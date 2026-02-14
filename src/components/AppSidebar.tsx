@@ -14,12 +14,13 @@ import {
 } from "@/components/ui/sidebar";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
-import { Box, LayoutDashboard, FolderOpen, Settings, LogOut } from "lucide-react";
+import { Box, LayoutDashboard, FolderOpen, Settings, LogOut, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Projects", url: "/dashboard/projects", icon: FolderOpen },
+  { title: "How It Works", url: "/dashboard/how-it-works", icon: HelpCircle },
   { title: "Settings", url: "/dashboard/settings", icon: Settings },
 ];
 

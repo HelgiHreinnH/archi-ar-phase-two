@@ -10,6 +10,7 @@ import ProjectsList from "./pages/ProjectsList";
 import NewProject from "./pages/NewProject";
 import ProjectDetail from "./pages/ProjectDetail";
 import SettingsPage from "./pages/SettingsPage";
+import HowItWorksPage from "./pages/HowItWorksPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="projects/new" element={<NewProject />} />
             <Route path="projects/:id" element={<ProjectDetail />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="how-it-works" element={<HowItWorksPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
