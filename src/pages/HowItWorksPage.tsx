@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   FolderPlus,
   Upload,
@@ -8,7 +8,10 @@ import {
   Share2,
   Lightbulb,
   Crosshair,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const steps = [
@@ -72,10 +75,11 @@ const steps = [
 ];
 
 const HowItWorksPage = () => {
-  const [activeStep, setActiveStep] = useState<number | null>(null);
+  const [activeStep, setActiveStep] = useState(0);
+  const step = steps[activeStep];
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-3xl">
+    <div className="space-y-8 animate-fade-in max-w-4xl">
       <div>
         <h1 className="font-display text-3xl font-bold">How It Works</h1>
         <p className="text-muted-foreground mt-1">
@@ -83,78 +87,112 @@ const HowItWorksPage = () => {
         </p>
       </div>
 
-      {/* Timeline */}
-      <div className="relative pl-10">
-        {/* Vertical line */}
-        <div className="absolute left-[19px] top-3 bottom-3 w-0.5 bg-border" />
-
-        <div className="space-y-2">
-          {steps.map((step, i) => {
-            const Icon = step.icon;
+      {/* Horizontal timeline */}
+      <div className="relative">
+        <div className="flex items-center justify-between">
+          {steps.map((s, i) => {
+            const Icon = s.icon;
             const isActive = i === activeStep;
+            const isPast = i < activeStep;
 
             return (
-              <div key={i} className="relative">
-                {/* Timeline dot */}
+              <div key={i} className="flex flex-1 items-center">
+                {/* Node */}
                 <button
-                  onClick={() => setActiveStep(isActive ? null : i)}
-                  className={cn(
-                    "absolute -left-10 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors",
-                    isActive
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-muted-foreground hover:border-primary hover:text-primary"
-                  )}
+                  onClick={() => setActiveStep(i)}
+                  className="relative z-10 flex flex-col items-center gap-2 group"
                 >
-                  <Icon className="h-4 w-4" />
-                </button>
-
-                {/* Content */}
-                <button
-                  onClick={() => setActiveStep(isActive ? null : i)}
-                  className={cn(
-                    "w-full text-left rounded-lg border p-4 transition-colors",
-                    isActive
-                      ? "border-primary/30 bg-primary/5"
-                      : "border-transparent hover:bg-muted/50"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs shrink-0">
-                      Step {i + 1}
-                    </Badge>
-                    <h3 className="font-display font-semibold text-base">{step.title}</h3>
+                  <div
+                    className={cn(
+                      "flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
+                      isActive
+                        ? "border-primary bg-primary text-primary-foreground scale-110 shadow-md"
+                        : isPast
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground group-hover:border-primary/50 group-hover:text-primary"
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
                   </div>
-
-                  {isActive && (
-                    <div className="mt-3 space-y-4 animate-fade-in">
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {step.description}
-                      </p>
-
-                      {step.tips.length > 0 && (
-                        <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
-                          <div className="flex items-center gap-2 text-sm font-medium">
-                            <Lightbulb className="h-4 w-4 text-primary" />
-                            Tips
-                          </div>
-                          <ul className="space-y-1.5">
-                            {step.tips.map((tip, j) => (
-                              <li key={j} className="text-sm text-muted-foreground flex gap-2">
-                                <span className="text-primary mt-0.5">•</span>
-                                {tip}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <span
+                    className={cn(
+                      "text-xs font-medium text-center max-w-[90px] leading-tight hidden sm:block",
+                      isActive ? "text-foreground" : "text-muted-foreground"
+                    )}
+                  >
+                    {s.title.length > 20 ? s.title.split(" ").slice(0, 3).join(" ") : s.title}
+                  </span>
                 </button>
+
+                {/* Connector line */}
+                {i < steps.length - 1 && (
+                  <div className="flex-1 mx-1">
+                    <div
+                      className={cn(
+                        "h-0.5 w-full transition-colors",
+                        i < activeStep ? "bg-primary" : "bg-border"
+                      )}
+                    />
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </div>
+
+      {/* Step detail card */}
+      <Card>
+        <CardContent className="p-8 space-y-6">
+          <div className="flex items-start gap-4">
+            <div className="rounded-xl bg-primary/10 p-3 shrink-0">
+              <step.icon className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <Badge variant="secondary" className="mb-2 text-xs">
+                Step {activeStep + 1} of {steps.length}
+              </Badge>
+              <h2 className="font-display text-2xl font-semibold">{step.title}</h2>
+              <p className="text-muted-foreground mt-2 leading-relaxed">{step.description}</p>
+            </div>
+          </div>
+
+          {step.tips.length > 0 && (
+            <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Lightbulb className="h-4 w-4 text-primary" />
+                Tips
+              </div>
+              <ul className="space-y-1.5">
+                {step.tips.map((tip, i) => (
+                  <li key={i} className="text-sm text-muted-foreground flex gap-2">
+                    <span className="text-primary mt-0.5">•</span>
+                    {tip}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setActiveStep((s) => s - 1)}
+              disabled={activeStep === 0}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              Previous
+            </Button>
+            <Button
+              onClick={() => setActiveStep((s) => s + 1)}
+              disabled={activeStep === steps.length - 1}
+            >
+              Next
+              <ChevronRight className="ml-1 h-4 w-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };
