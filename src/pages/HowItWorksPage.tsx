@@ -89,7 +89,7 @@ const HowItWorksPage = () => {
       </div>
 
       {/* Step indicators */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {steps.map((s, i) => {
           const Icon = s.icon;
           const isActive = i === activeStep;
