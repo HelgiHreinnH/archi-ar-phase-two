@@ -34,9 +34,13 @@ const App = () => (
             }
           >
             <Route index element={<DashboardHome />} />
-            <Route path="projects" element={<ProjectsList />} />
-            <Route path="projects/new" element={<NewProject />} />
+            {/* Support both old and new routes */}
+            <Route path="projects" element={<Navigate to="/dashboard/experiences" replace />} />
+            <Route path="projects/new" element={<Navigate to="/dashboard/experiences/new" replace />} />
             <Route path="projects/:id" element={<ProjectDetail />} />
+            <Route path="experiences" element={<ProjectsList />} />
+            <Route path="experiences/new" element={<NewProject />} />
+            <Route path="experiences/:id" element={<ProjectDetail />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="how-it-works" element={<HowItWorksPage />} />
           </Route>

@@ -50,10 +50,14 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          initial_rotation: number | null
           location: string | null
           marker_data: Json | null
+          mode: string
           model_url: string | null
           name: string
+          qr_size: string | null
+          scale: string | null
           share_link: string | null
           status: string
           updated_at: string
@@ -64,10 +68,14 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          initial_rotation?: number | null
           location?: string | null
           marker_data?: Json | null
+          mode?: string
           model_url?: string | null
           name: string
+          qr_size?: string | null
+          scale?: string | null
           share_link?: string | null
           status?: string
           updated_at?: string
@@ -78,10 +86,14 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          initial_rotation?: number | null
           location?: string | null
           marker_data?: Json | null
+          mode?: string
           model_url?: string | null
           name?: string
+          qr_size?: string | null
+          scale?: string | null
           share_link?: string | null
           status?: string
           updated_at?: string

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Sidebar,
@@ -19,7 +18,7 @@ import { Button } from "@/components/ui/button";
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Projects", url: "/dashboard/projects", icon: FolderOpen },
+  { title: "Experiences", url: "/dashboard/experiences", icon: FolderOpen },
   { title: "How It Works", url: "/dashboard/how-it-works", icon: HelpCircle },
   { title: "Settings", url: "/dashboard/settings", icon: Settings },
 ];
