@@ -228,42 +228,16 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
             </div>
 
             {shareUrl && (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1" onClick={copyShareLink}>
-                    <Copy className="mr-1 h-3 w-3" />
-                    Copy Link
-                  </Button>
-                  <Button variant="outline" size="sm" className="flex-1" asChild>
-                    <a href={shareUrl} target="_blank" rel="noopener noreferrer">
-                      <Link2 className="mr-1 h-3 w-3" />
-                      Preview
-                    </a>
-                  </Button>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={async () => {
-                    try {
-                      const qrCanvas = document.createElement("canvas");
-                      await QRCode.toCanvas(qrCanvas, shareUrl, {
-                        width: 600,
-                        margin: 2,
-                        color: { dark: "#212121", light: "#FFFFFF" },
-                      });
-                      const a = document.createElement("a");
-                      a.href = qrCanvas.toDataURL("image/png");
-                      a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
-                      a.click();
-                    } catch {
-                      toast({ title: "QR generation failed", variant: "destructive" });
-                    }
-                  }}
-                >
-                  <Download className="mr-1 h-3 w-3" />
-                  Download QR Code
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1" onClick={copyShareLink}>
+                  <Copy className="mr-1 h-3 w-3" />
+                  Copy Link
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1" asChild>
+                  <a href={shareUrl} target="_blank" rel="noopener noreferrer">
+                    <Link2 className="mr-1 h-3 w-3" />
+                    Preview
+                  </a>
                 </Button>
               </div>
             )}
@@ -289,16 +263,46 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
           </div>
         )}
 
-        {/* Download Marker References */}
-        {isActive && mode === "multipoint" && markerData && (
+        {/* Downloads Section */}
+        {isActive && shareUrl && (
           <div className="space-y-3 border-t pt-4">
             <h3 className="text-sm font-semibold flex items-center gap-2">
               <FileDown className="h-4 w-4 text-muted-foreground" />
-              Marker Reference Sheets
+              Downloads
             </h3>
-            <p className="text-xs text-muted-foreground">
-              Download and print these reference sheets. Place each marker at the indicated coordinates on site.
-            </p>
+
+            {/* QR Code Download */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2"
+              onClick={async () => {
+                try {
+                  const qrCanvas = document.createElement("canvas");
+                  await QRCode.toCanvas(qrCanvas, shareUrl, {
+                    width: 600,
+                    margin: 2,
+                    color: { dark: "#212121", light: "#FFFFFF" },
+                  });
+                  const a = document.createElement("a");
+                  a.href = qrCanvas.toDataURL("image/png");
+                  a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
+                  a.click();
+                } catch {
+                  toast({ title: "QR generation failed", variant: "destructive" });
+                }
+              }}
+            >
+              <Download className="h-3 w-3" />
+              Download QR Code
+            </Button>
+
+            {/* Marker Reference Sheets — multipoint only */}
+            {mode === "multipoint" && markerData && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Download and print marker reference sheets. Place each at the indicated coordinates on site.
+                </p>
             <div className="grid gap-2 sm:grid-cols-3">
               {(["A", "B", "C"] as const).map((pointId) => {
                 const point = markerData[pointId];
@@ -327,6 +331,8 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
                 );
               })}
             </div>
+              </>
+            )}
           </div>
         )}
       </CardContent>
