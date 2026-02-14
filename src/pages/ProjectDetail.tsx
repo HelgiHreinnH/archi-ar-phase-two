@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, MapPin, Grid3X3 } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import ExperienceWizard from "@/components/ExperienceWizard";
+import ProjectOverview from "@/components/ProjectOverview";
 
 type Project = Tables<"projects">;
 
@@ -26,6 +28,7 @@ const ProjectDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -64,6 +67,12 @@ const ProjectDetail = () => {
   const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
   const config = modeConfig[mode];
   const ModeIcon = config.icon;
+  const isActive = project.status === "active";
+  const showOverview = isActive && !editing;
+
+  const handleProjectUpdate = () => {
+    queryClient.invalidateQueries({ queryKey: ["project", id] });
+  };
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
@@ -82,7 +91,7 @@ const ProjectDetail = () => {
           </div>
           <span
             className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-              project.status === "active"
+              isActive
                 ? "bg-primary/10 text-primary"
                 : "bg-muted text-muted-foreground"
             }`}
@@ -92,11 +101,22 @@ const ProjectDetail = () => {
         </div>
       </div>
 
-      {/* Wizard */}
-      <ExperienceWizard
-        project={project}
-        onProjectUpdate={() => queryClient.invalidateQueries({ queryKey: ["project", id] })}
-      />
+      {/* Content: Overview or Wizard */}
+      {showOverview ? (
+        <ProjectOverview
+          project={project}
+          onEdit={() => setEditing(true)}
+        />
+      ) : (
+        <ExperienceWizard
+          project={project}
+          onProjectUpdate={() => {
+            handleProjectUpdate();
+            // If the project just became active, switch to overview
+            if (editing) setEditing(false);
+          }}
+        />
+      )}
     </div>
   );
 };
