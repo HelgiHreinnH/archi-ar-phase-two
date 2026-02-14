@@ -95,6 +95,10 @@ export default {
   				blue: 'hsl(var(--marker-blue))',
   				yellow: 'hsl(var(--marker-yellow))'
   			},
+  			warm: {
+  				DEFAULT: 'hsl(var(--warm))',
+  				foreground: 'hsl(var(--warm-foreground))'
+  			},
   			sidebar: {
   				DEFAULT: 'hsl(var(--sidebar-background))',
   				foreground: 'hsl(var(--sidebar-foreground))',

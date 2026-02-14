@@ -48,6 +48,10 @@
     --marker-blue: 211 100% 50%;
     --marker-yellow: 45 100% 51%;
 
+    /* Warm accent */
+    --warm: 32 95% 55%;
+    --warm-foreground: 0 0% 100%;
+
     /* Surface variants */
     --surface-elevated: 0 0% 100%;
     --surface-sunken: 220 15% 96%;
@@ -97,6 +101,10 @@
     --border: 220 20% 18%;
     --input: 220 20% 18%;
     --ring: 220 80% 60%;
+
+
+    --warm: 32 90% 50%;
+    --warm-foreground: 0 0% 100%;
 
     --sidebar-background: 220 25% 5%;
     --sidebar-foreground: 220 15% 85%;
