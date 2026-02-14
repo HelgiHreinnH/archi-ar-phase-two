@@ -18,6 +18,7 @@ const steps = [
   {
     icon: Crosshair,
     title: "Preparing XYZ Coordinates in Your 3D File",
+    shortTitle: "Prepare Coordinates",
     description:
       "Before exporting your interior design model, make sure the origin point and coordinate system are set correctly. The AR system uses these coordinates to place furniture, fixtures, and finishes precisely in the client's room — if they're off in the file, they'll be off on-site.",
     tips: [
@@ -32,6 +33,7 @@ const steps = [
   {
     icon: FolderPlus,
     title: "Create an Experience",
+    shortTitle: "Create Experience",
     description:
       "Start by creating a new experience from the Experiences page. Give it a name, add your client's name, a short description, and the property address. This keeps everything organized per room or space.",
     tips: [
@@ -42,6 +44,7 @@ const steps = [
   {
     icon: Upload,
     title: "Upload Your 3D Model",
+    shortTitle: "Upload Model",
     description:
       "Open your experience and upload a GLB or USDZ file (up to 250 MB). These are standard formats for AR-ready 3D interior models. You'll see a real-time progress bar during upload.",
     tips: [
@@ -53,6 +56,7 @@ const steps = [
   {
     icon: MapPin,
     title: "Set Marker Coordinates",
+    shortTitle: "Set Markers",
     description:
       "Define three marker points (A, B, C) with X, Y, Z coordinates. Point A is the anchor, while B and C are reference points. These tell the AR system exactly where to place the interior design within the existing room.",
     tips: [
@@ -64,6 +68,7 @@ const steps = [
   {
     icon: Share2,
     title: "Share with Your Client",
+    shortTitle: "Share",
     description:
       'Once your design is uploaded and markers are configured, hit the "Share" button to generate a unique link. Your client can open this on their phone or tablet to see the proposed interior overlaid in their actual room — no app install needed.',
     tips: [
@@ -106,10 +111,10 @@ const HowItWorksPage = () => {
                     className={cn(
                       "flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
                       isActive
-                        ? "border-primary bg-primary text-primary-foreground scale-110 shadow-md"
+                        ? "border-warm bg-warm text-warm-foreground scale-110 shadow-md"
                         : isPast
                         ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-card text-muted-foreground group-hover:border-primary/50 group-hover:text-primary"
+                        : "border-border bg-card text-muted-foreground group-hover:border-warm/50 group-hover:text-warm"
                     )}
                   >
                     <Icon className="h-5 w-5" />
@@ -117,10 +122,10 @@ const HowItWorksPage = () => {
                   <span
                     className={cn(
                       "text-xs font-medium text-center max-w-[90px] leading-tight hidden sm:block",
-                      isActive ? "text-foreground" : "text-muted-foreground"
+                      isActive ? "text-warm font-semibold" : isPast ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    {s.title.length > 20 ? s.title.split(" ").slice(0, 3).join(" ") : s.title}
+                    {s.shortTitle}
                   </span>
                 </button>
 
@@ -142,14 +147,14 @@ const HowItWorksPage = () => {
       </div>
 
       {/* Step detail card */}
-      <Card>
+      <Card className="border-warm/20">
         <CardContent className="p-8 space-y-6">
           <div className="flex items-start gap-4">
-            <div className="rounded-xl bg-primary/10 p-3 shrink-0">
-              <step.icon className="h-6 w-6 text-primary" />
+            <div className="rounded-xl bg-warm/10 p-3 shrink-0">
+              <step.icon className="h-6 w-6 text-warm" />
             </div>
             <div>
-              <Badge variant="secondary" className="mb-2 text-xs">
+              <Badge className="mb-2 text-xs bg-warm/10 text-warm border-warm/20 hover:bg-warm/20">
                 Step {activeStep + 1} of {steps.length}
               </Badge>
               <h2 className="font-display text-2xl font-semibold">{step.title}</h2>
@@ -160,13 +165,13 @@ const HowItWorksPage = () => {
           {step.tips.length > 0 && (
             <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <Lightbulb className="h-4 w-4 text-primary" />
+                <Lightbulb className="h-4 w-4 text-warm" />
                 Tips
               </div>
               <ul className="space-y-1.5">
                 {step.tips.map((tip, i) => (
                   <li key={i} className="text-sm text-muted-foreground flex gap-2">
-                    <span className="text-primary mt-0.5">•</span>
+                    <span className="text-warm mt-0.5">•</span>
                     {tip}
                   </li>
                 ))}
@@ -186,6 +191,7 @@ const HowItWorksPage = () => {
             <Button
               onClick={() => setActiveStep((s) => s + 1)}
               disabled={activeStep === steps.length - 1}
+              className="bg-warm text-warm-foreground hover:bg-warm/90"
             >
               Next
               <ChevronRight className="ml-1 h-4 w-4" />
