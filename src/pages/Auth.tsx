@@ -82,9 +82,9 @@ const Auth = () => {
               {isLogin ? "Welcome back" : "Create your account"}
             </h2>
             <p className="text-sm text-muted-foreground">
-              {isLogin
-                ? "Sign in to manage your interior design presentations"
-                : "Start presenting interior designs in AR to your clients"}
+            {isLogin
+              ? "Sign in to manage your AR experiences"
+              : "Start presenting interior designs in AR to your clients"}
             </p>
           </div>
 
