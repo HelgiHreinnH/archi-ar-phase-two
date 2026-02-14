@@ -22,7 +22,7 @@ const steps = [
     title: "Preparing Your 3D File",
     shortTitle: "Prepare File",
     description:
-      "Before exporting your interior design model, make sure the origin point and coordinate system are set correctly. How you prepare depends on whether you're using Tabletop or Multi-Point mode.",
+      "Before exporting your interior design model, make sure the origin point, coordinate system, and layer naming are set correctly. How you prepare depends on whether you're using Tabletop or Multi-Point mode.",
     sections: [
       {
         heading: "Tabletop Mode (Single QR)",
@@ -33,18 +33,20 @@ const steps = [
           "Choose your export scale to match your intended ratio (1:10 to 1:100) — the app handles the rest",
           "Use Y-up for GLB exports; the app will interpret orientation automatically",
           "Keep the model compact — Tabletop mode is ideal for furniture, fixtures, or room vignettes",
+          "No special layer naming required — just ensure the origin is set correctly before export",
         ],
       },
       {
         heading: "Multi-Point Mode (3 Markers)",
         detail:
-          "For 1:1 scale room overlays, three physical markers (A, B, C) triangulate the design's position. Your model's world origin must match the real-world location where you'll place Marker A.",
+          "For 1:1 scale room overlays, three physical markers (A, B, C) triangulate the design's position. Your model must include three named point layers that correspond to the physical marker positions.",
         tips: [
-          "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A (e.g. a corner or doorway)",
-          "Use a consistent coordinate system: Y-up for GLB (glTF standard) or Z-up if your software converts on export",
-          "In Rhino, use 'Set Origin' or move geometry so the base point sits at the world origin",
-          "In Revit, align 'Project Base Point' to your survey point for accurate geo-positioning",
-          "In Blender, apply all transforms (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
+          "Create three point objects in Rhino on layers named exactly: marker_A, marker_B, and marker_C — these names are required for the system to link the 3D model to the physical QR codes",
+          "marker_A is the primary anchor — place it at a fixed, identifiable spot (e.g. a corner or doorway). Set your model's origin (0,0,0) to this same location",
+          "marker_B and marker_C are reference points — place them to form a well-shaped triangle (avoid collinear/thin triangles). Minimum 1m edge length recommended",
+          "In Rhino, use Point3d for each marker: marker_A = Point3d(0, 0, 0), marker_B = Point3d(2000, 0, 0), marker_C = Point3d(0, 0, 1500)",
+          "Apply all transforms in Blender (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
+          "Use Y-up for GLB (glTF standard) or Z-up if your software converts on export",
           "Export a small test cube first to verify orientation and scale match the room in AR",
         ],
       },
@@ -76,22 +78,43 @@ const steps = [
   },
   {
     icon: MapPin,
-    title: "Set Marker Coordinates",
-    shortTitle: "Set Markers",
+    title: "Configure Placement",
+    shortTitle: "Placement",
     description:
-      "Define three marker points (A, B, C) with X, Y, Z coordinates. Point A is the anchor, while B and C are reference points. These tell the AR system exactly where to place the interior design within the existing room.",
-    tips: [
-      "Point A (red) is the primary anchor — place it at a fixed, easy-to-identify spot in the room like a corner or door frame",
-      "Points B and C (green, blue) triangulate the design's orientation and scale within the space",
-      "Coordinates can be exported from Rhino/Grasshopper as JSON and pasted in",
+      "How the AR model is positioned depends on the mode you selected when creating the experience.",
+    sections: [
+      {
+        heading: "Tabletop Mode (Single QR)",
+        detail:
+          "A single QR code is generated for your experience. Print it and place it on a table — the model will appear anchored to the QR position at the scale you configured (1:10 to 1:100).",
+        tips: [
+          "Print the QR marker on heavy stock paper (200gsm+) with matte finish to reduce glare",
+          "Recommended print sizes: Small (10×10cm), Medium (15×15cm), or Large (20×20cm) — selectable when creating the experience",
+          "The model's origin sits directly on the QR code, so the design 'stands up' from the table naturally",
+          "Adjust the initial rotation in the experience settings if the model faces the wrong direction",
+        ],
+      },
+      {
+        heading: "Multi-Point Mode (3 Markers)",
+        detail:
+          "Enter the X, Y, Z coordinates for markers A, B, and C. These must match the marker_A, marker_B, and marker_C point layers you defined in your Rhino model. The system uses these three points to triangulate the model's exact position and orientation in the room.",
+        tips: [
+          "Point A (red) is the primary anchor — its coordinates should match your model's origin (0,0,0)",
+          "Points B (green) and C (blue) define orientation and scale — ensure they form a well-shaped triangle, not a thin sliver",
+          "Coordinates from Rhino/Grasshopper can be exported as JSON and pasted directly into the platform",
+          'Use the format: { "A": {"x": 0, "y": 0, "z": 0}, "B": {"x": 2000, "y": 0, "z": 0}, "C": {"x": 0, "y": 0, "z": 1500} }',
+          "All three markers must be printed (A4 recommended, 300 DPI minimum) and placed at the corresponding physical locations in the room",
+        ],
+      },
     ],
+    tips: [],
   },
   {
     icon: Share2,
     title: "Share with Your Client",
     shortTitle: "Share",
     description:
-      'Once your design is uploaded and markers are configured, hit the "Share" button to generate a unique link. Your client can open this on their phone or tablet to see the proposed interior overlaid in their actual room — no app install needed.',
+      'Once your design is uploaded and placement is configured, hit the "Share" button to generate a unique link. Your client can open this on their phone or tablet to see the proposed interior overlaid in their actual room — no app install needed.',
     tips: [
       "The share link works on iOS Safari and Android Chrome with WebXR",
       "Clients can walk around the room and see furniture, materials, and layouts at true scale",
@@ -124,7 +147,6 @@ const HowItWorksPage = () => {
 
             return (
               <div key={i} className="flex flex-1 items-center">
-                {/* Node */}
                 <button
                   onClick={() => setActiveStep(i)}
                   className="relative z-10 flex flex-col items-center gap-2 group"
@@ -151,7 +173,6 @@ const HowItWorksPage = () => {
                   </span>
                 </button>
 
-                {/* Connector line */}
                 {i < steps.length - 1 && (
                   <div className="flex-1 mx-1">
                     <div
@@ -190,7 +211,6 @@ const HowItWorksPage = () => {
             const section = sections[activeMode];
             return (
               <div className="space-y-4">
-                {/* Toggle */}
                 <div className="inline-flex rounded-lg border bg-muted/50 p-1 gap-1">
                   {sections.map((s, si) => (
                     <button
@@ -211,13 +231,12 @@ const HowItWorksPage = () => {
                   ))}
                 </div>
 
-                {/* Content */}
                 <div className="rounded-lg border p-4 space-y-3 animate-fade-in" key={activeMode}>
                   <p className="text-sm text-muted-foreground leading-relaxed">{section.detail}</p>
                   <ul className="space-y-1.5">
                     {section.tips.map((tip: string, ti: number) => (
                       <li key={ti} className="text-sm text-muted-foreground flex gap-2">
-                        <span className={cn("mt-0.5", activeMode === 0 ? "text-primary" : "text-warm")}>•</span>
+                        <span className={cn("mt-0.5 shrink-0", activeMode === 0 ? "text-primary" : "text-warm")}>•</span>
                         {tip}
                       </li>
                     ))}
