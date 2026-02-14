@@ -46,13 +46,13 @@
     --surface-elevated: 0 0% 100%;
     --surface-sunken: 220 15% 96%;
 
-    --sidebar-background: 220 20% 10%;
-    --sidebar-foreground: 220 15% 85%;
-    --sidebar-primary: 220 80% 60%;
+    --sidebar-background: 220 20% 97%;
+    --sidebar-foreground: 220 20% 25%;
+    --sidebar-primary: 220 80% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 16%;
-    --sidebar-accent-foreground: 220 15% 85%;
-    --sidebar-border: 220 20% 18%;
+    --sidebar-accent: 220 20% 92%;
+    --sidebar-accent-foreground: 220 20% 15%;
+    --sidebar-border: 220 15% 90%;
     --sidebar-ring: 220 80% 50%;
 
     /* Typography */
