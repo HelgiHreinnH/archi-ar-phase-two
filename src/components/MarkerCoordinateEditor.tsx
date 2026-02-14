@@ -225,7 +225,7 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
                   placeholder={cfg.defaultLabel}
                   className="text-xs h-8"
                 />
-                <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-2">
                   {(["x", "y", "z"] as const).map((axis) => {
                     const val = point[axis];
                     const isNeg = typeof val === "number" ? val < 0 : String(val).startsWith("-");
