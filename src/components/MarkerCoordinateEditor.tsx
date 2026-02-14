@@ -85,8 +85,16 @@ function computeTriangleQuality(markers: MarkerData): { score: number; label: st
   return { score: 5, label: "Excellent", color: "text-marker-green" };
 }
 
+const isValidMarkerData = (data: unknown): data is MarkerData => {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  return ["A", "B", "C"].every(
+    (k) => d[k] && typeof d[k] === "object" && "x" in (d[k] as object)
+  );
+};
+
 const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoordinateEditorProps) => {
-  const [markers, setMarkers] = useState<MarkerData>(markerData || DEFAULT_MARKERS);
+  const [markers, setMarkers] = useState<MarkerData>(isValidMarkerData(markerData) ? markerData : DEFAULT_MARKERS);
   const [jsonInput, setJsonInput] = useState("");
   const [showJsonPaste, setShowJsonPaste] = useState(false);
   const [saving, setSaving] = useState(false);
