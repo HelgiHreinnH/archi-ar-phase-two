@@ -7,6 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import QRCode from "qrcode";
 
 type Project = Tables<"projects">;
 
@@ -25,57 +26,81 @@ const MARKER_COLORS: Record<string, { fill: string; label: string }> = {
   C: { fill: "#1E88E5", label: "Point C" },
 };
 
-function generateMarkerImage(
+async function generateMarkerImage(
   pointId: string,
   coords: { x: number; y: number; z: number; label: string },
-  projectName: string
-): string {
+  projectName: string,
+  shareUrl: string
+): Promise<string> {
   const canvas = document.createElement("canvas");
   canvas.width = 800;
-  canvas.height = 800;
+  canvas.height = 1000;
   const ctx = canvas.getContext("2d")!;
   const cfg = MARKER_COLORS[pointId];
 
   // White background
   ctx.fillStyle = "#FFFFFF";
-  ctx.fillRect(0, 0, 800, 800);
+  ctx.fillRect(0, 0, 800, 1000);
 
   // Border
   ctx.strokeStyle = "#E0E0E0";
   ctx.lineWidth = 2;
-  ctx.strokeRect(20, 20, 760, 760);
+  ctx.strokeRect(20, 20, 760, 960);
 
   // Colored circle
   ctx.beginPath();
-  ctx.arc(400, 300, 140, 0, Math.PI * 2);
+  ctx.arc(400, 220, 120, 0, Math.PI * 2);
   ctx.fillStyle = cfg.fill;
   ctx.fill();
 
   // Letter inside circle
   ctx.fillStyle = "#FFFFFF";
-  ctx.font = "bold 120px sans-serif";
+  ctx.font = "bold 100px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(pointId, 400, 300);
+  ctx.fillText(pointId, 400, 220);
 
   // Label
   ctx.fillStyle = "#212121";
-  ctx.font = "bold 32px sans-serif";
-  ctx.fillText(cfg.label, 400, 500);
-  ctx.font = "24px sans-serif";
+  ctx.font = "bold 28px sans-serif";
+  ctx.fillText(cfg.label, 400, 390);
+  ctx.font = "20px sans-serif";
   ctx.fillStyle = "#757575";
-  ctx.fillText(coords.label || cfg.label, 400, 545);
+  ctx.fillText(coords.label || cfg.label, 400, 425);
 
   // Coordinates
-  ctx.font = "bold 22px monospace";
+  ctx.font = "bold 20px monospace";
   ctx.fillStyle = "#424242";
-  ctx.fillText(`X: ${coords.x}   Y: ${coords.y}   Z: ${coords.z}  (mm)`, 400, 620);
+  ctx.fillText(`X: ${coords.x}   Y: ${coords.y}   Z: ${coords.z}  (mm)`, 400, 480);
+
+  // QR Code
+  try {
+    const qrCanvas = document.createElement("canvas");
+    await QRCode.toCanvas(qrCanvas, shareUrl, {
+      width: 260,
+      margin: 0,
+      color: { dark: "#212121", light: "#FFFFFF" },
+    });
+    ctx.drawImage(qrCanvas, 270, 520, 260, 260);
+  } catch {
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = "#9E9E9E";
+    ctx.fillText("QR generation failed", 400, 650);
+  }
+
+  // "Scan to view in AR" label
+  ctx.font = "bold 18px sans-serif";
+  ctx.fillStyle = "#424242";
+  ctx.fillText("Scan to view in AR", 400, 810);
+  ctx.font = "13px sans-serif";
+  ctx.fillStyle = "#9E9E9E";
+  ctx.fillText(shareUrl, 400, 838);
 
   // Project name footer
-  ctx.font = "18px sans-serif";
-  ctx.fillStyle = "#9E9E9E";
-  ctx.fillText(projectName, 400, 720);
-  ctx.fillText("Print at 100% scale · Place marker at indicated coordinates", 400, 750);
+  ctx.font = "16px sans-serif";
+  ctx.fillStyle = "#BDBDBD";
+  ctx.fillText(projectName, 400, 900);
+  ctx.fillText("Print at 100% scale · Place marker at indicated coordinates", 400, 925);
 
   return canvas.toDataURL("image/png");
 }
@@ -258,8 +283,8 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
                     variant="outline"
                     size="sm"
                     className="justify-start gap-2"
-                    onClick={() => {
-                      const dataUrl = generateMarkerImage(pointId, point, project.name);
+                    onClick={async () => {
+                      const dataUrl = await generateMarkerImage(pointId, point, project.name, shareUrl!);
                       const a = document.createElement("a");
                       a.href = dataUrl;
                       a.download = `marker_${pointId}_${project.name.replace(/\s+/g, "_")}.png`;
