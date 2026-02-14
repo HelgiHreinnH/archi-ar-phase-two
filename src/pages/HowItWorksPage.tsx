@@ -10,6 +10,8 @@ import {
   Crosshair,
   ChevronLeft,
   ChevronRight,
+  QrCode,
+  Triangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,18 +19,37 @@ import { cn } from "@/lib/utils";
 const steps = [
   {
     icon: Crosshair,
-    title: "Preparing XYZ Coordinates in Your 3D File",
-    shortTitle: "Prepare Coordinates",
+    title: "Preparing Your 3D File",
+    shortTitle: "Prepare File",
     description:
-      "Before exporting your interior design model, make sure the origin point and coordinate system are set correctly. The AR system uses these coordinates to place furniture, fixtures, and finishes precisely in the client's room — if they're off in the file, they'll be off on-site.",
-    tips: [
-      "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A in the room (e.g. a corner or doorway)",
-      "Use a consistent coordinate system: Y-up for GLB (glTF standard) or Z-up if your software converts on export",
-      "In Rhino, use 'Set Origin' or move your geometry so the base point sits at the world origin",
-      "In Revit, use 'Project Base Point' aligned to your survey point for accurate geo-positioning",
-      "In Blender, apply all transforms (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
-      "Export a small test cube first to verify orientation and scale match the room dimensions in the AR view",
+      "Before exporting your interior design model, make sure the origin point and coordinate system are set correctly. How you prepare depends on whether you're using Tabletop or Multi-Point mode.",
+    sections: [
+      {
+        heading: "Tabletop Mode (Single QR)",
+        detail:
+          "For scale models viewed on a table, the QR code acts as a single anchor point. Your model's origin (0,0,0) should be at the base center of the design — this is where the QR marker will sit.",
+        tips: [
+          "Set the origin at the center-bottom of your model so it 'sits' on the QR marker naturally",
+          "Choose your export scale to match your intended ratio (1:10 to 1:100) — the app handles the rest",
+          "Use Y-up for GLB exports; the app will interpret orientation automatically",
+          "Keep the model compact — Tabletop mode is ideal for furniture, fixtures, or room vignettes",
+        ],
+      },
+      {
+        heading: "Multi-Point Mode (3 Markers)",
+        detail:
+          "For 1:1 scale room overlays, three physical markers (A, B, C) triangulate the design's position. Your model's world origin must match the real-world location where you'll place Marker A.",
+        tips: [
+          "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A (e.g. a corner or doorway)",
+          "Use a consistent coordinate system: Y-up for GLB (glTF standard) or Z-up if your software converts on export",
+          "In Rhino, use 'Set Origin' or move geometry so the base point sits at the world origin",
+          "In Revit, align 'Project Base Point' to your survey point for accurate geo-positioning",
+          "In Blender, apply all transforms (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
+          "Export a small test cube first to verify orientation and scale match the room in AR",
+        ],
+      },
     ],
+    tips: [],
   },
   {
     icon: FolderPlus,
@@ -161,6 +182,33 @@ const HowItWorksPage = () => {
               <p className="text-muted-foreground mt-2 leading-relaxed">{step.description}</p>
             </div>
           </div>
+
+          {/* Mode-specific sections */}
+          {"sections" in step && (step as any).sections && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {(step as any).sections.map((section: any, si: number) => (
+                <div key={si} className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    {si === 0 ? (
+                      <QrCode className="h-4 w-4 text-primary" />
+                    ) : (
+                      <Triangle className="h-4 w-4 text-warm" />
+                    )}
+                    {section.heading}
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{section.detail}</p>
+                  <ul className="space-y-1.5">
+                    {section.tips.map((tip: string, ti: number) => (
+                      <li key={ti} className="text-sm text-muted-foreground flex gap-2">
+                        <span className={cn("mt-0.5", si === 0 ? "text-primary" : "text-warm")}>•</span>
+                        {tip}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
 
           {step.tips.length > 0 && (
             <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
