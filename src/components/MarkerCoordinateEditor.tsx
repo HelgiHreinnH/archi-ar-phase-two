@@ -230,9 +230,19 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
                     <div key={axis}>
                       <Label className="text-[10px] text-muted-foreground uppercase">{axis} (mm)</Label>
                       <Input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
                         value={point[axis]}
-                        onChange={(e) => updateMarker(cfg.id, axis, e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "" || v === "-" || /^-?\d*\.?\d*$/.test(v)) {
+                            updateMarker(cfg.id, axis, v === "" || v === "-" ? v : v);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const num = parseFloat(e.target.value);
+                          updateMarker(cfg.id, axis, isNaN(num) ? 0 : num);
+                        }}
                         className="font-mono text-sm h-8"
                       />
                     </div>
