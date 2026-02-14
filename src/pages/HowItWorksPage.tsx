@@ -16,6 +16,20 @@ import {
 
 const steps = [
   {
+    icon: Crosshair,
+    title: "Preparing XYZ Coordinates in Your 3D File",
+    description:
+      "Before exporting, make sure your 3D model's origin point and coordinate system are set correctly. The AR system uses these coordinates to place and orient the model in real space — if they're off in the file, they'll be off on-site.",
+    tips: [
+      "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A on site",
+      "Use a consistent coordinate system: Y-up for GLB (glTF standard) or Z-up if your software converts on export",
+      "In Rhino, use 'Set Origin' or move your geometry so the base point sits at the world origin",
+      "In Revit, use 'Project Base Point' aligned to your survey point for accurate geo-positioning",
+      "In Blender, apply all transforms (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
+      "Export a small test cube first to verify orientation and scale match your expectations in the AR view",
+    ],
+  },
+  {
     icon: FolderPlus,
     title: "Create a Project",
     description:
@@ -34,20 +48,6 @@ const steps = [
       "Export from Rhino, Revit, or Blender as GLB with Draco compression for smaller files",
       "USDZ works best for iOS AR Quick Look previews",
       "If your file exceeds 250 MB, try lowering textures to 2K or decimating polygon count",
-    ],
-  },
-  {
-    icon: Crosshair,
-    title: "Preparing XYZ Coordinates in Your 3D File",
-    description:
-      "Before exporting, make sure your 3D model's origin point and coordinate system are set correctly. The AR system uses these coordinates to place and orient the model in real space — if they're off in the file, they'll be off on-site.",
-    tips: [
-      "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A on site",
-      "Use a consistent coordinate system: Y-up for GLB (glTF standard) or Z-up if your software converts on export",
-      "In Rhino, use 'Set Origin' or move your geometry so the base point sits at the world origin",
-      "In Revit, use 'Project Base Point' aligned to your survey point for accurate geo-positioning",
-      "In Blender, apply all transforms (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
-      "Export a small test cube first to verify orientation and scale match your expectations in the AR view",
     ],
   },
   {
