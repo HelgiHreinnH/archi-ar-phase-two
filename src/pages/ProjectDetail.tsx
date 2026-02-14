@@ -1,17 +1,22 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Share2, Upload, MapPin, User, Clock } from "lucide-react";
+import { ArrowLeft, Share2, MapPin, User, Clock } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
+import ModelUploader from "@/components/ModelUploader";
+import ModelPreview from "@/components/ModelPreview";
 
 type Project = Tables<"projects">;
 
 const ProjectDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [showUploader, setShowUploader] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
@@ -124,16 +129,24 @@ const ProjectDetail = () => {
             <CardTitle className="font-display text-base">3D Model</CardTitle>
           </CardHeader>
           <CardContent>
-            {project.model_url ? (
-              <p className="text-sm text-muted-foreground">Model uploaded</p>
+            {project.model_url && !showUploader ? (
+              <ModelPreview
+                modelUrl={project.model_url}
+                projectId={project.id}
+                onReplace={() => setShowUploader(true)}
+                onDelete={() => {
+                  queryClient.invalidateQueries({ queryKey: ["project", id] });
+                  setShowUploader(false);
+                }}
+              />
             ) : (
-              <div className="border-2 border-dashed rounded-lg p-6 text-center">
-                <Upload className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground mb-3">Upload GLB or USDZ</p>
-                <Button variant="outline" size="sm" disabled>
-                  Upload Model
-                </Button>
-              </div>
+              <ModelUploader
+                projectId={project.id}
+                onUploadComplete={() => {
+                  queryClient.invalidateQueries({ queryKey: ["project", id] });
+                  setShowUploader(false);
+                }}
+              />
             )}
           </CardContent>
         </Card>
