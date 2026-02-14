@@ -1,40 +1,63 @@
-import { Suspense, useEffect, useState } from "react";
-import { Canvas } from "@react-three/fiber";
-import { OrbitControls, useGLTF, Environment, Center } from "@react-three/drei";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import "@google/model-viewer";
+
+// Extend JSX for model-viewer web component
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      "model-viewer": React.DetailedHTMLProps<
+        React.HTMLAttributes<HTMLElement> & {
+          src?: string;
+          "ios-src"?: string;
+          alt?: string;
+          "auto-rotate"?: boolean | string;
+          "camera-controls"?: boolean | string;
+          "shadow-intensity"?: string;
+          "environment-image"?: string;
+          exposure?: string;
+          "camera-orbit"?: string;
+          "field-of-view"?: string;
+          "interaction-prompt"?: string;
+          loading?: string;
+          poster?: string;
+        },
+        HTMLElement
+      >;
+    }
+  }
+}
 
 interface ModelViewer3DProps {
   modelUrl: string; // storage path e.g. "userId/file.glb"
   className?: string;
 }
 
-function Model({ url }: { url: string }) {
-  const { scene } = useGLTF(url);
-  return (
-    <Center>
-      <primitive object={scene} />
-    </Center>
-  );
-}
-
 const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const isGlb = modelUrl.toLowerCase().endsWith(".glb");
+  const isUsdz = modelUrl.toLowerCase().endsWith(".usdz");
 
   useEffect(() => {
-    if (!isGlb) return;
+    setError(false);
+    setSignedUrl(null);
     supabase.storage
       .from("project-models")
       .createSignedUrl(modelUrl, 600)
-      .then(({ data }) => {
-        if (data?.signedUrl) setSignedUrl(data.signedUrl);
+      .then(({ data, error: err }) => {
+        if (err || !data?.signedUrl) {
+          setError(true);
+        } else {
+          setSignedUrl(data.signedUrl);
+        }
       });
-  }, [modelUrl, isGlb]);
+  }, [modelUrl]);
 
-  if (!isGlb) {
+  if (error) {
     return (
       <div className={`flex items-center justify-center bg-muted rounded-lg ${className}`}>
-        <p className="text-xs text-muted-foreground">USDZ preview not available</p>
+        <p className="text-xs text-muted-foreground">Could not load model preview</p>
       </div>
     );
   }
@@ -49,25 +72,21 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
 
   return (
     <div className={`rounded-lg overflow-hidden bg-muted/50 border ${className}`}>
-      <Canvas
-        camera={{ position: [3, 2, 3], fov: 45 }}
-        style={{ width: "100%", height: "100%" }}
-      >
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[5, 5, 5]} intensity={0.8} />
-        <Suspense fallback={null}>
-          <Model url={signedUrl} />
-          <Environment preset="city" />
-        </Suspense>
-        <OrbitControls
-          autoRotate
-          autoRotateSpeed={1.5}
-          enableZoom={false}
-          enablePan={false}
-          minPolarAngle={Math.PI / 4}
-          maxPolarAngle={Math.PI / 2}
-        />
-      </Canvas>
+      <model-viewer
+        src={isGlb ? signedUrl : undefined}
+        ios-src={isUsdz ? signedUrl : undefined}
+        {...(isUsdz && !isGlb ? { src: signedUrl } : {})}
+        alt="3D model preview"
+        auto-rotate=""
+        camera-controls=""
+        shadow-intensity="1"
+        exposure="0.8"
+        camera-orbit="45deg 55deg 105%"
+        field-of-view="45deg"
+        interaction-prompt="none"
+        loading="eager"
+        style={{ width: "100%", height: "100%", minHeight: "inherit" }}
+      />
     </div>
   );
 };
