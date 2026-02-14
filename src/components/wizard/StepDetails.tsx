@@ -3,10 +3,27 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Grid3X3 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Grid3X3, Compass } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
+
+const SCALE_PRESETS = [
+  { value: "1:10", label: "1:10", description: "Very large detail — furniture studies" },
+  { value: "1:20", label: "1:20", description: "Large detail — room layouts" },
+  { value: "1:50", label: "1:50", description: "Standard presentation — buildings" },
+  { value: "1:100", label: "1:100", description: "Overview — building exteriors" },
+  { value: "1:200", label: "1:200", description: "Master planning — campus / site" },
+  { value: "1:500", label: "1:500", description: "Urban planning — city blocks" },
+] as const;
+
+const ROTATION_PRESETS = [
+  { value: 0, label: "N", icon: "↑" },
+  { value: 90, label: "E", icon: "→" },
+  { value: 180, label: "S", icon: "↓" },
+  { value: 270, label: "W", icon: "←" },
+] as const;
 
 type Project = Tables<"projects">;
 
@@ -91,45 +108,67 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
       </div>
 
       {mode === "tabletop" && (
-        <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-5">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Grid3X3 className="h-4 w-4 text-primary" />
             Tabletop Configuration
           </h3>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Model Scale</Label>
-              <Select value={form.scale} onValueChange={(v) => setForm({ ...form, scale: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1:10">1:10</SelectItem>
-                  <SelectItem value="1:20">1:20</SelectItem>
-                  <SelectItem value="1:50">1:50</SelectItem>
-                  <SelectItem value="1:100">1:100</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>QR Marker Size</Label>
-              <Select value={form.qr_size} onValueChange={(v) => setForm({ ...form, qr_size: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="small">Small (10×10cm)</SelectItem>
-                  <SelectItem value="medium">Medium (15×15cm)</SelectItem>
-                  <SelectItem value="large">Large (20×20cm)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Initial Rotation</Label>
-              <Input
-                type="number"
-                min={0}
-                max={360}
-                value={form.initial_rotation}
-                onChange={(e) => setForm({ ...form, initial_rotation: parseInt(e.target.value) || 0 })}
-                placeholder="0°"
-              />
+
+          {/* Scale */}
+          <div className="space-y-2">
+            <Label>Presentation Scale</Label>
+            <p className="text-xs text-muted-foreground">
+              How large the model appears on the table
+            </p>
+            <Select value={form.scale} onValueChange={(v) => setForm({ ...form, scale: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SCALE_PRESETS.map((preset) => (
+                  <SelectItem key={preset.value} value={preset.value}>
+                    <span className="font-mono font-medium">{preset.label}</span>
+                    <span className="ml-2 text-muted-foreground text-xs">{preset.description}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* QR Size */}
+          <div className="space-y-2">
+            <Label>QR Marker Size</Label>
+            <Select value={form.qr_size} onValueChange={(v) => setForm({ ...form, qr_size: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="small">Small (10×10 cm)</SelectItem>
+                <SelectItem value="medium">Medium (15×15 cm)</SelectItem>
+                <SelectItem value="large">Large (20×20 cm)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Rotation — compass buttons */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Compass className="h-3.5 w-3.5" />
+              Initial Rotation
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Which direction should the model face when it loads?
+            </p>
+            <div className="flex gap-2">
+              {ROTATION_PRESETS.map((preset) => (
+                <Button
+                  key={preset.value}
+                  type="button"
+                  variant={form.initial_rotation === preset.value ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1 font-mono gap-1"
+                  onClick={() => setForm({ ...form, initial_rotation: preset.value })}
+                >
+                  <span>{preset.icon}</span>
+                  <span>{preset.label}</span>
+                </Button>
+              ))}
             </div>
           </div>
         </div>
