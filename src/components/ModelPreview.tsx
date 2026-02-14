@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Download, Replace, Trash2, FileBox } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -70,18 +71,35 @@ const ModelPreview = ({ modelUrl, projectId, onReplace, onDelete }: ModelPreview
           <Badge variant="secondary" className="text-[10px] mt-1">{format}</Badge>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm" className="flex-1" onClick={handleDownload}>
-          <Download className="mr-1 h-3 w-3" />
-          Download
-        </Button>
-        <Button variant="outline" size="sm" onClick={onReplace}>
-          <Replace className="h-3 w-3" />
-        </Button>
-        <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleDelete}>
-          <Trash2 className="h-3 w-3" />
-        </Button>
-      </div>
+      <TooltipProvider delayDuration={300}>
+        <div className="flex gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="flex-1" onClick={handleDownload}>
+                <Download className="mr-1 h-3 w-3" />
+                Download
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Download the 3D model file</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" onClick={onReplace}>
+                <Replace className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Replace with a different model</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleDelete}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Remove this model</TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
     </div>
   );
 };
