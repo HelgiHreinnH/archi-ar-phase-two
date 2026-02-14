@@ -5,11 +5,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Share2, MapPin, User, Clock, Grid3X3 } from "lucide-react";
-import { toast } from "@/hooks/use-toast";
+import { ArrowLeft, MapPin, User, Clock, Grid3X3 } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import ModelUploader from "@/components/ModelUploader";
 import ModelPreview from "@/components/ModelPreview";
+import MarkerCoordinateEditor, { type MarkerData } from "@/components/MarkerCoordinateEditor";
+import GenerateExperience from "@/components/GenerateExperience";
 
 type Project = Tables<"projects">;
 
@@ -18,13 +19,11 @@ const modeConfig = {
     icon: Grid3X3,
     label: "Tabletop",
     badgeBg: "bg-blue-100 text-blue-700",
-    accent: "text-blue-600",
   },
   multipoint: {
     icon: MapPin,
     label: "Multi-Point",
     badgeBg: "bg-orange-100 text-orange-700",
-    accent: "text-orange-600",
   },
 } as const;
 
@@ -48,21 +47,6 @@ const ProjectDetail = () => {
     enabled: !!id,
   });
 
-  const handleGenerateShareLink = async () => {
-    if (!project) return;
-    const shareId = crypto.randomUUID();
-    const { error } = await supabase
-      .from("projects")
-      .update({ share_link: shareId, status: "active" })
-      .eq("id", project.id);
-    if (error) {
-      toast({ title: "Error generating link", variant: "destructive" });
-      return;
-    }
-    queryClient.invalidateQueries({ queryKey: ["project", id] });
-    toast({ title: "Share link generated!", description: "Your client can now view the design in their space." });
-  };
-
   if (isLoading) {
     return (
       <div className="space-y-6 animate-fade-in">
@@ -83,12 +67,22 @@ const ProjectDetail = () => {
     );
   }
 
-  const mode = (project as any).mode === "tabletop" ? "tabletop" : "multipoint";
+  const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
   const config = modeConfig[mode];
   const ModeIcon = config.icon;
 
+  const markerData = project.marker_data as unknown as MarkerData | null;
+  const hasModel = !!project.model_url;
+  const hasValidMarkers = mode === "tabletop" || (
+    !!markerData?.A && !!markerData?.B && !!markerData?.C &&
+    (markerData.A.x !== 0 || markerData.A.y !== 0 || markerData.A.z !== 0 ||
+     markerData.B.x !== 0 || markerData.B.y !== 0 || markerData.B.z !== 0 ||
+     markerData.C.x !== 0 || markerData.C.y !== 0 || markerData.C.z !== 0)
+  );
+
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard/experiences")}>
@@ -112,12 +106,6 @@ const ProjectDetail = () => {
               {project.status}
             </span>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleGenerateShareLink}>
-            <Share2 className="mr-2 h-4 w-4" />
-            Share
-          </Button>
         </div>
       </div>
 
@@ -158,15 +146,15 @@ const ProjectDetail = () => {
                 <div className="grid gap-3 sm:grid-cols-3 text-sm">
                   <div>
                     <span className="text-muted-foreground block text-xs">Scale</span>
-                    <span className="font-mono font-medium">{(project as any).scale || "1:20"}</span>
+                    <span className="font-mono font-medium">{project.scale || "1:20"}</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground block text-xs">QR Size</span>
-                    <span className="font-medium capitalize">{(project as any).qr_size || "medium"}</span>
+                    <span className="font-medium capitalize">{project.qr_size || "medium"}</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground block text-xs">Rotation</span>
-                    <span className="font-mono font-medium">{(project as any).initial_rotation || 0}°</span>
+                    <span className="font-mono font-medium">{project.initial_rotation || 0}°</span>
                   </div>
                 </div>
               </div>
@@ -205,40 +193,21 @@ const ProjectDetail = () => {
 
       {/* Marker Configuration — only for Multi-Point */}
       {mode === "multipoint" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-display">Marker Configuration</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 sm:grid-cols-3">
-              {["A", "B", "C"].map((label, i) => {
-                const colors = ["bg-marker-red", "bg-marker-green", "bg-marker-blue"];
-                const labels = ["Anchor Point", "Reference Point", "Reference Point"];
-                return (
-                  <div
-                    key={label}
-                    className="border rounded-lg p-4 space-y-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className={`h-3 w-3 rounded-full ${colors[i]}`} />
-                      <span className="font-display font-semibold">Point {label}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{labels[i]}</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {["X", "Y", "Z"].map((axis) => (
-                        <div key={axis} className="text-center">
-                          <span className="text-[10px] text-muted-foreground block">{axis}</span>
-                          <span className="text-sm font-mono">0</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+        <MarkerCoordinateEditor
+          projectId={project.id}
+          markerData={markerData}
+          onUpdate={() => queryClient.invalidateQueries({ queryKey: ["project", id] })}
+        />
       )}
+
+      {/* Generate AR Experience */}
+      <GenerateExperience
+        project={project}
+        hasModel={hasModel}
+        hasValidMarkers={hasValidMarkers}
+        mode={mode}
+        onGenerated={() => queryClient.invalidateQueries({ queryKey: ["project", id] })}
+      />
     </div>
   );
 };

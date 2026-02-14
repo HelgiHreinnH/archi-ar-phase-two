@@ -13,6 +13,7 @@ import SettingsPage from "./pages/SettingsPage";
 import HowItWorksPage from "./pages/HowItWorksPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
+import ARViewer from "./pages/ARViewer";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/view/:shareId" element={<ARViewer />} />
           <Route path="/auth" element={<Auth />} />
           <Route
             path="/dashboard"
