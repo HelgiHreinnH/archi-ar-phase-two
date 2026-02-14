@@ -41,7 +41,7 @@ const DashboardHome = () => {
             Hey, {displayName} 👋
           </h1>
           <p className="text-muted-foreground mt-1">
-            Here's what's happening with your AR projects.
+            Here's an overview of your interior design presentations.
           </p>
         </div>
         <Button onClick={() => navigate("/dashboard/projects/new")}>
@@ -87,9 +87,9 @@ const DashboardHome = () => {
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
               <FolderOpen className="h-12 w-12 text-muted-foreground/40 mb-4" />
               <h3 className="font-display text-lg font-semibold mb-1">No projects yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Create your first AR project to get started.
-              </p>
+               <p className="text-sm text-muted-foreground mb-4">
+                Create your first project to start presenting designs in real spaces.
+               </p>
               <Button onClick={() => navigate("/dashboard/projects/new")}>
                 <Plus className="mr-2 h-4 w-4" />
                 Create Project

@@ -43,7 +43,7 @@ const ProjectDetail = () => {
       toast({ title: "Error generating link", variant: "destructive" });
       return;
     }
-    toast({ title: "Share link generated!", description: "Your project is now shareable." });
+    toast({ title: "Share link generated!", description: "Your client can now view the design in their space." });
   };
 
   if (isLoading) {
