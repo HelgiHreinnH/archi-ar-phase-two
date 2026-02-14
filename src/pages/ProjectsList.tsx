@@ -1,7 +1,8 @@
 import { useProjects } from "@/hooks/useProjects";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, FolderOpen, Trash2, MoreVertical } from "lucide-react";
+import { Plus, FolderOpen, Trash2, MoreVertical, FileBox, FileQuestion } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import {
   DropdownMenu,
@@ -119,9 +120,22 @@ const ProjectsList = () => {
                   </span>
                 </div>
 
-                {project.location && (
-                  <p className="text-xs text-muted-foreground mt-2 truncate">📍 {project.location}</p>
-                )}
+                <div className="flex items-center gap-2 mt-3">
+                  {project.model_url ? (
+                    <Badge variant="secondary" className="text-[10px] gap-1">
+                      <FileBox className="h-3 w-3" />
+                      Ready
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] gap-1 text-muted-foreground">
+                      <FileQuestion className="h-3 w-3" />
+                      No model
+                    </Badge>
+                  )}
+                  {project.location && (
+                    <span className="text-xs text-muted-foreground truncate">📍 {project.location}</span>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}
