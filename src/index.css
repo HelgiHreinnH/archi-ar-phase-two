@@ -4,6 +4,12 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
+@import url("https://fonts.googleapis.com/css2?family=Roboto&display=swap");
+
+@import url("https://fonts.googleapis.com/css2?family=Lora&display=swap");
+
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono&display=swap");
+
 @layer base {
   :root {
     --background: 0 0% 98%;
@@ -46,18 +52,21 @@
     --surface-elevated: 0 0% 100%;
     --surface-sunken: 220 15% 96%;
 
-    --sidebar-background: 220 20% 97%;
-    --sidebar-foreground: 220 20% 25%;
-    --sidebar-primary: 220 80% 50%;
+    --sidebar-background: 220 20% 10%;
+    --sidebar-foreground: 220 15% 85%;
+    --sidebar-primary: 220 80% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 92%;
-    --sidebar-accent-foreground: 220 20% 15%;
-    --sidebar-border: 220 15% 90%;
+    --sidebar-accent: 220 20% 16%;
+    --sidebar-accent-foreground: 220 15% 85%;
+    --sidebar-border: 220 20% 18%;
     --sidebar-ring: 220 80% 50%;
 
     /* Typography */
-    --font-display: 'Space Grotesk', system-ui, sans-serif;
-    --font-body: 'Inter', system-ui, sans-serif;
+    --font-display: "Space Grotesk", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, sans-serif;
+    --font-sans: Roboto, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+    --font-serif: Lora, ui-serif, Georgia, Cambria, Times New Roman, Times, serif;
+    --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
   }
 
   .dark {
@@ -97,6 +106,9 @@
     --sidebar-accent-foreground: 220 15% 85%;
     --sidebar-border: 220 25% 12%;
     --sidebar-ring: 220 80% 60%;
+    --font-sans: Roboto, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+    --font-serif: Lora, ui-serif, Georgia, Cambria, Times New Roman, Times, serif;
+    --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
   }
 }
 
