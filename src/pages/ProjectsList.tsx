@@ -31,7 +31,7 @@ const ProjectsList = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-3xl font-bold">Projects</h1>
-          <p className="text-muted-foreground mt-1">Manage your AR visualization projects.</p>
+          <p className="text-muted-foreground mt-1">Manage your interior design presentations.</p>
         </div>
         <Button onClick={() => navigate("/dashboard/projects/new")}>
           <Plus className="mr-2 h-4 w-4" />
@@ -56,7 +56,7 @@ const ProjectsList = () => {
             <FolderOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
             <h3 className="font-display text-xl font-semibold mb-2">No projects yet</h3>
             <p className="text-muted-foreground mb-6 max-w-sm">
-              Create your first AR project. Upload a 3D model, define markers, and share with clients.
+              Upload your interior design, place it in the client's space, and share an AR walkthrough — no app needed.
             </p>
             <Button onClick={() => navigate("/dashboard/projects/new")}>
               <Plus className="mr-2 h-4 w-4" />

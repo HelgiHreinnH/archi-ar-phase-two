@@ -19,45 +19,45 @@ const steps = [
     icon: Crosshair,
     title: "Preparing XYZ Coordinates in Your 3D File",
     description:
-      "Before exporting, make sure your 3D model's origin point and coordinate system are set correctly. The AR system uses these coordinates to place and orient the model in real space — if they're off in the file, they'll be off on-site.",
+      "Before exporting your interior design model, make sure the origin point and coordinate system are set correctly. The AR system uses these coordinates to place furniture, fixtures, and finishes precisely in the client's room — if they're off in the file, they'll be off on-site.",
     tips: [
-      "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A on site",
+      "Set your model's origin (0,0,0) to the same real-world point you'll use as Marker A in the room (e.g. a corner or doorway)",
       "Use a consistent coordinate system: Y-up for GLB (glTF standard) or Z-up if your software converts on export",
       "In Rhino, use 'Set Origin' or move your geometry so the base point sits at the world origin",
       "In Revit, use 'Project Base Point' aligned to your survey point for accurate geo-positioning",
       "In Blender, apply all transforms (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
-      "Export a small test cube first to verify orientation and scale match your expectations in the AR view",
+      "Export a small test cube first to verify orientation and scale match the room dimensions in the AR view",
     ],
   },
   {
     icon: FolderPlus,
     title: "Create a Project",
     description:
-      "Start by creating a new project from the Projects page. Give it a name, add your client's name, a short description, and the project location. This keeps everything organized per site or building.",
+      "Start by creating a new project from the Projects page. Give it a name, add your client's name, a short description, and the property address. This keeps everything organized per room or space.",
     tips: [
-      "Use clear naming like 'Villa Lindgren — Phase 2' so you can find it later",
-      "The client name and location are optional but help when managing many projects",
+      "Use clear naming like 'Lindgren Living Room — Concept A' so you can find it later",
+      "The client name and address help when managing presentations across multiple properties",
     ],
   },
   {
     icon: Upload,
     title: "Upload Your 3D Model",
     description:
-      "Open your project and upload a GLB or USDZ file (up to 250 MB). These are the standard formats for AR-ready 3D models. You'll see a real-time progress bar during upload.",
+      "Open your project and upload a GLB or USDZ file (up to 250 MB). These are standard formats for AR-ready 3D interior models. You'll see a real-time progress bar during upload.",
     tips: [
-      "Export from Rhino, Revit, or Blender as GLB with Draco compression for smaller files",
+      "Export your interior scene from Rhino, Revit, SketchUp, or Blender as GLB with Draco compression for smaller files",
       "USDZ works best for iOS AR Quick Look previews",
-      "If your file exceeds 250 MB, try lowering textures to 2K or decimating polygon count",
+      "If your file exceeds 250 MB, try lowering material textures to 2K or simplifying furniture geometry",
     ],
   },
   {
     icon: MapPin,
     title: "Set Marker Coordinates",
     description:
-      "Define three marker points (A, B, C) with X, Y, Z coordinates. Point A is the anchor, while B and C are reference points. These tell the AR system exactly where to place the 3D model in the real world.",
+      "Define three marker points (A, B, C) with X, Y, Z coordinates. Point A is the anchor, while B and C are reference points. These tell the AR system exactly where to place the interior design within the existing room.",
     tips: [
-      "Point A (red) is the primary anchor — place it at a fixed, easy-to-find spot on site",
-      "Points B and C (green, blue) triangulate the model's orientation and scale",
+      "Point A (red) is the primary anchor — place it at a fixed, easy-to-identify spot in the room like a corner or door frame",
+      "Points B and C (green, blue) triangulate the design's orientation and scale within the space",
       "Coordinates can be exported from Rhino/Grasshopper as JSON and pasted in",
     ],
   },
@@ -65,10 +65,10 @@ const steps = [
     icon: Share2,
     title: "Share with Your Client",
     description:
-      'Once your model is uploaded and markers are configured, hit the "Share" button to generate a unique link. Your client can open this on their phone or tablet to view the AR visualization on-site — no app install needed.',
+      'Once your design is uploaded and markers are configured, hit the "Share" button to generate a unique link. Your client can open this on their phone or tablet to see the proposed interior overlaid in their actual room — no app install needed.',
     tips: [
       "The share link works on iOS Safari and Android Chrome with WebXR",
-      "Clients can walk around the site and see the model anchored in real space",
+      "Clients can walk around the room and see furniture, materials, and layouts at true scale",
       "You can regenerate the link anytime if you need to revoke access",
     ],
   },
@@ -84,7 +84,7 @@ const HowItWorksPage = () => {
       <div>
         <h1 className="font-display text-3xl font-bold">How It Works</h1>
         <p className="text-muted-foreground mt-1">
-          A step-by-step guide to creating AR visualizations for your architectural projects.
+          A step-by-step guide to presenting interior designs in your client's space using AR.
         </p>
       </div>
 

@@ -60,7 +60,7 @@ const Auth = () => {
             <h1 className="font-display text-3xl font-bold text-background">Archi AR</h1>
           </div>
           <p className="text-lg text-muted-foreground">
-            Place your 3D designs in real-world spaces with precision AR marker tracking.
+            Visualize interior designs in real spaces. Walk your clients through their future rooms before anything is built.
           </p>
           <div className="flex gap-3 pt-4">
             <div className="h-3 w-3 rounded-full bg-marker-red" />
@@ -83,8 +83,8 @@ const Auth = () => {
             </h2>
             <p className="text-sm text-muted-foreground">
               {isLogin
-                ? "Sign in to manage your AR projects"
-                : "Start creating AR experiences for your clients"}
+                ? "Sign in to manage your interior design presentations"
+                : "Start presenting interior designs in AR to your clients"}
             </p>
           </div>
 

@@ -49,7 +49,7 @@ const NewProject = () => {
         </Button>
         <div>
           <h1 className="font-display text-3xl font-bold">New Project</h1>
-          <p className="text-muted-foreground mt-1">Set up a new AR visualization project.</p>
+          <p className="text-muted-foreground mt-1">Set up a new interior design presentation for your client's space.</p>
         </div>
       </div>
 
@@ -65,7 +65,7 @@ const NewProject = () => {
                 id="name"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Hansen Kitchen Renovation"
+                placeholder="Lindgren Living Room Redesign"
                 required
               />
             </div>
@@ -77,7 +77,7 @@ const NewProject = () => {
                   id="client"
                   value={form.client_name}
                   onChange={(e) => setForm({ ...form, client_name: e.target.value })}
-                  placeholder="Hansen Family"
+                  placeholder="Lindgren Family"
                 />
               </div>
               <div className="space-y-2">
@@ -86,7 +86,7 @@ const NewProject = () => {
                   id="location"
                   value={form.location}
                   onChange={(e) => setForm({ ...form, location: e.target.value })}
-                  placeholder="Reykjavik, Iceland"
+                  placeholder="Strandvägen 7, Stockholm"
                 />
               </div>
             </div>
@@ -97,7 +97,7 @@ const NewProject = () => {
                 id="description"
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="Brief description of the project..."
+                placeholder="Full interior redesign of living and dining area in existing apartment..."
                 rows={3}
               />
             </div>
