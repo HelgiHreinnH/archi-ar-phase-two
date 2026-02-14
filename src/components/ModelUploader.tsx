@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Upload, RefreshCw, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
+import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
+import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 
 const MAX_FILE_SIZE_MB = 250;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -13,6 +15,7 @@ const ACCEPTED_MIME_TYPES = ["model/gltf-binary", "model/vnd.usdz+zip", "applica
 interface ModelUploaderProps {
   projectId: string;
   onUploadComplete: (modelUrl: string) => void;
+  onMarkersDetected?: (markers: MarkerData) => void;
 }
 
 function validateFile(file: File): string | null {
@@ -26,7 +29,7 @@ function validateFile(file: File): string | null {
   return null;
 }
 
-const ModelUploader = ({ projectId, onUploadComplete }: ModelUploaderProps) => {
+const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: ModelUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -36,6 +39,7 @@ const ModelUploader = ({ projectId, onUploadComplete }: ModelUploaderProps) => {
   const [oversized, setOversized] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const lastFileRef = useRef<File | null>(null);
 
   const handleUpload = useCallback(async (file: File) => {
     const validation = validateFile(file);
@@ -102,6 +106,19 @@ const ModelUploader = ({ projectId, onUploadComplete }: ModelUploaderProps) => {
 
       toast({ title: "Model uploaded successfully" });
       onUploadComplete(filePath);
+
+      // Try to auto-detect marker positions from GLB files
+      if (onMarkersDetected) {
+        try {
+          const markers = await parseGlbMarkers(file);
+          if (markers) {
+            onMarkersDetected(markers);
+            toast({ title: "Marker positions detected", description: "Found marker_A, marker_B, and marker_C in your model." });
+          }
+        } catch {
+          // Silently ignore — user can enter markers manually
+        }
+      }
     } catch (err: any) {
       if (err?.message !== "Network error during upload" || !abortRef.current?.signal.aborted) {
         setError(err?.message || "Upload failed. Please try again.");
