@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Rocket, CheckCircle2, AlertCircle, Loader2, Download, Link2, Copy } from "lucide-react";
+import { Rocket, CheckCircle2, AlertCircle, Loader2, Download, Link2, Copy, FileDown } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
+import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 
 type Project = Tables<"projects">;
 
@@ -14,7 +15,69 @@ interface GenerateExperienceProps {
   hasModel: boolean;
   hasValidMarkers: boolean;
   mode: "tabletop" | "multipoint";
+  markerData: MarkerData | null;
   onGenerated: () => void;
+}
+
+const MARKER_COLORS: Record<string, { fill: string; label: string }> = {
+  A: { fill: "#E53935", label: "Point A" },
+  B: { fill: "#43A047", label: "Point B" },
+  C: { fill: "#1E88E5", label: "Point C" },
+};
+
+function generateMarkerImage(
+  pointId: string,
+  coords: { x: number; y: number; z: number; label: string },
+  projectName: string
+): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = 800;
+  canvas.height = 800;
+  const ctx = canvas.getContext("2d")!;
+  const cfg = MARKER_COLORS[pointId];
+
+  // White background
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, 800, 800);
+
+  // Border
+  ctx.strokeStyle = "#E0E0E0";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, 20, 760, 760);
+
+  // Colored circle
+  ctx.beginPath();
+  ctx.arc(400, 300, 140, 0, Math.PI * 2);
+  ctx.fillStyle = cfg.fill;
+  ctx.fill();
+
+  // Letter inside circle
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = "bold 120px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(pointId, 400, 300);
+
+  // Label
+  ctx.fillStyle = "#212121";
+  ctx.font = "bold 32px sans-serif";
+  ctx.fillText(cfg.label, 400, 500);
+  ctx.font = "24px sans-serif";
+  ctx.fillStyle = "#757575";
+  ctx.fillText(coords.label || cfg.label, 400, 545);
+
+  // Coordinates
+  ctx.font = "bold 22px monospace";
+  ctx.fillStyle = "#424242";
+  ctx.fillText(`X: ${coords.x}   Y: ${coords.y}   Z: ${coords.z}  (mm)`, 400, 620);
+
+  // Project name footer
+  ctx.font = "18px sans-serif";
+  ctx.fillStyle = "#9E9E9E";
+  ctx.fillText(projectName, 400, 720);
+  ctx.fillText("Print at 100% scale · Place marker at indicated coordinates", 400, 750);
+
+  return canvas.toDataURL("image/png");
 }
 
 interface CheckItem {
@@ -23,7 +86,7 @@ interface CheckItem {
   hint?: string;
 }
 
-const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, onGenerated }: GenerateExperienceProps) => {
+const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerData, onGenerated }: GenerateExperienceProps) => {
   const [generating, setGenerating] = useState(false);
 
   const checks: CheckItem[] =
@@ -172,6 +235,47 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, onGenera
                 </>
               )}
             </Button>
+          </div>
+        )}
+
+        {/* Download Marker References */}
+        {isActive && mode === "multipoint" && markerData && (
+          <div className="space-y-3 border-t pt-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <FileDown className="h-4 w-4 text-muted-foreground" />
+              Marker Reference Sheets
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Download and print these reference sheets. Place each marker at the indicated coordinates on site.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {(["A", "B", "C"] as const).map((pointId) => {
+                const point = markerData[pointId];
+                if (!point) return null;
+                return (
+                  <Button
+                    key={pointId}
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => {
+                      const dataUrl = generateMarkerImage(pointId, point, project.name);
+                      const a = document.createElement("a");
+                      a.href = dataUrl;
+                      a.download = `marker_${pointId}_${project.name.replace(/\s+/g, "_")}.png`;
+                      a.click();
+                    }}
+                  >
+                    <div
+                      className="h-3 w-3 rounded-full shrink-0"
+                      style={{ backgroundColor: MARKER_COLORS[pointId].fill }}
+                    />
+                    <Download className="h-3 w-3" />
+                    Marker {pointId}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
         )}
       </CardContent>

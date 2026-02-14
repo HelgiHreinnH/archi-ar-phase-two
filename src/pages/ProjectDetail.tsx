@@ -206,6 +206,7 @@ const ProjectDetail = () => {
         hasModel={hasModel}
         hasValidMarkers={hasValidMarkers}
         mode={mode}
+        markerData={markerData}
         onGenerated={() => queryClient.invalidateQueries({ queryKey: ["project", id] })}
       />
     </div>
