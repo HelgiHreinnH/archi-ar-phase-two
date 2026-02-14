@@ -102,6 +102,7 @@ const steps = [
 
 const HowItWorksPage = () => {
   const [activeStep, setActiveStep] = useState(0);
+  const [activeMode, setActiveMode] = useState<0 | 1>(0);
   const step = steps[activeStep];
 
   return (
@@ -183,32 +184,48 @@ const HowItWorksPage = () => {
             </div>
           </div>
 
-          {/* Mode-specific sections */}
-          {"sections" in step && (step as any).sections && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {(step as any).sections.map((section: any, si: number) => (
-                <div key={si} className="rounded-lg border p-4 space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    {si === 0 ? (
-                      <QrCode className="h-4 w-4 text-primary" />
-                    ) : (
-                      <Triangle className="h-4 w-4 text-warm" />
-                    )}
-                    {section.heading}
-                  </div>
+          {/* Mode-specific sections with toggle */}
+          {"sections" in step && (step as any).sections && (() => {
+            const sections = (step as any).sections as Array<{ heading: string; detail: string; tips: string[] }>;
+            const section = sections[activeMode];
+            return (
+              <div className="space-y-4">
+                {/* Toggle */}
+                <div className="inline-flex rounded-lg border bg-muted/50 p-1 gap-1">
+                  {sections.map((s, si) => (
+                    <button
+                      key={si}
+                      onClick={() => setActiveMode(si as 0 | 1)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                        activeMode === si
+                          ? si === 0
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "bg-warm text-warm-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {si === 0 ? <QrCode className="h-3.5 w-3.5" /> : <Triangle className="h-3.5 w-3.5" />}
+                      {s.heading}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Content */}
+                <div className="rounded-lg border p-4 space-y-3 animate-fade-in" key={activeMode}>
                   <p className="text-sm text-muted-foreground leading-relaxed">{section.detail}</p>
                   <ul className="space-y-1.5">
                     {section.tips.map((tip: string, ti: number) => (
                       <li key={ti} className="text-sm text-muted-foreground flex gap-2">
-                        <span className={cn("mt-0.5", si === 0 ? "text-primary" : "text-warm")}>•</span>
+                        <span className={cn("mt-0.5", activeMode === 0 ? "text-primary" : "text-warm")}>•</span>
                         {tip}
                       </li>
                     ))}
                   </ul>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {step.tips.length > 0 && (
             <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
