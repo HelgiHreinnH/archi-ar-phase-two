@@ -2,15 +2,17 @@ import { useState } from "react";
 import ModelUploader from "@/components/ModelUploader";
 import ModelPreview from "@/components/ModelPreview";
 import type { Tables } from "@/integrations/supabase/types";
+import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 
 type Project = Tables<"projects">;
 
 interface StepModelProps {
   project: Project;
   onUpdate: () => void;
+  onMarkersDetected?: (markers: MarkerData) => void;
 }
 
-const StepModel = ({ project, onUpdate }: StepModelProps) => {
+const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => {
   const [showUploader, setShowUploader] = useState(false);
 
   return (
@@ -36,6 +38,7 @@ const StepModel = ({ project, onUpdate }: StepModelProps) => {
             onUpdate();
             setShowUploader(false);
           }}
+          onMarkersDetected={onMarkersDetected}
         />
       )}
     </div>

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import { supabase } from "@/integrations/supabase/client";
 import StepProgress from "@/components/wizard/StepProgress";
 import StepDetails from "@/components/wizard/StepDetails";
 import StepModel from "@/components/wizard/StepModel";
@@ -68,6 +69,15 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     setCurrentStep(1);
   }, [onProjectUpdate]);
 
+  const handleMarkersDetected = useCallback(async (markers: MarkerData) => {
+    // Save auto-detected markers to DB
+    await supabase
+      .from("projects")
+      .update({ marker_data: markers as any })
+      .eq("id", project.id);
+    onProjectUpdate();
+  }, [project.id, onProjectUpdate]);
+
   const isLastStep = currentStep === 3;
   const canContinue = currentStep === 0 ? true
     : currentStep === 1 ? hasModel
@@ -95,6 +105,7 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
             <StepModel
               project={project}
               onUpdate={onProjectUpdate}
+              onMarkersDetected={mode === "multipoint" ? handleMarkersDetected : undefined}
             />
           )}
           {currentStep === 2 && (
