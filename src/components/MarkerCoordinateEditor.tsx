@@ -226,27 +226,47 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
                   className="text-xs h-8"
                 />
                 <div className="grid grid-cols-3 gap-2">
-                  {(["x", "y", "z"] as const).map((axis) => (
-                    <div key={axis}>
-                      <Label className="text-[10px] text-muted-foreground uppercase">{axis} (mm)</Label>
-                      <Input
-                        type="text"
-                        inputMode="numeric"
-                        value={point[axis]}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === "" || v === "-" || /^-?\d*\.?\d*$/.test(v)) {
-                            updateMarker(cfg.id, axis, v === "" || v === "-" ? v : v);
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const num = parseFloat(e.target.value);
-                          updateMarker(cfg.id, axis, isNaN(num) ? 0 : num);
-                        }}
-                        className="font-mono text-sm h-8"
-                      />
-                    </div>
-                  ))}
+                  {(["x", "y", "z"] as const).map((axis) => {
+                    const val = point[axis];
+                    const isNeg = typeof val === "number" ? val < 0 : String(val).startsWith("-");
+                    const absVal = typeof val === "number" ? Math.abs(val) : String(val).replace(/^-/, "");
+                    return (
+                      <div key={axis}>
+                        <Label className="text-[10px] text-muted-foreground uppercase">{axis} (mm)</Label>
+                        <div className="flex gap-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 shrink-0 px-0 font-mono text-xs"
+                            onClick={() => {
+                              const num = typeof val === "number" ? val : parseFloat(String(val)) || 0;
+                              updateMarker(cfg.id, axis, -num);
+                            }}
+                          >
+                            {isNeg ? "−" : "+"}
+                          </Button>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            value={absVal}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === "" || /^\d*\.?\d*$/.test(v)) {
+                                const numVal = parseFloat(v) || 0;
+                                updateMarker(cfg.id, axis, isNeg ? -numVal : numVal);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const num = parseFloat(e.target.value) || 0;
+                              updateMarker(cfg.id, axis, isNeg ? -num : num);
+                            }}
+                            className="font-mono text-sm h-8"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
