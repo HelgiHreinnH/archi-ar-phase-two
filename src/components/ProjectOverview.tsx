@@ -153,14 +153,12 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     </div>
 
                     {/* Label */}
-                    <div className="rounded-md border bg-muted/40 px-3 py-1.5">
-                      <span className="text-sm text-muted-foreground">{point.label}</span>
-                    </div>
+                    <p className="text-sm text-muted-foreground">{point.label}</p>
 
                     {/* X */}
                     <div>
                       <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">X (mm)</span>
-                      <div className="rounded-md border bg-muted/40 px-3 py-1.5 mt-1 flex items-center gap-2">
+                      <div className="px-1 py-1 mt-1 flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">{point.x >= 0 ? "+" : "−"}</span>
                         <span className="text-base font-semibold font-mono">{Math.abs(point.x)}</span>
                       </div>
@@ -169,7 +167,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     {/* Y */}
                     <div>
                       <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Y (mm)</span>
-                      <div className="rounded-md border bg-muted/40 px-3 py-1.5 mt-1 flex items-center gap-2">
+                      <div className="px-1 py-1 mt-1 flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">{point.y >= 0 ? "+" : "−"}</span>
                         <span className="text-base font-semibold font-mono">{Math.abs(point.y)}</span>
                       </div>
@@ -178,7 +176,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     {/* Z */}
                     <div>
                       <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Z (mm)</span>
-                      <div className="rounded-md border bg-muted/40 px-3 py-1.5 mt-1 flex items-center gap-2">
+                      <div className="px-1 py-1 mt-1 flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">{point.z >= 0 ? "+" : "−"}</span>
                         <span className="text-base font-semibold font-mono">{Math.abs(point.z)}</span>
                       </div>
