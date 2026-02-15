@@ -41,54 +41,23 @@ const GLTF_LOADER_URL =
 const MINDAR_THREE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 
-/** Import map is now statically defined in index.html — no runtime injection needed. */
-function ensureImportMap() {
-  // no-op: import map lives in index.html before any module scripts
-}
-
-/** Load the MindAR Three.js build as an ES module. */
-function loadMindARScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if ((window as any).__MINDAR_LOADED) {
-      resolve();
-      return;
-    }
-
-    ensureImportMap();
-
-    const script = document.createElement("script");
-    script.type = "module";
-    script.src = MINDAR_THREE_URL;
-    script.onload = () => {
-      (window as any).__MINDAR_LOADED = true;
-      resolve();
-    };
-    script.onerror = () =>
-      reject(new Error("Failed to load MindAR script"));
-    document.head.appendChild(script);
-  });
-}
-
 /**
- * Poll for `window.MINDAR.IMAGE.MindARThree` — module execution is async
- * and may complete in a subsequent microtask after `onload` fires.
+ * Load MindAR via dynamic import() so the browser's import-map (or the
+ * es-module-shims polyfill) correctly resolves the bare "three" specifier.
+ *
+ * A dynamically-injected <script type="module"> is NOT intercepted by
+ * es-module-shims, which is why the old approach timed out on Safari.
  */
-function waitForMindAR(timeout = 30_000): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if ((window as any).MINDAR?.IMAGE?.MindARThree) {
-        resolve();
-        return;
-      }
-      if (Date.now() - start > timeout) {
-        reject(new Error("MindAR runtime did not become available within timeout"));
-        return;
-      }
-      setTimeout(check, 150);
-    };
-    check();
-  });
+async function loadMindAR(): Promise<void> {
+  if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
+
+  // Dynamic import goes through the module graph → import map applies
+  await import(/* @vite-ignore */ MINDAR_THREE_URL);
+
+  // MindAR attaches itself to window.MINDAR after execution
+  if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
+    throw new Error("MindAR module loaded but runtime not found on window.MINDAR");
+  }
 }
 
 const MindARScene = ({
@@ -118,8 +87,7 @@ const MindARScene = ({
         throw new Error("Your browser does not support camera access. Please use a modern browser like Safari, Chrome, or Firefox.");
       }
 
-      await loadMindARScript();
-      await waitForMindAR();
+      await loadMindAR();
 
       const MINDAR = (window as any).MINDAR;
       const THREE = (window as any).THREE;
