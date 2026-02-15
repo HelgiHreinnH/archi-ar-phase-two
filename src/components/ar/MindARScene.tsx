@@ -110,6 +110,14 @@ const MindARScene = ({
     if (!containerRef.current) return;
 
     try {
+      // Pre-flight: check secure context & getUserMedia support
+      if (!window.isSecureContext) {
+        throw new Error("Camera requires a secure (HTTPS) connection. Please access this page via HTTPS.");
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Your browser does not support camera access. Please use a modern browser like Safari, Chrome, or Firefox.");
+      }
+
       await loadMindARScript();
       await waitForMindAR();
 

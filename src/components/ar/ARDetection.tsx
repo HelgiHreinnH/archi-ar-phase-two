@@ -70,10 +70,30 @@ const ARDetection = ({
     guideDescription = "All markers locked. Preparing your AR experience.";
   }
 
-  // Use default example target if none provided
-  const targetSrc =
-    imageTargetSrc ||
-    "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind";
+  // Guard: a .mind target is required for AR to work
+  if (!imageTargetSrc) {
+    return (
+      <div className="fixed inset-0 bg-black flex items-center justify-center p-6">
+        <div className="text-center space-y-4 max-w-sm">
+          <div className="bg-destructive/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+            <Target className="h-8 w-8 text-destructive" />
+          </div>
+          <h2 className="font-display text-lg font-bold text-white">Experience Not Ready</h2>
+          <p className="text-sm text-white/70 leading-relaxed">
+            This experience needs to be re-generated. Please ask the project owner to regenerate it.
+          </p>
+          <button
+            onClick={onCancel}
+            className="mt-2 text-sm text-white/60 hover:text-white/80 underline"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const targetSrc = imageTargetSrc;
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col">

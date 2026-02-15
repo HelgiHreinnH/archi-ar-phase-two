@@ -85,7 +85,10 @@ const ARViewer = () => {
     setViewState("detecting");
   };
 
-  const handleARError = useCallback(() => {
+  const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
+
+  const handleARError = useCallback((err?: Error) => {
+    setArErrorMessage(err?.message || "Camera access was denied.");
     setViewState("permission-denied");
   }, []);
 
@@ -145,6 +148,7 @@ const ARViewer = () => {
         <ARPermission
           onCancel={() => setViewState("landing")}
           onRetry={launchDetecting}
+          errorMessage={arErrorMessage}
         />
       );
 
@@ -157,7 +161,7 @@ const ARViewer = () => {
           onTargetLost={handleTargetLost}
           onAllDetected={handleAllDetected}
           onCancel={() => setViewState("landing")}
-          onError={handleARError}
+          onError={(err) => handleARError(err)}
           imageTargetSrc={project.mind_file_url || undefined}
           modelUrl={signedModelUrl}
           modelScale={scaleNum}
