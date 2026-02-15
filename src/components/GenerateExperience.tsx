@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   Rocket, CheckCircle2, AlertCircle, Loader2,
-  Download, Link2, Copy, FileDown, Image, Cpu, QrCode, Upload, Zap,
+  Download, Link2, Copy, FileDown, Image, Cpu, QrCode, Upload, Zap, FileText,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,7 @@ import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 import QRCode from "qrcode";
 import { generateAllMarkerImages, canvasToImage, type MarkerPoint } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
+import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 
 type Project = Tables<"projects">;
 
@@ -427,33 +428,25 @@ const GenerateExperience = ({
               Download QR Code
             </Button>
 
-            {/* Marker sheets — multipoint only */}
+            {/* Marker PDFs — multipoint only */}
             {mode === "multipoint" && markerData && (
               <>
                 <p className="text-xs text-muted-foreground">
-                  Download and print marker reference sheets. Place each at the indicated coordinates on site.
+                  Download print-ready A4 PDFs with marker image, QR code, and placement instructions.
                 </p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {(["A", "B", "C"] as const).map((pointId) => {
                     const point = markerData[pointId];
                     if (!point) return null;
-                    // Use stored marker image URL if available
-                    const storedUrl = (project as any).marker_image_urls?.[pointId];
                     return (
                       <Button
                         key={pointId}
                         variant="outline"
                         size="sm"
                         className="justify-start gap-2"
-                        onClick={() => {
-                          if (storedUrl) {
-                            const a = document.createElement("a");
-                            a.href = storedUrl;
-                            a.download = `marker_${pointId}_${project.name.replace(/\s+/g, "_")}.png`;
-                            a.target = "_blank";
-                            a.click();
-                          }
-                        }}
+                        onClick={() =>
+                          downloadMarkerPDF(pointId, point, project.name, shareUrl!)
+                        }
                       >
                         <div
                           className="h-3 w-3 rounded-full shrink-0"
@@ -462,12 +455,27 @@ const GenerateExperience = ({
                               pointId === "A" ? "hsl(0 100% 60%)" : pointId === "B" ? "hsl(145 63% 49%)" : "hsl(211 100% 50%)",
                           }}
                         />
-                        <Download className="h-3 w-3" />
-                        Marker {pointId}
+                        <FileText className="h-3 w-3" />
+                        Marker {pointId} PDF
                       </Button>
                     );
                   })}
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => {
+                    const points: Record<string, { x: number; y: number; z: number; label: string }> = {};
+                    for (const id of ["A", "B", "C"] as const) {
+                      if (markerData[id]) points[id] = markerData[id];
+                    }
+                    downloadAllMarkerPDFs(points, project.name, shareUrl!);
+                  }}
+                >
+                  <Download className="h-3 w-3" />
+                  Download All Marker PDFs
+                </Button>
               </>
             )}
 

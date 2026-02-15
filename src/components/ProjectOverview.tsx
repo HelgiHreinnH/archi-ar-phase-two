@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Copy, Link2, Download, FileDown, Pencil,
-  MapPin, Grid3X3, Compass, User, FileBox,
+  MapPin, Grid3X3, Compass, User, FileBox, FileText,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,6 +11,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 import QRCode from "qrcode";
 import ModelViewer3D from "@/components/ModelViewer3D";
+import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 
 type Project = Tables<"projects">;
 
@@ -273,23 +274,70 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
               {mode === "multipoint" && markerData && (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Print marker sheets and place each at the indicated coordinates on site.
+                    Download print-ready A4 PDFs with marker image, QR code, and placement instructions.
+                  </p>
+
+                  {/* PDF downloads */}
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {(["A", "B", "C"] as const).map((id) => {
+                      const point = markerData[id];
+                      if (!point) return null;
+                      return (
+                        <Button
+                          key={id}
+                          variant="outline"
+                          size="sm"
+                          className="justify-start gap-2"
+                          onClick={() =>
+                            downloadMarkerPDF(id, point, project.name, shareUrl!)
+                          }
+                        >
+                          <div
+                            className="h-3 w-3 rounded-full shrink-0"
+                            style={{ backgroundColor: MARKER_COLORS[id].fill }}
+                          />
+                          <FileText className="h-3 w-3" />
+                          Marker {id} PDF
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-start gap-2"
+                    onClick={() => {
+                      const points: Record<string, { x: number; y: number; z: number; label: string }> = {};
+                      for (const id of ["A", "B", "C"] as const) {
+                        if (markerData[id]) points[id] = markerData[id];
+                      }
+                      downloadAllMarkerPDFs(points, project.name, shareUrl!);
+                    }}
+                  >
+                    <Download className="h-3 w-3" />
+                    Download All Marker PDFs
+                  </Button>
+
+                  {/* Raw PNG downloads */}
+                  <p className="text-[11px] text-muted-foreground pt-1">
+                    Or download raw marker images (PNG):
                   </p>
                   <div className="grid gap-2 sm:grid-cols-3">
                     {(["A", "B", "C"] as const).map((id) => (
                       <Button
                         key={id}
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="justify-start gap-2"
+                        className="justify-start gap-2 text-xs"
                         onClick={() => downloadMarker(id)}
                       >
                         <div
-                          className="h-3 w-3 rounded-full shrink-0"
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: MARKER_COLORS[id].fill }}
                         />
                         <Download className="h-3 w-3" />
-                        Marker {id}
+                        PNG {id}
                       </Button>
                     ))}
                   </div>
