@@ -1,14 +1,26 @@
+import { useState, useCallback, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, AlertTriangle, Box, Smartphone } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2, AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
+import ARLanding from "@/components/ar/ARLanding";
+import ARPermission from "@/components/ar/ARPermission";
+import ARDetection from "@/components/ar/ARDetection";
+import ARActiveView from "@/components/ar/ARActiveView";
 
 type Project = Tables<"projects">;
+type ViewerState = "landing" | "permission-denied" | "detecting" | "active";
+type MarkerStatus = "searching" | "detected" | "locked";
 
 const ARViewer = () => {
   const { shareId } = useParams<{ shareId: string }>();
+  const [viewState, setViewState] = useState<ViewerState>("landing");
+  const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({
+    A: "searching",
+    B: "searching",
+    C: "searching",
+  });
 
   const { data: project, isLoading, error } = useQuery({
     queryKey: ["public-project", shareId],
@@ -25,17 +37,63 @@ const ARViewer = () => {
     enabled: !!shareId,
   });
 
+  // Request camera access
+  const requestCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      // Got access — stop preview stream and move to detection
+      stream.getTracks().forEach((t) => t.stop());
+      setViewState("detecting");
+    } catch {
+      setViewState("permission-denied");
+    }
+  }, []);
+
+  // Simulate marker detection for demo purposes
+  // In production, MindAR.js would drive these state changes
+  useEffect(() => {
+    if (viewState !== "detecting") return;
+
+    const isMultipoint = project?.mode !== "tabletop";
+    const markerIds = isMultipoint ? ["A", "B", "C"] : ["QR"];
+    let idx = 0;
+
+    const interval = setInterval(() => {
+      if (idx < markerIds.length) {
+        setMarkers((prev) => ({ ...prev, [markerIds[idx]]: "detected" }));
+        idx++;
+      } else {
+        clearInterval(interval);
+        // All detected — transition to active after a brief pause
+        setTimeout(() => setViewState("active"), 800);
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [viewState, project?.mode]);
+
+  const handleLaunchAR = () => {
+    requestCamera();
+  };
+
+  const handleReset = () => {
+    setMarkers({ A: "searching", B: "searching", C: "searching" });
+    setViewState("detecting");
+  };
+
+  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Loading AR experience...</p>
+          <p className="text-muted-foreground text-sm">Loading AR experience…</p>
         </div>
       </div>
     );
   }
 
+  // Error state
   if (error || !project) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6">
@@ -43,69 +101,44 @@ const ARViewer = () => {
           <AlertTriangle className="h-12 w-12 text-muted-foreground/40 mx-auto" />
           <h1 className="font-display text-xl font-bold">Experience Not Found</h1>
           <p className="text-sm text-muted-foreground">
-            This AR experience may have been removed or the link is invalid. Please ask the designer for a new link.
+            This AR experience may have been removed or the link is invalid.
           </p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center gap-3">
-          <Box className="h-6 w-6 text-primary shrink-0" />
-          <div className="min-w-0">
-            <h1 className="font-display font-bold text-lg truncate">{project.name}</h1>
-            {project.client_name && (
-              <p className="text-xs text-muted-foreground truncate">For {project.client_name}</p>
-            )}
-          </div>
-        </div>
-      </header>
+  switch (viewState) {
+    case "landing":
+      return <ARLanding project={project} onLaunchAR={handleLaunchAR} />;
 
-      {/* Content */}
-      <main className="max-w-lg mx-auto p-6 space-y-6">
-        {project.description && (
-          <p className="text-sm text-muted-foreground">{project.description}</p>
-        )}
+    case "permission-denied":
+      return (
+        <ARPermission
+          onCancel={() => setViewState("landing")}
+          onRetry={requestCamera}
+        />
+      );
 
-        {/* AR Launch Instructions */}
-        <div className="rounded-xl border-2 border-dashed border-primary/30 p-8 text-center space-y-4">
-          <div className="bg-primary/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto">
-            <Smartphone className="h-8 w-8 text-primary" />
-          </div>
-          <div>
-            <h2 className="font-display text-lg font-semibold mb-1">View in AR</h2>
-            <p className="text-sm text-muted-foreground">
-              {project.mode === "tabletop"
-                ? "Point your camera at the QR marker on the table to see the design appear."
-                : "Point your camera at any of the 3 colored markers placed in the room to view the design at full scale."}
-            </p>
-          </div>
-          <Button size="lg" className="w-full" disabled>
-            <Smartphone className="mr-2 h-4 w-4" />
-            Launch AR Camera
-            <span className="ml-2 text-xs opacity-60">(Coming soon)</span>
-          </Button>
-        </div>
+    case "detecting":
+      return (
+        <ARDetection
+          mode={project.mode}
+          markers={markers}
+          onAllDetected={() => setViewState("active")}
+          onCancel={() => setViewState("landing")}
+        />
+      );
 
-        {/* Project Info */}
-        <div className="rounded-lg bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
-          <p><strong>Mode:</strong> {project.mode === "tabletop" ? "Tabletop" : "Multi-Point"}</p>
-          {project.mode === "tabletop" && project.scale && (
-            <p><strong>Scale:</strong> {project.scale}</p>
-          )}
-          <p><strong>Model:</strong> {project.model_url ? "✅ Loaded" : "⚠️ Not uploaded"}</p>
-        </div>
-
-        <p className="text-center text-[10px] text-muted-foreground">
-          Powered by Archi AR
-        </p>
-      </main>
-    </div>
-  );
+    case "active":
+      return (
+        <ARActiveView
+          project={project}
+          onReset={handleReset}
+          onExit={() => setViewState("landing")}
+        />
+      );
+  }
 };
 
 export default ARViewer;
