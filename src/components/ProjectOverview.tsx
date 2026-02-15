@@ -137,23 +137,52 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
               <MapPin className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-semibold">Markers</span>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-3">
               {(["A", "B", "C"] as const).map((id) => {
                 const point = markerData[id];
                 if (!point) return null;
                 return (
-                  <div key={id} className="rounded-md border px-3 py-2">
-                    <div className="flex items-center gap-1.5 mb-0.5">
+                  <div key={id} className="rounded-lg border p-4 space-y-3">
+                    {/* Header */}
+                    <div className="flex items-center gap-2">
                       <span
-                        className="h-2 w-2 rounded-full shrink-0"
+                        className="h-3 w-3 rounded-full shrink-0"
                         style={{ backgroundColor: MARKER_COLORS[id] }}
                       />
-                      <span className="text-xs font-semibold">{id}</span>
-                      <span className="text-[11px] text-muted-foreground ml-auto">{point.label}</span>
+                      <span className="text-sm font-bold">Point {id}</span>
                     </div>
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      {point.x}, {point.y}, {point.z}
-                    </p>
+
+                    {/* Label */}
+                    <div className="rounded-md border bg-muted/40 px-3 py-1.5">
+                      <span className="text-sm text-muted-foreground">{point.label}</span>
+                    </div>
+
+                    {/* X */}
+                    <div>
+                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">X (mm)</span>
+                      <div className="rounded-md border bg-muted/40 px-3 py-1.5 mt-1 flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{point.x >= 0 ? "+" : "−"}</span>
+                        <span className="text-base font-semibold font-mono">{Math.abs(point.x)}</span>
+                      </div>
+                    </div>
+
+                    {/* Y */}
+                    <div>
+                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Y (mm)</span>
+                      <div className="rounded-md border bg-muted/40 px-3 py-1.5 mt-1 flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{point.y >= 0 ? "+" : "−"}</span>
+                        <span className="text-base font-semibold font-mono">{Math.abs(point.y)}</span>
+                      </div>
+                    </div>
+
+                    {/* Z */}
+                    <div>
+                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Z (mm)</span>
+                      <div className="rounded-md border bg-muted/40 px-3 py-1.5 mt-1 flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{point.z >= 0 ? "+" : "−"}</span>
+                        <span className="text-base font-semibold font-mono">{Math.abs(point.z)}</span>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
