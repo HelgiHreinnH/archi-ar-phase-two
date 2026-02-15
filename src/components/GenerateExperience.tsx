@@ -2,12 +2,18 @@ import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Rocket, CheckCircle2, AlertCircle, Loader2, Download, Link2, Copy, FileDown } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import {
+  Rocket, CheckCircle2, AlertCircle, Loader2,
+  Download, Link2, Copy, FileDown, Image, Cpu, QrCode, Upload, Zap,
+} from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 import QRCode from "qrcode";
+import { generateAllMarkerImages, canvasToImage, type MarkerPoint } from "@/lib/generateMarkers";
+import { compileMindFile } from "@/lib/compileMindFile";
 
 type Project = Tables<"projects">;
 
@@ -20,99 +26,55 @@ interface GenerateExperienceProps {
   onGenerated: () => void;
 }
 
-const MARKER_COLORS: Record<string, { fill: string; label: string }> = {
-  A: { fill: "#E53935", label: "Point A" },
-  B: { fill: "#43A047", label: "Point B" },
-  C: { fill: "#1E88E5", label: "Point C" },
-};
-
-async function generateMarkerImage(
-  pointId: string,
-  coords: { x: number; y: number; z: number; label: string },
-  projectName: string,
-  shareUrl: string
-): Promise<string> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 800;
-  canvas.height = 1000;
-  const ctx = canvas.getContext("2d")!;
-  const cfg = MARKER_COLORS[pointId];
-
-  // White background
-  ctx.fillStyle = "#FFFFFF";
-  ctx.fillRect(0, 0, 800, 1000);
-
-  // Border
-  ctx.strokeStyle = "#E0E0E0";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(20, 20, 760, 960);
-
-  // Colored circle
-  ctx.beginPath();
-  ctx.arc(400, 220, 120, 0, Math.PI * 2);
-  ctx.fillStyle = cfg.fill;
-  ctx.fill();
-
-  // Letter inside circle
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = "bold 100px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(pointId, 400, 220);
-
-  // Label
-  ctx.fillStyle = "#212121";
-  ctx.font = "bold 28px sans-serif";
-  ctx.fillText(cfg.label, 400, 390);
-  ctx.font = "20px sans-serif";
-  ctx.fillStyle = "#757575";
-  ctx.fillText(coords.label || cfg.label, 400, 425);
-
-  // Coordinates
-  ctx.font = "bold 20px monospace";
-  ctx.fillStyle = "#424242";
-  ctx.fillText(`X: ${coords.x}   Y: ${coords.y}   Z: ${coords.z}  (mm)`, 400, 480);
-
-  // QR Code
-  try {
-    const qrCanvas = document.createElement("canvas");
-    await QRCode.toCanvas(qrCanvas, shareUrl, {
-      width: 260,
-      margin: 0,
-      color: { dark: "#212121", light: "#FFFFFF" },
-    });
-    ctx.drawImage(qrCanvas, 270, 520, 260, 260);
-  } catch {
-    ctx.font = "14px sans-serif";
-    ctx.fillStyle = "#9E9E9E";
-    ctx.fillText("QR generation failed", 400, 650);
-  }
-
-  // "Scan to view in AR" label
-  ctx.font = "bold 18px sans-serif";
-  ctx.fillStyle = "#424242";
-  ctx.fillText("Scan to view in AR", 400, 810);
-  ctx.font = "13px sans-serif";
-  ctx.fillStyle = "#9E9E9E";
-  ctx.fillText(shareUrl, 400, 838);
-
-  // Project name footer
-  ctx.font = "16px sans-serif";
-  ctx.fillStyle = "#BDBDBD";
-  ctx.fillText(projectName, 400, 900);
-  ctx.fillText("Print at 100% scale · Place marker at indicated coordinates", 400, 925);
-
-  return canvas.toDataURL("image/png");
-}
-
 interface CheckItem {
   label: string;
   passed: boolean;
   hint?: string;
 }
 
-const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerData, onGenerated }: GenerateExperienceProps) => {
+type GenerationStep =
+  | "idle"
+  | "markers"
+  | "compiling"
+  | "qr"
+  | "uploading"
+  | "activating"
+  | "done"
+  | "error";
+
+const STEP_LABELS: Record<GenerationStep, string> = {
+  idle: "",
+  markers: "Generating marker images…",
+  compiling: "Compiling MindAR targets…",
+  qr: "Creating QR code…",
+  uploading: "Uploading assets…",
+  activating: "Activating experience…",
+  done: "Complete!",
+  error: "Generation failed",
+};
+
+const STEP_PROGRESS: Record<GenerationStep, number> = {
+  idle: 0,
+  markers: 15,
+  compiling: 45,
+  qr: 60,
+  uploading: 80,
+  activating: 95,
+  done: 100,
+  error: 0,
+};
+
+const GenerateExperience = ({
+  project,
+  hasModel,
+  hasValidMarkers,
+  mode,
+  markerData,
+  onGenerated,
+}: GenerateExperienceProps) => {
   const [generating, setGenerating] = useState(false);
+  const [step, setStep] = useState<GenerationStep>("idle");
+  const [compileProgress, setCompileProgress] = useState(0);
 
   const checks: CheckItem[] =
     mode === "tabletop"
@@ -129,31 +91,152 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
   const allPassed = checks.every((c) => c.passed);
   const isActive = project.status === "active";
 
-  const handleGenerate = async () => {
+  const overallProgress =
+    step === "compiling"
+      ? STEP_PROGRESS.markers + (compileProgress / 100) * (STEP_PROGRESS.compiling - STEP_PROGRESS.markers)
+      : STEP_PROGRESS[step];
+
+  const handleGenerate = useCallback(async () => {
     if (!allPassed) return;
 
     setGenerating(true);
+    setStep("idle");
+
     try {
-      // Generate a share link and set status to active
-      const shareId = crypto.randomUUID();
+      const shareId = project.share_link || crypto.randomUUID();
+      const shareUrl = `${window.location.origin}/view/${shareId}`;
+      const projectPath = `${project.id}`;
+
+      // ── Step 1: Generate marker images ──
+      setStep("markers");
+      let markerImageUrls: Record<string, string> = {};
+      let mindFileUrl: string | null = null;
+
+      if (mode === "multipoint" && markerData) {
+        const points: Record<string, MarkerPoint> = {};
+        for (const [id, data] of Object.entries(markerData)) {
+          points[id] = {
+            x: data.x,
+            y: data.y,
+            z: data.z,
+            label: data.label || `Point ${id}`,
+          };
+        }
+
+        const generatedMarkers = await generateAllMarkerImages(points, project.name);
+
+        // ── Step 2: Compile .mind file ──
+        setStep("compiling");
+        setCompileProgress(0);
+
+        const markerImages = await Promise.all(
+          generatedMarkers.map((m) => canvasToImage(m.canvas))
+        );
+        const { blob: mindBlob } = await compileMindFile(markerImages, (p) =>
+          setCompileProgress(p)
+        );
+
+        // ── Step 3: Generate QR code ──
+        setStep("qr");
+
+        // ── Step 4: Upload everything ──
+        setStep("uploading");
+
+        // Upload marker images
+        for (const marker of generatedMarkers) {
+          const filePath = `${projectPath}/markers/marker_${marker.id}.png`;
+          const { error: uploadErr } = await supabase.storage
+            .from("project-assets")
+            .upload(filePath, marker.blob, {
+              contentType: "image/png",
+              upsert: true,
+            });
+          if (uploadErr) throw uploadErr;
+
+          const { data: urlData } = supabase.storage
+            .from("project-assets")
+            .getPublicUrl(filePath);
+          markerImageUrls[marker.id] = urlData.publicUrl;
+        }
+
+        // Upload .mind file
+        const mindPath = `${projectPath}/targets.mind`;
+        const { error: mindUploadErr } = await supabase.storage
+          .from("project-assets")
+          .upload(mindPath, mindBlob, {
+            contentType: "application/octet-stream",
+            upsert: true,
+          });
+        if (mindUploadErr) throw mindUploadErr;
+
+        const { data: mindUrlData } = supabase.storage
+          .from("project-assets")
+          .getPublicUrl(mindPath);
+        mindFileUrl = mindUrlData.publicUrl;
+      }
+
+      // Generate and upload QR code
+      const qrCanvas = document.createElement("canvas");
+      await QRCode.toCanvas(qrCanvas, shareUrl, {
+        width: 600,
+        margin: 2,
+        color: { dark: "#212121", light: "#FFFFFF" },
+      });
+      const qrBlob = await new Promise<Blob>((resolve) => {
+        qrCanvas.toBlob((b) => resolve(b!), "image/png");
+      });
+      const qrPath = `${projectPath}/qr_code.png`;
+      const { error: qrUploadErr } = await supabase.storage
+        .from("project-assets")
+        .upload(qrPath, qrBlob, {
+          contentType: "image/png",
+          upsert: true,
+        });
+      if (qrUploadErr) throw qrUploadErr;
+
+      const { data: qrUrlData } = supabase.storage
+        .from("project-assets")
+        .getPublicUrl(qrPath);
+
+      // ── Step 5: Activate experience ──
+      setStep("activating");
+
+      const updatePayload: Record<string, any> = {
+        share_link: shareId,
+        status: "active",
+        qr_code_url: qrUrlData.publicUrl,
+      };
+
+      if (mode === "multipoint") {
+        updatePayload.mind_file_url = mindFileUrl;
+        updatePayload.marker_image_urls = markerImageUrls;
+      }
+
       const { error } = await supabase
         .from("projects")
-        .update({ share_link: shareId, status: "active" })
+        .update(updatePayload)
         .eq("id", project.id);
 
       if (error) throw error;
 
+      setStep("done");
       toast({
         title: "AR Experience Generated! 🚀",
-        description: "Your experience is live and ready to share with clients.",
+        description: "Marker images compiled, assets uploaded, and experience is live.",
       });
       onGenerated();
     } catch (err: any) {
-      toast({ title: "Generation failed", description: err.message, variant: "destructive" });
+      setStep("error");
+      console.error("Generation error:", err);
+      toast({
+        title: "Generation failed",
+        description: err.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
     } finally {
       setGenerating(false);
     }
-  };
+  }, [allPassed, project, mode, markerData, onGenerated]);
 
   const shareUrl = project.share_link
     ? `${window.location.origin}/view/${project.share_link}`
@@ -193,6 +276,53 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
             </div>
           ))}
         </div>
+
+        {/* Generation Progress */}
+        {generating && step !== "idle" && (
+          <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {step === "done" ? (
+                <CheckCircle2 className="h-4 w-4 text-marker-green" />
+              ) : step === "error" ? (
+                <AlertCircle className="h-4 w-4 text-destructive" />
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              )}
+              <span>{STEP_LABELS[step]}</span>
+            </div>
+            <Progress value={overallProgress} className="h-2" />
+            <div className="grid grid-cols-5 gap-1 text-[10px] text-muted-foreground">
+              {[
+                { key: "markers", icon: Image, label: "Markers" },
+                { key: "compiling", icon: Cpu, label: "Compile" },
+                { key: "qr", icon: QrCode, label: "QR Code" },
+                { key: "uploading", icon: Upload, label: "Upload" },
+                { key: "activating", icon: Zap, label: "Activate" },
+              ].map(({ key, icon: Icon, label }) => {
+                const stepKeys: GenerationStep[] = ["markers", "compiling", "qr", "uploading", "activating", "done"];
+                const currentIdx = stepKeys.indexOf(step);
+                const thisIdx = stepKeys.indexOf(key as GenerationStep);
+                const isDone = currentIdx > thisIdx || step === "done";
+                const isActive = key === step;
+                return (
+                  <div
+                    key={key}
+                    className={`flex flex-col items-center gap-0.5 ${
+                      isDone
+                        ? "text-marker-green"
+                        : isActive
+                        ? "text-primary font-medium"
+                        : ""
+                    }`}
+                  >
+                    <Icon className="h-3 w-3" />
+                    <span>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Generate Button */}
         {!isActive ? (
@@ -297,41 +427,68 @@ const GenerateExperience = ({ project, hasModel, hasValidMarkers, mode, markerDa
               Download QR Code
             </Button>
 
-            {/* Marker Reference Sheets — multipoint only */}
+            {/* Marker sheets — multipoint only */}
             {mode === "multipoint" && markerData && (
               <>
                 <p className="text-xs text-muted-foreground">
                   Download and print marker reference sheets. Place each at the indicated coordinates on site.
                 </p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {(["A", "B", "C"] as const).map((pointId) => {
-                const point = markerData[pointId];
-                if (!point) return null;
-                return (
-                  <Button
-                    key={pointId}
-                    variant="outline"
-                    size="sm"
-                    className="justify-start gap-2"
-                    onClick={async () => {
-                      const dataUrl = await generateMarkerImage(pointId, point, project.name, shareUrl!);
-                      const a = document.createElement("a");
-                      a.href = dataUrl;
-                      a.download = `marker_${pointId}_${project.name.replace(/\s+/g, "_")}.png`;
-                      a.click();
-                    }}
-                  >
-                    <div
-                      className="h-3 w-3 rounded-full shrink-0"
-                      style={{ backgroundColor: MARKER_COLORS[pointId].fill }}
-                    />
-                    <Download className="h-3 w-3" />
-                    Marker {pointId}
-                  </Button>
-                );
-              })}
-            </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(["A", "B", "C"] as const).map((pointId) => {
+                    const point = markerData[pointId];
+                    if (!point) return null;
+                    // Use stored marker image URL if available
+                    const storedUrl = (project as any).marker_image_urls?.[pointId];
+                    return (
+                      <Button
+                        key={pointId}
+                        variant="outline"
+                        size="sm"
+                        className="justify-start gap-2"
+                        onClick={() => {
+                          if (storedUrl) {
+                            const a = document.createElement("a");
+                            a.href = storedUrl;
+                            a.download = `marker_${pointId}_${project.name.replace(/\s+/g, "_")}.png`;
+                            a.target = "_blank";
+                            a.click();
+                          }
+                        }}
+                      >
+                        <div
+                          className="h-3 w-3 rounded-full shrink-0"
+                          style={{
+                            backgroundColor:
+                              pointId === "A" ? "hsl(0 100% 60%)" : pointId === "B" ? "hsl(145 63% 49%)" : "hsl(211 100% 50%)",
+                          }}
+                        />
+                        <Download className="h-3 w-3" />
+                        Marker {pointId}
+                      </Button>
+                    );
+                  })}
+                </div>
               </>
+            )}
+
+            {/* .mind file download */}
+            {(project as any).mind_file_url && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <a
+                  href={(project as any).mind_file_url}
+                  download={`targets_${project.name.replace(/\s+/g, "_")}.mind`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Download className="h-3 w-3" />
+                  Download MindAR Targets (.mind)
+                </a>
+              </Button>
             )}
           </div>
         )}

@@ -27,12 +27,12 @@ const ARViewer = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("projects")
-        .select("name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation")
+        .select("name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url")
         .eq("share_link", shareId!)
         .eq("status", "active")
         .single();
       if (error) throw error;
-      return data as Pick<Project, "name" | "description" | "client_name" | "model_url" | "mode" | "scale" | "marker_data" | "status" | "initial_rotation">;
+      return data;
     },
     enabled: !!shareId,
   });
@@ -162,6 +162,7 @@ const ARViewer = () => {
           onAllDetected={handleAllDetected}
           onCancel={() => setViewState("landing")}
           onError={handleARError}
+          imageTargetSrc={project.mind_file_url || undefined}
           modelUrl={signedModelUrl}
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
