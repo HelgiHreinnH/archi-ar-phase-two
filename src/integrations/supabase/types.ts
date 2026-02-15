@@ -53,9 +53,12 @@ export type Database = {
           initial_rotation: number | null
           location: string | null
           marker_data: Json | null
+          marker_image_urls: Json | null
+          mind_file_url: string | null
           mode: string
           model_url: string | null
           name: string
+          qr_code_url: string | null
           qr_size: string | null
           scale: string | null
           share_link: string | null
@@ -71,9 +74,12 @@ export type Database = {
           initial_rotation?: number | null
           location?: string | null
           marker_data?: Json | null
+          marker_image_urls?: Json | null
+          mind_file_url?: string | null
           mode?: string
           model_url?: string | null
           name: string
+          qr_code_url?: string | null
           qr_size?: string | null
           scale?: string | null
           share_link?: string | null
@@ -89,9 +95,12 @@ export type Database = {
           initial_rotation?: number | null
           location?: string | null
           marker_data?: Json | null
+          marker_image_urls?: Json | null
+          mind_file_url?: string | null
           mode?: string
           model_url?: string | null
           name?: string
+          qr_code_url?: string | null
           qr_size?: string | null
           scale?: string | null
           share_link?: string | null
