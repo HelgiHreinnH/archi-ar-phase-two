@@ -1,6 +1,4 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 interface MindARSceneProps {
   /** URL of the .mind compiled image target file */
@@ -23,6 +21,44 @@ interface MindARSceneProps {
   initialRotation?: number;
 }
 
+/**
+ * Loads the MindAR + Three.js bundle from CDN (avoids npm version conflict
+ * with the project's three@0.170 which removed sRGBEncoding).
+ * The CDN build bundles its own compatible Three.js internally.
+ */
+function loadMindARScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).__MINDAR_LOADED) {
+      resolve();
+      return;
+    }
+
+    // Load Three.js r160 (compatible with MindAR)
+    const threeScript = document.createElement("script");
+    threeScript.src = "https://unpkg.com/three@0.160.0/build/three.min.js";
+    threeScript.onload = () => {
+      // Load GLTFLoader
+      const gltfScript = document.createElement("script");
+      gltfScript.src = "https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js";
+      gltfScript.onload = () => {
+        // Load MindAR Three.js production build
+        const mindScript = document.createElement("script");
+        mindScript.src = "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+        mindScript.onload = () => {
+          (window as any).__MINDAR_LOADED = true;
+          resolve();
+        };
+        mindScript.onerror = () => reject(new Error("Failed to load MindAR script"));
+        document.head.appendChild(mindScript);
+      };
+      gltfScript.onerror = () => reject(new Error("Failed to load GLTFLoader"));
+      document.head.appendChild(gltfScript);
+    };
+    threeScript.onerror = () => reject(new Error("Failed to load Three.js"));
+    document.head.appendChild(threeScript);
+  });
+}
+
 const MindARScene = ({
   imageTargetSrc,
   modelUrl,
@@ -42,13 +78,16 @@ const MindARScene = ({
     if (!containerRef.current) return;
 
     try {
-      // Dynamic import to avoid SSR issues and reduce bundle size
-      const { MindARThree } = await import(
-        /* @vite-ignore */
-        "mind-ar/dist/mindar-image-three.prod.js"
-      );
+      await loadMindARScript();
 
-      const mindarThree = new MindARThree({
+      const MINDAR = (window as any).MINDAR;
+      const THREE = (window as any).THREE;
+
+      if (!MINDAR?.IMAGE?.MindARThree) {
+        throw new Error("MindAR not available after loading");
+      }
+
+      const mindarThree = new MINDAR.IMAGE.MindARThree({
         container: containerRef.current,
         imageTargetSrc,
         maxTrack,
@@ -82,19 +121,19 @@ const MindARScene = ({
         };
 
         // Load GLB model onto the first anchor
-        if (i === 0 && modelUrl) {
-          const loader = new GLTFLoader();
+        if (i === 0 && modelUrl && THREE.GLTFLoader) {
+          const loader = new THREE.GLTFLoader();
           try {
             const gltf = await new Promise<any>((resolve, reject) => {
               loader.load(modelUrl, resolve, undefined, reject);
             });
             const model = gltf.scene;
-            
+
             // Calculate bounding box and normalize size
             const box = new THREE.Box3().setFromObject(model);
             const size = box.getSize(new THREE.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
-            const scale = (modelScale / maxDim) * 0.5; // Normalize to ~0.5 units then apply scale
+            const scale = (modelScale / maxDim) * 0.5;
             model.scale.set(scale, scale, scale);
 
             // Center the model
@@ -133,7 +172,6 @@ const MindARScene = ({
     startAR();
 
     return () => {
-      // Cleanup MindAR on unmount
       if (mindarRef.current) {
         try {
           mindarRef.current.stop();
