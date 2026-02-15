@@ -199,6 +199,39 @@ const GenerateExperience = ({
         .from("project-assets")
         .getPublicUrl(qrPath);
 
+      // ── Tabletop: compile QR image into .mind target ──
+      if (mode === "tabletop" && !mindFileUrl) {
+        setStep("compiling");
+        setCompileProgress(0);
+
+        // Convert QR canvas to an HTMLImageElement for the compiler
+        const qrDataUrl = qrCanvas.toDataURL("image/png");
+        const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new window.Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = qrDataUrl;
+        });
+
+        const { blob: mindBlob } = await compileMindFile([qrImg], (p) =>
+          setCompileProgress(p)
+        );
+
+        const mindPath = `${projectPath}/targets.mind`;
+        const { error: mindUploadErr } = await supabase.storage
+          .from("project-assets")
+          .upload(mindPath, mindBlob, {
+            contentType: "application/octet-stream",
+            upsert: true,
+          });
+        if (mindUploadErr) throw mindUploadErr;
+
+        const { data: mindUrlData } = supabase.storage
+          .from("project-assets")
+          .getPublicUrl(mindPath);
+        mindFileUrl = mindUrlData.publicUrl;
+      }
+
       // ── Step 5: Activate experience ──
       setStep("activating");
 
@@ -206,10 +239,10 @@ const GenerateExperience = ({
         share_link: shareId,
         status: "active",
         qr_code_url: qrUrlData.publicUrl,
+        mind_file_url: mindFileUrl,
       };
 
       if (mode === "multipoint") {
-        updatePayload.mind_file_url = mindFileUrl;
         updatePayload.marker_image_urls = markerImageUrls;
       }
 
