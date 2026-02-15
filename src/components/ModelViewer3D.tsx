@@ -73,9 +73,8 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   return (
     <div className={`rounded-lg overflow-hidden bg-muted/50 border ${className}`}>
       <model-viewer
-        src={isGlb ? signedUrl : undefined}
+        src={signedUrl}
         ios-src={isUsdz ? signedUrl : undefined}
-        {...(isUsdz && !isGlb ? { src: signedUrl } : {})}
         alt="3D model preview"
         auto-rotate=""
         camera-controls=""
