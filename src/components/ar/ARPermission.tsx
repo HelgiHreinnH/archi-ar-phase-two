@@ -4,9 +4,10 @@ import { Camera } from "lucide-react";
 interface ARPermissionProps {
   onCancel: () => void;
   onRetry: () => void;
+  errorMessage?: string | null;
 }
 
-const ARPermission = ({ onCancel, onRetry }: ARPermissionProps) => {
+const ARPermission = ({ onCancel, onRetry, errorMessage }: ARPermissionProps) => {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <div className="max-w-sm w-full text-center space-y-6">
@@ -16,7 +17,7 @@ const ARPermission = ({ onCancel, onRetry }: ARPermissionProps) => {
         <div className="space-y-2">
           <h1 className="font-display text-2xl font-bold">Camera Access Required</h1>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Please enable camera permissions in your device settings to view this AR experience.
+            {errorMessage || "Please enable camera permissions in your device settings to view this AR experience."}
           </p>
         </div>
         <div className="flex gap-3">
