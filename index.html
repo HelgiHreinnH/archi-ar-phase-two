@@ -21,10 +21,9 @@
   <meta name="twitter:title" content="Lovable App">
   <meta property="og:description" content="Lovable Generated Project">
   <meta name="twitter:description" content="Lovable Generated Project">
-</head>
 
-  <body>
-    <div id="root"></div>
+    <!-- es-module-shims polyfill for import maps on older Safari/iOS/Firefox -->
+    <script async src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
     <!-- Import map MUST appear before any module scripts so MindAR can resolve "three" -->
     <script type="importmap">
       {
@@ -34,6 +33,10 @@
         }
       }
     </script>
+</head>
+
+  <body>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
