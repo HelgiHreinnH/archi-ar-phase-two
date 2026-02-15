@@ -73,7 +73,7 @@ function loadMindARScript(): Promise<void> {
  * Poll for `window.MINDAR.IMAGE.MindARThree` — module execution is async
  * and may complete in a subsequent microtask after `onload` fires.
  */
-function waitForMindAR(timeout = 15_000): Promise<void> {
+function waitForMindAR(timeout = 30_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
