@@ -41,27 +41,9 @@ const GLTF_LOADER_URL =
 const MINDAR_THREE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 
-/** Inject an import-map (once) so `import "three"` resolves to r160 ESM. */
+/** Import map is now statically defined in index.html — no runtime injection needed. */
 function ensureImportMap() {
-  if ((window as any).__MINDAR_IMPORTMAP) return;
-
-  const existing = document.querySelector('script[type="importmap"]');
-  if (existing) {
-    (window as any).__MINDAR_IMPORTMAP = true;
-    return;
-  }
-
-  const map = document.createElement("script");
-  map.type = "importmap";
-  map.textContent = JSON.stringify({
-    imports: {
-      three: THREE_ESM_URL,
-      "three/examples/jsm/loaders/GLTFLoader.js": GLTF_LOADER_URL,
-    },
-  });
-  // Import maps MUST be inserted before any module scripts
-  document.head.prepend(map);
-  (window as any).__MINDAR_IMPORTMAP = true;
+  // no-op: import map lives in index.html before any module scripts
 }
 
 /** Load the MindAR Three.js build as an ES module. */
