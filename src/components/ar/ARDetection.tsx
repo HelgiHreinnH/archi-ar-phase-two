@@ -1,14 +1,26 @@
 import { useState } from "react";
-import { ChevronDown, MapPin, Target, Check } from "lucide-react";
+import { ChevronDown, MapPin, Target, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import MindARScene from "./MindARScene";
 
 type MarkerStatus = "searching" | "detected" | "locked";
 
 interface ARDetectionProps {
   mode: string;
   markers: Record<string, MarkerStatus>;
+  onTargetFound?: (index: number) => void;
+  onTargetLost?: (index: number) => void;
   onAllDetected: () => void;
   onCancel: () => void;
+  onError?: (error: Error) => void;
+  /** Compiled .mind image-target URL */
+  imageTargetSrc?: string;
+  /** GLB model URL to render on anchor */
+  modelUrl?: string | null;
+  /** Model scale factor */
+  modelScale?: number;
+  /** Initial rotation in degrees */
+  initialRotation?: number;
 }
 
 const MARKER_CONFIG = {
@@ -17,8 +29,21 @@ const MARKER_CONFIG = {
   C: { color: "hsl(211 100% 50%)", label: "Blue" },
 } as const;
 
-const ARDetection = ({ mode, markers, onCancel }: ARDetectionProps) => {
+const ARDetection = ({
+  mode,
+  markers,
+  onTargetFound,
+  onTargetLost,
+  onAllDetected,
+  onCancel,
+  onError,
+  imageTargetSrc,
+  modelUrl,
+  modelScale = 1,
+  initialRotation = 0,
+}: ARDetectionProps) => {
   const [guideExpanded, setGuideExpanded] = useState(true);
+  const [arReady, setArReady] = useState(false);
   const isMultipoint = mode !== "tabletop";
 
   const detectedCount = Object.values(markers).filter((s) => s !== "searching").length;
@@ -27,27 +52,50 @@ const ARDetection = ({ mode, markers, onCancel }: ARDetectionProps) => {
 
   // Determine guide state
   let guideIcon = <MapPin className="h-4 w-4" />;
-  let guideTitle = "Point camera at markers";
+  let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
   let guideDescription = isMultipoint
     ? "Slowly scan the space to locate the three position markers. Hold steady when a marker is in view."
     : "Point your camera at the QR marker on the table. Hold steady when the marker is in view.";
 
-  if (detectedCount > 0 && !allDetected) {
+  if (!arReady) {
+    guideIcon = <Loader2 className="h-4 w-4 animate-spin" />;
+    guideDescription = "Initializing AR engine and camera feed…";
+  } else if (detectedCount > 0 && !allDetected) {
     guideIcon = <Target className="h-4 w-4" />;
     guideTitle = "Almost there!";
     guideDescription = `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
-  }
-
-  if (allDetected) {
+  } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
     guideTitle = "Loading model…";
     guideDescription = "All markers locked. Preparing your AR experience.";
   }
 
+  // Use default example target if none provided
+  const targetSrc =
+    imageTargetSrc ||
+    "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind";
+
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
-      {/* Simulated camera feed background */}
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 to-zinc-800" />
+      {/* Real camera feed via MindAR */}
+      <MindARScene
+        imageTargetSrc={targetSrc}
+        modelUrl={modelUrl}
+        maxTrack={isMultipoint ? 3 : 1}
+        modelScale={modelScale}
+        initialRotation={initialRotation}
+        onTargetFound={(index) => {
+          onTargetFound?.(index);
+        }}
+        onTargetLost={(index) => {
+          onTargetLost?.(index);
+        }}
+        onReady={() => setArReady(true)}
+        onError={(err) => {
+          console.error("AR Error:", err);
+          onError?.(err);
+        }}
+      />
 
       {/* Top Guide Card */}
       <div className="relative z-10 p-4 pt-[env(safe-area-inset-top,16px)]">

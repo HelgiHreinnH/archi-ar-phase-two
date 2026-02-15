@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,12 +27,12 @@ const ARViewer = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("projects")
-        .select("name, description, client_name, model_url, mode, scale, marker_data, status")
+        .select("name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation")
         .eq("share_link", shareId!)
         .eq("status", "active")
         .single();
       if (error) throw error;
-      return data as Pick<Project, "name" | "description" | "client_name" | "model_url" | "mode" | "scale" | "marker_data" | "status">;
+      return data as Pick<Project, "name" | "description" | "client_name" | "model_url" | "mode" | "scale" | "marker_data" | "status" | "initial_rotation">;
     },
     enabled: !!shareId,
   });
@@ -41,7 +41,6 @@ const ARViewer = () => {
   const requestCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      // Got access — stop preview stream and move to detection
       stream.getTracks().forEach((t) => t.stop());
       setViewState("detecting");
     } catch {
@@ -49,28 +48,37 @@ const ARViewer = () => {
     }
   }, []);
 
-  // Simulate marker detection for demo purposes
-  // In production, MindAR.js would drive these state changes
-  useEffect(() => {
-    if (viewState !== "detecting") return;
-
+  // MindAR target found callback — update marker status
+  const handleTargetFound = useCallback((index: number) => {
     const isMultipoint = project?.mode !== "tabletop";
-    const markerIds = isMultipoint ? ["A", "B", "C"] : ["QR"];
-    let idx = 0;
-
-    const interval = setInterval(() => {
-      if (idx < markerIds.length) {
-        setMarkers((prev) => ({ ...prev, [markerIds[idx]]: "detected" }));
-        idx++;
-      } else {
-        clearInterval(interval);
-        // All detected — transition to active after a brief pause
-        setTimeout(() => setViewState("active"), 800);
+    if (isMultipoint) {
+      const markerIds = ["A", "B", "C"];
+      const markerId = markerIds[index];
+      if (markerId) {
+        setMarkers((prev) => ({ ...prev, [markerId]: "detected" }));
       }
-    }, 1500);
+    } else {
+      setMarkers((prev) => ({ ...prev, QR: "detected" }));
+    }
+  }, [project?.mode]);
 
-    return () => clearInterval(interval);
-  }, [viewState, project?.mode]);
+  const handleTargetLost = useCallback((index: number) => {
+    const isMultipoint = project?.mode !== "tabletop";
+    if (isMultipoint) {
+      const markerIds = ["A", "B", "C"];
+      const markerId = markerIds[index];
+      if (markerId) {
+        setMarkers((prev) => ({ ...prev, [markerId]: "searching" }));
+      }
+    } else {
+      setMarkers((prev) => ({ ...prev, QR: "searching" }));
+    }
+  }, [project?.mode]);
+
+  // Transition to active when all markers detected
+  const handleAllDetected = useCallback(() => {
+    setViewState("active");
+  }, []);
 
   const handleLaunchAR = () => {
     requestCamera();
@@ -80,6 +88,27 @@ const ARViewer = () => {
     setMarkers({ A: "searching", B: "searching", C: "searching" });
     setViewState("detecting");
   };
+
+  const handleARError = useCallback(() => {
+    setViewState("permission-denied");
+  }, []);
+
+  // Resolve the model URL (generate signed URL for Supabase storage)
+  const { data: signedModelUrl } = useQuery({
+    queryKey: ["signed-model-url", project?.model_url],
+    queryFn: async () => {
+      if (!project?.model_url) return null;
+      // If it's already a full URL, use it directly
+      if (project.model_url.startsWith("http")) return project.model_url;
+      // Otherwise generate a signed URL from Supabase storage
+      const { data, error } = await supabase.storage
+        .from("models")
+        .createSignedUrl(project.model_url, 3600);
+      if (error) throw error;
+      return data.signedUrl;
+    },
+    enabled: !!project?.model_url && viewState === "detecting",
+  });
 
   // Loading state
   if (isLoading) {
@@ -108,6 +137,9 @@ const ARViewer = () => {
     );
   }
 
+  // Parse scale to a number
+  const scaleNum = project.scale ? parseFloat(project.scale.replace(/[^0-9.]/g, "")) || 1 : 1;
+
   switch (viewState) {
     case "landing":
       return <ARLanding project={project} onLaunchAR={handleLaunchAR} />;
@@ -125,8 +157,14 @@ const ARViewer = () => {
         <ARDetection
           mode={project.mode}
           markers={markers}
-          onAllDetected={() => setViewState("active")}
+          onTargetFound={handleTargetFound}
+          onTargetLost={handleTargetLost}
+          onAllDetected={handleAllDetected}
           onCancel={() => setViewState("landing")}
+          onError={handleARError}
+          modelUrl={signedModelUrl}
+          modelScale={scaleNum}
+          initialRotation={project.initial_rotation || 0}
         />
       );
 
