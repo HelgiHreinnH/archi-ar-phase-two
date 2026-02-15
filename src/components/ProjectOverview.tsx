@@ -59,15 +59,15 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
   const fileFormat = project.model_url?.toLowerCase().endsWith(".usdz") ? "USDZ" : "GLB";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* 3D Model Preview */}
       {project.model_url && (
-        <ModelViewer3D modelUrl={project.model_url} className="h-56 w-full" />
+        <ModelViewer3D modelUrl={project.model_url} className="h-32 w-full" />
       )}
 
-      {/* Primary Actions */}
+      {/* Primary Info */}
       <Card>
-        <CardContent className="pt-5 pb-5 space-y-4">
+        <CardContent className="pt-4 pb-4 space-y-3">
           {/* Status + share row */}
           {shareUrl ? (
             <div className="flex items-center justify-between gap-3">
@@ -76,10 +76,10 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                 <span className="text-sm font-medium truncate">Live</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={copyLink} title="Copy link">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={copyLink} title="Copy link">
                   <Copy className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" asChild title="Open preview">
+                <Button variant="ghost" size="icon" className="h-7 w-7" asChild title="Open preview">
                   <a href={shareUrl} target="_blank" rel="noopener noreferrer">
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
@@ -90,8 +90,8 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
             <Badge variant="secondary" className="text-xs">Draft</Badge>
           )}
 
-          {/* Key details — compact */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          {/* Key details */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             {project.client_name && (
               <div>
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Client</span>
@@ -122,65 +122,38 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
               </>
             )}
           </div>
-
-          {project.description && (
-            <p className="text-sm text-muted-foreground leading-relaxed">{project.description}</p>
-          )}
         </CardContent>
       </Card>
 
       {/* Marker Coordinates — multipoint only */}
       {mode === "multipoint" && markerData && (
         <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2 mb-3">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-semibold">Markers</span>
+          <CardContent className="pt-3 pb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-semibold">Markers</span>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-3">
               {(["A", "B", "C"] as const).map((id) => {
                 const point = markerData[id];
                 if (!point) return null;
                 return (
-                  <div key={id} className="rounded-lg border p-4 space-y-3">
-                    {/* Header */}
-                    <div className="flex items-center gap-2">
+                  <div key={id} className="rounded-lg border p-2.5 space-y-1">
+                    <div className="flex items-center gap-1.5">
                       <span
-                        className="h-3 w-3 rounded-full shrink-0"
+                        className="h-2 w-2 rounded-full shrink-0"
                         style={{ backgroundColor: MARKER_COLORS[id] }}
                       />
-                      <span className="text-sm font-bold">Point {id}</span>
+                      <span className="text-xs font-bold">Point {id}</span>
                     </div>
-
-                    {/* Label */}
-                    <p className="text-sm text-muted-foreground">{point.label}</p>
-
-                    {/* X */}
-                    <div>
-                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">X (mm)</span>
-                      <div className="px-1 py-1 mt-1 flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{point.x >= 0 ? "+" : "−"}</span>
-                        <span className="text-base font-semibold font-mono">{Math.abs(point.x)}</span>
+                    <p className="text-[11px] text-muted-foreground">{point.label}</p>
+                    {(["x", "y", "z"] as const).map((axis) => (
+                      <div key={axis} className="flex items-baseline gap-1">
+                        <span className="text-[10px] font-medium text-muted-foreground uppercase shrink-0 w-5">{axis}</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{point[axis] >= 0 ? "+" : "−"}</span>
+                        <span className="text-xs font-semibold font-mono">{Math.abs(point[axis])}</span>
                       </div>
-                    </div>
-
-                    {/* Y */}
-                    <div>
-                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Y (mm)</span>
-                      <div className="px-1 py-1 mt-1 flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{point.y >= 0 ? "+" : "−"}</span>
-                        <span className="text-base font-semibold font-mono">{Math.abs(point.y)}</span>
-                      </div>
-                    </div>
-
-                    {/* Z */}
-                    <div>
-                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Z (mm)</span>
-                      <div className="px-1 py-1 mt-1 flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{point.z >= 0 ? "+" : "−"}</span>
-                        <span className="text-base font-semibold font-mono">{Math.abs(point.z)}</span>
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 );
               })}
@@ -189,12 +162,12 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
         </Card>
       )}
 
-      {/* Downloads — collapsible */}
+      {/* Downloads */}
       {shareUrl && (
         <Card>
           <CardContent className="pt-0 pb-0">
             <button
-              className="flex items-center justify-between w-full py-3.5 text-sm font-semibold text-left"
+              className="flex items-center justify-between w-full py-3 text-sm font-semibold text-left"
               onClick={() => setDownloadsOpen(!downloadsOpen)}
             >
               <span className="flex items-center gap-2">
@@ -209,8 +182,8 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
             </button>
 
             {downloadsOpen && (
-              <div className="pb-4 space-y-3">
-                <Button variant="outline" size="sm" className="w-full justify-start gap-2" onClick={downloadQR}>
+              <div className="pb-3 space-y-2">
+                <Button variant="outline" size="sm" className="w-full justify-start gap-2 h-8" onClick={downloadQR}>
                   <Download className="h-3.5 w-3.5" />
                   QR Code
                 </Button>
@@ -226,7 +199,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                             key={id}
                             variant="ghost"
                             size="sm"
-                            className="justify-start gap-2 text-xs h-8"
+                            className="justify-start gap-2 text-xs h-7"
                             onClick={() => downloadMarkerPDF(id, point, project.name, shareUrl!)}
                           >
                             <span
@@ -242,7 +215,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="w-full justify-start gap-2"
+                      className="w-full justify-start gap-2 h-8"
                       onClick={() => {
                         const points: Record<string, { x: number; y: number; z: number; label: string }> = {};
                         for (const id of ["A", "B", "C"] as const) {
@@ -263,7 +236,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
       )}
 
       {/* Edit */}
-      <Button variant="outline" className="w-full" onClick={onEdit}>
+      <Button variant="outline" size="sm" className="w-full" onClick={onEdit}>
         <Pencil className="mr-2 h-4 w-4" />
         Edit Experience
       </Button>
