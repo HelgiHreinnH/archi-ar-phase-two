@@ -37,15 +37,11 @@ const ARViewer = () => {
     enabled: !!shareId,
   });
 
-  // Request camera access
-  const requestCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      stream.getTracks().forEach((t) => t.stop());
-      setViewState("detecting");
-    } catch {
-      setViewState("permission-denied");
-    }
+  // Go straight to detecting – let MindAR request the camera in a single
+  // getUserMedia call.  A double request (pre-check then MindAR) breaks on
+  // mobile Safari because the second call loses the user-gesture context.
+  const launchDetecting = useCallback(() => {
+    setViewState("detecting");
   }, []);
 
   // MindAR target found callback — update marker status
@@ -81,7 +77,7 @@ const ARViewer = () => {
   }, []);
 
   const handleLaunchAR = () => {
-    requestCamera();
+    launchDetecting();
   };
 
   const handleReset = () => {
@@ -148,7 +144,7 @@ const ARViewer = () => {
       return (
         <ARPermission
           onCancel={() => setViewState("landing")}
-          onRetry={requestCamera}
+          onRetry={launchDetecting}
         />
       );
 
