@@ -22,10 +22,49 @@ interface MindARSceneProps {
 }
 
 /**
- * Loads the MindAR + Three.js bundle from CDN (avoids npm version conflict
- * with the project's three@0.170 which removed sRGBEncoding).
- * The CDN build bundles its own compatible Three.js internally.
+ * MindAR v1.2.5 ships as ES modules:
+ *   - `mindar-image-three.prod.js`  imports `from "three"`
+ *   - `mindar-image.prod.js`        imports `from "./controller-*.js"`
+ *
+ * To make these work in the browser we inject an **import-map** so the
+ * bare-specifier `"three"` resolves to the Three.js r160 ES-module build
+ * (the last version that still exposes `sRGBEncoding`, which MindAR needs).
+ *
+ * We then load the MindAR entry point with `<script type="module">` and
+ * poll for `window.MINDAR.IMAGE.MindARThree` to become available.
  */
+
+const THREE_ESM_URL =
+  "https://unpkg.com/three@0.160.0/build/three.module.js";
+const GLTF_LOADER_URL =
+  "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+const MINDAR_THREE_URL =
+  "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+/** Inject an import-map (once) so `import "three"` resolves to r160 ESM. */
+function ensureImportMap() {
+  if ((window as any).__MINDAR_IMPORTMAP) return;
+
+  const existing = document.querySelector('script[type="importmap"]');
+  if (existing) {
+    (window as any).__MINDAR_IMPORTMAP = true;
+    return;
+  }
+
+  const map = document.createElement("script");
+  map.type = "importmap";
+  map.textContent = JSON.stringify({
+    imports: {
+      three: THREE_ESM_URL,
+      "three/examples/jsm/loaders/GLTFLoader.js": GLTF_LOADER_URL,
+    },
+  });
+  // Import maps MUST be inserted before any module scripts
+  document.head.prepend(map);
+  (window as any).__MINDAR_IMPORTMAP = true;
+}
+
+/** Load the MindAR Three.js build as an ES module. */
 function loadMindARScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if ((window as any).__MINDAR_LOADED) {
@@ -33,29 +72,40 @@ function loadMindARScript(): Promise<void> {
       return;
     }
 
-    // Load Three.js r160 (compatible with MindAR)
-    const threeScript = document.createElement("script");
-    threeScript.src = "https://unpkg.com/three@0.160.0/build/three.min.js";
-    threeScript.onload = () => {
-      // Load GLTFLoader
-      const gltfScript = document.createElement("script");
-      gltfScript.src = "https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js";
-      gltfScript.onload = () => {
-        // Load MindAR Three.js production build
-        const mindScript = document.createElement("script");
-        mindScript.src = "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
-        mindScript.onload = () => {
-          (window as any).__MINDAR_LOADED = true;
-          resolve();
-        };
-        mindScript.onerror = () => reject(new Error("Failed to load MindAR script"));
-        document.head.appendChild(mindScript);
-      };
-      gltfScript.onerror = () => reject(new Error("Failed to load GLTFLoader"));
-      document.head.appendChild(gltfScript);
+    ensureImportMap();
+
+    const script = document.createElement("script");
+    script.type = "module";
+    script.src = MINDAR_THREE_URL;
+    script.onload = () => {
+      (window as any).__MINDAR_LOADED = true;
+      resolve();
     };
-    threeScript.onerror = () => reject(new Error("Failed to load Three.js"));
-    document.head.appendChild(threeScript);
+    script.onerror = () =>
+      reject(new Error("Failed to load MindAR script"));
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Poll for `window.MINDAR.IMAGE.MindARThree` — module execution is async
+ * and may complete in a subsequent microtask after `onload` fires.
+ */
+function waitForMindAR(timeout = 15_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if ((window as any).MINDAR?.IMAGE?.MindARThree) {
+        resolve();
+        return;
+      }
+      if (Date.now() - start > timeout) {
+        reject(new Error("MindAR runtime did not become available within timeout"));
+        return;
+      }
+      setTimeout(check, 150);
+    };
+    check();
   });
 }
 
@@ -79,9 +129,17 @@ const MindARScene = ({
 
     try {
       await loadMindARScript();
+      await waitForMindAR();
 
       const MINDAR = (window as any).MINDAR;
       const THREE = (window as any).THREE;
+
+      // THREE might not be on window when loaded via import-map (it's an
+      // ES module). We need to get it from the dynamic import instead.
+      let ThreeLib = THREE;
+      if (!ThreeLib) {
+        ThreeLib = await import(/* @vite-ignore */ THREE_ESM_URL);
+      }
 
       if (!MINDAR?.IMAGE?.MindARThree) {
         throw new Error("MindAR not available after loading");
@@ -101,10 +159,10 @@ const MindARScene = ({
       const { renderer, scene, camera } = mindarThree;
 
       // Setup lighting
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+      const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.8);
       scene.add(ambientLight);
 
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+      const directionalLight = new ThreeLib.DirectionalLight(0xffffff, 1.2);
       directionalLight.position.set(5, 10, 7.5);
       directionalLight.castShadow = true;
       scene.add(directionalLight);
@@ -121,28 +179,31 @@ const MindARScene = ({
         };
 
         // Load GLB model onto the first anchor
-        if (i === 0 && modelUrl && THREE.GLTFLoader) {
-          const loader = new THREE.GLTFLoader();
+        if (i === 0 && modelUrl) {
           try {
+            const { GLTFLoader } = await import(
+              /* @vite-ignore */ GLTF_LOADER_URL
+            );
+            const loader = new GLTFLoader();
             const gltf = await new Promise<any>((resolve, reject) => {
               loader.load(modelUrl, resolve, undefined, reject);
             });
             const model = gltf.scene;
 
             // Calculate bounding box and normalize size
-            const box = new THREE.Box3().setFromObject(model);
-            const size = box.getSize(new THREE.Vector3());
+            const box = new ThreeLib.Box3().setFromObject(model);
+            const size = box.getSize(new ThreeLib.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
             const scale = (modelScale / maxDim) * 0.5;
             model.scale.set(scale, scale, scale);
 
             // Center the model
-            const center = box.getCenter(new THREE.Vector3());
+            const center = box.getCenter(new ThreeLib.Vector3());
             model.position.sub(center.multiplyScalar(scale));
 
             // Apply initial rotation
             if (initialRotation) {
-              model.rotation.y = THREE.MathUtils.degToRad(initialRotation);
+              model.rotation.y = ThreeLib.MathUtils.degToRad(initialRotation);
             }
 
             anchor.group.add(model);
