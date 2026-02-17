@@ -74,6 +74,19 @@ const MindARScene = ({
   const mindarRef = useRef<any>(null);
   const [isStarting, setIsStarting] = useState(true);
 
+  // Store callbacks in refs to avoid restarting MindAR on parent re-renders
+  const onTargetFoundRef = useRef(onTargetFound);
+  const onTargetLostRef = useRef(onTargetLost);
+  const onReadyRef = useRef(onReady);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    onTargetFoundRef.current = onTargetFound;
+    onTargetLostRef.current = onTargetLost;
+    onReadyRef.current = onReady;
+    onErrorRef.current = onError;
+  }, [onTargetFound, onTargetLost, onReady, onError]);
+
   const startAR = useCallback(async () => {
     if (!containerRef.current) return;
 
@@ -129,10 +142,10 @@ const MindARScene = ({
         const anchor = mindarThree.addAnchor(i);
 
         anchor.onTargetFound = () => {
-          onTargetFound?.(i);
+          onTargetFoundRef.current?.(i);
         };
         anchor.onTargetLost = () => {
-          onTargetLost?.(i);
+          onTargetLostRef.current?.(i);
         };
 
         // Load GLB model onto the first anchor
@@ -173,7 +186,7 @@ const MindARScene = ({
       // Start MindAR
       await mindarThree.start();
       setIsStarting(false);
-      onReady?.();
+      onReadyRef.current?.();
 
       // Render loop
       renderer.setAnimationLoop(() => {
@@ -182,9 +195,9 @@ const MindARScene = ({
     } catch (err) {
       console.error("MindAR initialization error:", err);
       setIsStarting(false);
-      onError?.(err instanceof Error ? err : new Error(String(err)));
+      onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [imageTargetSrc, modelUrl, maxTrack, modelScale, initialRotation, onTargetFound, onTargetLost, onReady, onError]);
+  }, [imageTargetSrc, modelUrl, maxTrack, modelScale, initialRotation]);
 
   useEffect(() => {
     startAR();
