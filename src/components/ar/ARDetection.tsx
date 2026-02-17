@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronDown, MapPin, Target, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import MindARScene from "./MindARScene";
@@ -50,7 +50,12 @@ const ARDetection = ({
   const totalMarkers = isMultipoint ? 3 : 1;
   const allDetected = detectedCount === totalMarkers;
 
-  // Determine guide state
+  // Transition to active view when all markers are detected
+  useEffect(() => {
+    if (allDetected) {
+      onAllDetected();
+    }
+  }, [allDetected, onAllDetected]);
   let guideIcon = <MapPin className="h-4 w-4" />;
   let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
   let guideDescription = isMultipoint
