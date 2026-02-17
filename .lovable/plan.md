@@ -1,59 +1,87 @@
 
+# Fix: MindAR Restart Loop After Target Detection
 
-# Fix: MindAR Camera Launch Failure on Mobile Safari
+## Problem
 
-## Root Cause
+When the QR marker is detected on mobile, the app enters an infinite restart loop instead of transitioning to the active AR view. Two bugs are at play:
 
-The error message is:
-```
-Module name, 'three/addons/renderers/CSS3DRenderer.js' does not resolve to a valid URL.
-```
+### Bug 1: MindAR restarts in a loop
+The `MindARScene` component includes callback props (`onTargetFound`, `onTargetLost`, etc.) in the dependency array of its `startAR` useCallback. Every time a marker is detected, the parent state changes, causing new inline function references to be passed down, which recreates `startAR`, which triggers the useEffect cleanup/restart cycle -- stopping and restarting MindAR endlessly.
 
-MindAR v1.2.5 internally imports modules using the `three/addons/` path prefix (e.g. `CSS3DRenderer.js`). Our import map in `index.html` only maps the base `"three"` and one specific loader file, but is **missing the wildcard `"three/addons/"` prefix** that MindAR needs to resolve its internal Three.js dependencies.
+### Bug 2: No transition to "active" state
+`ARDetection` receives an `onAllDetected` prop but **never calls it**. Even if the loop were fixed, the user would be stuck on the detection screen forever.
 
-The official MindAR installation docs confirm the required import map must include `"three/addons/"` as a trailing-slash mapping (which acts as a path prefix in import maps).
+---
 
-## Fix (single file change)
+## Solution
 
-**File: `index.html`**
+### 1. Stabilize callbacks with refs in `MindARScene.tsx`
+- Store all callback props (`onTargetFound`, `onTargetLost`, `onReady`, `onError`) in refs
+- Remove them from the `startAR` dependency array
+- Use the refs inside the MindAR event handlers so they always call the latest version without triggering re-initialization
 
-Replace the current import map entries:
-```json
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
-  }
-}
-```
+### 2. Call `onAllDetected` in `ARDetection.tsx`
+- Add a `useEffect` that watches the `allDetected` computed boolean
+- When all markers are detected, call `onAllDetected()` to transition to the "active" view state
 
-With the correct map matching the official MindAR docs:
-```json
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
-  }
-}
-```
+---
 
-This adds:
-- `"three/addons/"` -- resolves all internal MindAR imports like `CSS3DRenderer.js`
-- `"mindar-image-three"` -- allows cleaner importing (optional but matches official docs)
+## Technical Details
 
-The specific `GLTFLoader` entry is no longer needed because it is covered by the `three/addons/` wildcard.
+### File: `src/components/ar/MindARScene.tsx`
 
-**File: `src/components/ar/MindARScene.tsx`**
-
-Update the `GLTF_LOADER_URL` constant to use the new `three/addons/` path so it also resolves through the import map:
+Add refs for callbacks at the top of the component:
 ```ts
-const GLTF_LOADER_URL = "three/addons/loaders/GLTFLoader.js";
+const onTargetFoundRef = useRef(onTargetFound);
+const onTargetLostRef = useRef(onTargetLost);
+const onReadyRef = useRef(onReady);
+const onErrorRef = useRef(onError);
 ```
 
-No other changes needed. The `loadMindAR()` dynamic import approach stays as-is.
+Keep refs in sync with a useEffect:
+```ts
+useEffect(() => {
+  onTargetFoundRef.current = onTargetFound;
+  onTargetLostRef.current = onTargetLost;
+  onReadyRef.current = onReady;
+  onErrorRef.current = onError;
+}, [onTargetFound, onTargetLost, onReady, onError]);
+```
+
+Inside `startAR`, use refs instead of direct props:
+```ts
+anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
+anchor.onTargetLost = () => onTargetLostRef.current?.(i);
+// ...
+onReadyRef.current?.();
+// ...
+onErrorRef.current?.(err);
+```
+
+Remove callbacks from the `startAR` dependency array -- only keep stable values:
+```ts
+}, [imageTargetSrc, modelUrl, maxTrack, modelScale, initialRotation]);
+```
+
+### File: `src/components/ar/ARDetection.tsx`
+
+Add a useEffect to trigger the transition:
+```ts
+import { useState, useEffect } from "react";
+
+// Inside the component, after the allDetected calculation:
+useEffect(() => {
+  if (allDetected) {
+    onAllDetected();
+  }
+}, [allDetected, onAllDetected]);
+```
+
+---
 
 ## Why This Will Work
 
-This is not a guess -- the exact error message (`three/addons/renderers/CSS3DRenderer.js does not resolve`) tells us precisely which import map entry is missing, and the official MindAR v1.2.5 installation documentation prescribes the `"three/addons/"` trailing-slash mapping as required configuration.
+- **Bug 1 fix**: By using refs for callbacks, MindAR only starts once and never restarts due to parent re-renders. The refs always point to the latest callback so behavior is correct.
+- **Bug 2 fix**: The useEffect ensures the view transitions to "active" as soon as all required markers are detected, completing the user journey.
 
+This is a standard React pattern for breaking dependency cycles in useCallback/useEffect without losing access to up-to-date prop values.
