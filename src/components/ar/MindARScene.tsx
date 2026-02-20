@@ -163,13 +163,15 @@ const MindARScene = ({
             // Calculate bounding box and normalize size
             const box = new ThreeLib.Box3().setFromObject(model);
             const size = box.getSize(new ThreeLib.Vector3());
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const scale = (modelScale / maxDim) * 0.5;
-            model.scale.set(scale, scale, scale);
-
-            // Center the model
             const center = box.getCenter(new ThreeLib.Vector3());
-            model.position.sub(center.multiplyScalar(scale));
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const normalizedScale = (modelScale / maxDim) * 0.5;
+            model.scale.set(normalizedScale, normalizedScale, normalizedScale);
+
+            // Centre X/Z on marker; place model BASE at Y=0 (sits on marker)
+            model.position.x = -center.x * normalizedScale;
+            model.position.y = -box.min.y * normalizedScale;
+            model.position.z = -center.z * normalizedScale;
 
             // Apply initial rotation
             if (initialRotation) {
@@ -187,6 +189,23 @@ const MindARScene = ({
       await mindarThree.start();
       setIsStarting(false);
       onReadyRef.current?.();
+
+      // Force MindAR's internal canvas and video to fill the container
+      // This fixes the black strip on iOS Safari caused by viewport miscalculation
+      if (containerRef.current) {
+        const canvas = containerRef.current.querySelector("canvas");
+        const video = containerRef.current.querySelector("video");
+        if (canvas) {
+          canvas.style.width = "100%";
+          canvas.style.height = "100%";
+          canvas.style.objectFit = "cover";
+        }
+        if (video) {
+          video.style.width = "100%";
+          video.style.height = "100%";
+          video.style.objectFit = "cover";
+        }
+      }
 
       // Render loop
       renderer.setAnimationLoop(() => {
@@ -217,8 +236,8 @@ const MindARScene = ({
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0 overflow-hidden"
-      style={{ zIndex: 0 }}
+      className="fixed inset-0 overflow-hidden"
+      style={{ zIndex: 0, width: "100%", height: "100%" }}
     />
   );
 };
