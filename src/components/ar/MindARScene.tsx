@@ -200,9 +200,13 @@ const MindARScene = ({
             // lastKnownMatrix with the invisibleMatrix and causing the
             // "stuck to screen" bug.
             anchor.onTargetUpdate = () => {
-              if (model) {
-                model.updateWorldMatrix(true, false);
-                lastKnownMatrix.copy(model.matrixWorld);
+              if (model && !isWorldPlaced) {
+                // Force local matrix current from current position/quat/scale
+                model.updateMatrix();
+                // Compute world matrix directly: MindAR group pose × model local offset.
+                // anchor.group.matrix is written by MindAR immediately before this callback fires
+                // — no Three.js propagation timing dependency.
+                lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
               }
             };
 
@@ -217,6 +221,7 @@ const MindARScene = ({
                 model.position.set(localPos.x, localPos.y, localPos.z);
                 model.quaternion.copy(localQuat);
                 model.scale.set(localScale.x, localScale.y, localScale.z);
+                model.updateMatrix(); // force local matrix current before onTargetUpdate samples
                 isWorldPlaced = false;
               }
               onTargetFoundRef.current?.(i);
@@ -231,7 +236,8 @@ const MindARScene = ({
                 scene.add(model);
                 // Apply last valid pose captured in the render loop
                 model.matrix.copy(lastKnownMatrix);
-                model.matrix.decompose(model.position, model.quaternion, model.scale);
+                // matrixAutoUpdate = false tells Three.js to use model.matrix directly.
+                // No need to decompose — decompose adds floating point error with no benefit.
                 model.matrixAutoUpdate = false;
                 isWorldPlaced = true;
               }
