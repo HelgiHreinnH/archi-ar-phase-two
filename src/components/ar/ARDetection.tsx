@@ -14,6 +14,8 @@ interface ARDetectionProps {
   onAllDetected?: () => void;
   onCancel: () => void;
   onExit: () => void;
+  /** Full remount reset — restarts camera + re-anchors model from scratch */
+  onReset?: () => void;
   onError?: (error: Error) => void;
   /** Compiled .mind image-target URL */
   imageTargetSrc?: string;
@@ -41,6 +43,7 @@ const ARDetection = ({
   onAllDetected,
   onCancel,
   onExit,
+  onReset,
   onError,
   imageTargetSrc,
   modelUrl,
@@ -290,9 +293,9 @@ const ARDetection = ({
                 <Camera className="h-6 w-6 text-white" />
               </button>
 
-              {/* Reset — goes back to detection phase */}
+              {/* Reset — full remount so the model can re-anchor from scratch */}
               <button
-                onClick={() => setIsActive(false)}
+                onClick={() => onReset ? onReset() : setIsActive(false)}
                 className="h-12 w-12 rounded-full bg-white/15 backdrop-blur-xl border border-white/20 flex items-center justify-center active:scale-95 transition-transform"
               >
                 <RotateCcw className="h-5 w-5 text-white/80" />
