@@ -1,91 +1,165 @@
 
-# Fix: 3D Model Not Loading + Black Strip on Camera Feed
+# Three-Part Fix: World-Anchored Model, Full-Width Camera, Corrected Scale System
 
-## Root Cause Analysis
+## Problem Summary
 
-Three separate bugs have been identified from the screenshot and code review.
+**Issue 1 — Model vanishes when camera moves away from marker (anchor-tracking)**
+In MindAR, `anchor.group` is a transform node that follows the marker in real time. When the printed marker leaves the camera frame, MindAR hides the anchor group — so the model disappears. The user's requirement is: detect the marker once → place the model in world space → model stays visible no matter where the camera points.
 
----
+**Issue 2 — Double camera feed / black strip on the right**
+MindAR creates both a `<canvas>` (WebGL render) and a `<video>` (camera feed) inside the container. It sets explicit pixel dimensions on these internally via `style` attributes. Our post-`start()` CSS patch (`width: 100%`) is applied once, but MindAR may overwrite or conflict with it. The two elements are also independently sized, causing a visible seam. The container's `fixed inset-0` is correct but MindAR also sets `position: absolute` on the canvas internally, which can mis-align.
 
-## Bug 1 (Critical): Wrong Storage Bucket — Model Never Loads
-
-In `src/pages/ARViewer.tsx`, the signed URL is requested from the wrong bucket:
-
-```ts
-// Current — WRONG
-const { data, error } = await supabase.storage
-  .from("models")
-  .createSignedUrl(project.model_url, 3600);
-```
-
-The correct bucket name is `"project-models"` — confirmed by looking at `ModelViewer3D.tsx` which already uses `"project-models"` correctly. Because `"models"` does not exist, the request fails silently and `signedModelUrl` returns `null`. MindARScene receives `modelUrl={null}` and skips GLB loading entirely. The camera runs but nothing appears on the marker.
-
-**Fix:** Change `"models"` → `"project-models"` in `ARViewer.tsx`.
+**Issue 3 — Scale presets don't match real-world model dimensions**
+The current presets (1:10 to 1:500) are architectural but don't serve the user's workflow where models are built 1:1 in millimetres. The parser in ARViewer also incorrectly extracts the scale denominator. The new set of presets should be: `1:1` (furniture, true size), `1:10`, `1:25`, `1:50`, `1:100`, `1:200`.
 
 ---
 
-## Bug 2 (Visual): Black Strip — MindAR Canvas Not Full Width
+## Fix 1: World-Anchored Model (One-Shot Placement)
 
-MindAR creates its own `<canvas>` and `<video>` elements inside the container. It calculates their size from the container's dimensions at initialisation time. On iOS Safari, `window.innerHeight` includes the browser chrome (address bar), causing a miscalculation — the canvas ends up shorter/narrower than the physical screen, leaving a black strip.
+### Concept
+Instead of attaching the model to `anchor.group` (which follows the marker), we:
+1. Attach the model to `anchor.group` initially — this lets MindAR tell us the world-space transform of the marker via Three.js's scene graph
+2. On first `onTargetFound`, extract the model's computed world matrix
+3. Detach the model from `anchor.group` and re-attach it directly to the `scene` root, applying the captured world matrix
+4. Set a `worldPlaced` flag so subsequent `onTargetFound` events (if the marker is re-detected) don't move the model again
 
-The container div in `MindARScene.tsx` currently uses:
-```tsx
-<div ref={containerRef} className="absolute inset-0 overflow-hidden" style={{ zIndex: 0 }} />
+This gives exactly the behaviour described: "camera detects AR marker → model loads at that location → stays fixed in world space as user walks around."
+
+### Float above marker
+The user wants the model to float ~40mm above the marker centre. In MindAR's coordinate system, the marker plane is Y=0. We add `+0.04` in world-space Y (units are metres in MindAR's Three.js scene) to make it float 4cm above.
+
+The updated `model.position.y` before placement:
+```ts
+// Instead of sitting on the marker plane (Y=0), float 40mm above
+model.position.y = -box.min.y * normalizedScale + 0.04;
 ```
 
-This is correct for positioning, but MindAR's internal canvas needs explicit `width: 100%` and `height: 100%` CSS applied after initialisation, and the container must use `position: fixed` rather than `absolute` to correctly fill the real viewport on mobile Safari.
+### Implementation in `MindARScene.tsx`
+```ts
+let worldPlaced = false;
 
-**Fix:** Change the container from `absolute inset-0` to `fixed inset-0` in `MindARScene.tsx`. Also add a CSS rule that forces MindAR's internal canvas and video to 100% width/height via a style tag or by applying inline styles after MindAR starts.
+anchor.onTargetFound = () => {
+  if (!worldPlaced && model.parent === anchor.group) {
+    // Capture world transform
+    model.updateWorldMatrix(true, false);
+    const worldMatrix = model.matrixWorld.clone();
+
+    // Move from anchor.group to scene root
+    anchor.group.remove(model);
+    scene.add(model);
+
+    // Apply captured world matrix (position + rotation + scale)
+    model.matrix.copy(worldMatrix);
+    model.matrix.decompose(model.position, model.quaternion, model.scale);
+
+    worldPlaced = true;
+  }
+  onTargetFoundRef.current?.(i);
+};
+```
+
+After this, the model is a direct child of the `scene` with an absolute world position — MindAR's anchor tracking no longer affects its visibility.
 
 ---
 
-## Bug 3 (Positioning): Model Floats Above/Below the Marker
+## Fix 2: Full-Width Camera (Eliminate Double Feed / Black Strip)
 
-The model centring logic in `MindARScene.tsx` contains a scaling error:
+### Root Cause
+MindAR creates its video and canvas with explicit pixel dimensions set via JS style properties (not CSS classes). It uses `window.innerWidth` / `window.innerHeight` for sizing, which on iOS Safari includes the browser chrome, causing the camera feed to be narrower than the viewport.
+
+The additional complication is that after our CSS patch, MindAR's own render loop may re-touch the canvas dimensions on each frame.
+
+### Fix: Use a `ResizeObserver` + persistent style injection
+Instead of setting styles once after `start()`, we:
+1. Use a `ResizeObserver` on the container to re-apply the fill styles whenever dimensions change
+2. Add a `<style>` element inside the container that forces the canvas and video to fill it via CSS specificity (CSS applied via stylesheet beats inline `style` from JavaScript in some browsers)
 
 ```ts
-// Current — WRONG
-const center = box.getCenter(new ThreeLib.Vector3());
-model.position.sub(center.multiplyScalar(scale));
+// After mindarThree.start():
+const styleTag = document.createElement("style");
+styleTag.textContent = `
+  #mindar-container canvas,
+  #mindar-container video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    position: absolute !important;
+    top: 0 !important; left: 0 !important;
+  }
+`;
+containerRef.current.id = "mindar-container";
+containerRef.current.appendChild(styleTag);
 ```
 
-`center` is in model space (pre-scale). After calling `model.scale.set(scale, scale, scale)`, the effective world-space offset to subtract is `center * scale`. But `center.multiplyScalar(scale)` mutates the vector and then it's subtracted — which is mathematically correct *if* done after the scale is applied. However, the real issue is that this centres the model's geometric centre at the anchor, not its base. For an architectural/product model the **base should be at Y=0** (sitting on the marker), not the centre.
+This is injected once and stays active for the lifetime of the component, overriding MindAR's own inline styles with `!important`.
 
-The fix is to:
-1. Centre X and Z correctly (subtract the horizontal centre offset)
-2. Set Y so the model's bottom sits at Y=0 (not the geometric centre)
+---
 
+## Fix 3: Scale System Redesign
+
+### New Scale Presets
+Replace existing presets in `StepDetails.tsx` with:
+
+| Value | Label | Use case |
+|-------|-------|----------|
+| `1:1` | 1:1 | Furniture — true size |
+| `1:10` | 1:10 | Large furniture / room object |
+| `1:25` | 1:25 | Room-scale interior |
+| `1:50` | 1:50 | Standard floor plan |
+| `1:100` | 1:100 | Building overview |
+| `1:200` | 1:200 | Site plan / masterplan |
+
+### How scale is applied to the model
+The `scale` string (e.g. `"1:50"`) is parsed in `ARViewer.tsx`:
 ```ts
-// Correct approach
-const box = new ThreeLib.Box3().setFromObject(model);
-const size = box.getSize(new ThreeLib.Vector3());
-const center = box.getCenter(new ThreeLib.Vector3());
-const maxDim = Math.max(size.x, size.y, size.z);
+const scaleNum = project.scale ? parseFloat(project.scale.replace(/[^0-9.]/g, "")) || 1 : 1;
+```
+This extracts `50` from `"1:50"` and passes it as `modelScale` to `MindARScene`.
+
+In `MindARScene.tsx`, the normalisation formula is:
+```ts
 const normalizedScale = (modelScale / maxDim) * 0.5;
-model.scale.set(normalizedScale, normalizedScale, normalizedScale);
-
-// After scaling, recalculate — or adjust position in scaled space:
-// Move model so its base (min Y) sits at world Y=0, centred in X/Z
-model.position.x = -center.x * normalizedScale;
-model.position.y = -box.min.y * normalizedScale; // base at 0
-model.position.z = -center.z * normalizedScale;
 ```
+
+This divides the target display size (`modelScale`) by the model's largest dimension and scales to fit within 0.5 MindAR units. But this doesn't correctly implement architectural scale ratios.
+
+**Correct logic:** If a model is built at 1:1 in millimetres (e.g. a chair is 800mm tall → `maxDim = 800`), and we want to show it at `1:50`, the real-world height is `800mm` but we want to show it at `800/50 = 16mm` on the table. In MindAR units (1 unit ≈ 1 marker width, typically ~15cm printed), we convert mm to MindAR units by dividing by a reference marker size in mm.
+
+For a printed A4-sized AR marker (approximately 150mm), 1 MindAR unit = 150mm.
+
+So:
+```ts
+// modelScale is the scale denominator (e.g. 50 for 1:50)
+// maxDim is in mm (model built 1:1 in Rhino)
+// 1 MindAR unit ≈ 150mm (marker size)
+const MARKER_SIZE_MM = 150;
+const scaleFactor = (1 / modelScale) / (1 / MARKER_SIZE_MM);
+// = MARKER_SIZE_MM / modelScale
+const normalizedScale = scaleFactor / maxDim;
+```
+
+This cleanly maps: `1:1` → model appears true size relative to marker, `1:50` → model appears 50× smaller.
+
+**Default scale** for new tabletop projects changed from `"1:20"` to `"1:1"` in `NewProject.tsx`.
 
 ---
 
 ## Files to Change
 
-| File | Change |
-|---|---|
-| `src/pages/ARViewer.tsx` | Fix bucket name: `"models"` → `"project-models"` |
-| `src/components/ar/MindARScene.tsx` | Fix canvas sizing (fixed inset-0) + fix model base positioning |
+| File | What changes |
+|------|-------------|
+| `src/components/ar/MindARScene.tsx` | World-anchor placement on first detection; float +40mm; CSS injection fix for full-width camera |
+| `src/components/wizard/StepDetails.tsx` | New scale presets: 1:1, 1:10, 1:25, 1:50, 1:100, 1:200; update descriptions |
+| `src/pages/NewProject.tsx` | Default scale changed to `"1:1"` |
+| `src/pages/ARViewer.tsx` | Fix scale parsing to extract denominator correctly from `"1:50"` format |
 
-No database changes. No new files. Two targeted fixes.
+No database migration needed. No new components. No new dependencies.
 
 ---
 
-## Why This Will Work
+## Why This Solves Each User Complaint
 
-- **Bug 1**: With the correct bucket name, `createSignedUrl` succeeds, `signedModelUrl` becomes a valid HTTPS URL, and MindARScene loads and attaches the GLB to the anchor group. The model will appear when the marker is detected.
-- **Bug 2**: Using `position: fixed` ensures the container fills the true viewport, not the layout viewport affected by iOS Safari's browser chrome. MindAR will size its canvas to the full physical screen width.
-- **Bug 3**: Setting `model.position.y = -box.min.y * scale` places the bottom face of the model flush with the marker plane (Y=0), so it appears to sit on top of the printed AR marker rather than floating or sinking through it.
+1. **"Camera does not need to be pointed at marker after load"** → World placement extracts the model from the anchor group on first detection. The model lives in absolute scene space and is always rendered regardless of where the camera points.
+2. **"Model should float 4cm above marker"** → `model.position.y += 0.04` (in metres) applied before world placement.
+3. **"Two active camera sessions / black strip"** → CSS `!important` injection via a `<style>` tag inside the container overrides MindAR's own inline pixel dimensions, forcing both the video and canvas to fill the container completely at all times.
+4. **"Scale parameters should match real-world model dimensions"** → New presets + correct scale formula using marker physical size as the reference unit.
