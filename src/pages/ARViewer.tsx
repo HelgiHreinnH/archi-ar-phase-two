@@ -97,7 +97,7 @@ const ARViewer = () => {
       if (project.model_url.startsWith("http")) return project.model_url;
       // Otherwise generate a signed URL from Supabase storage
       const { data, error } = await supabase.storage
-        .from("models")
+        .from("project-models")
         .createSignedUrl(project.model_url, 3600);
       if (error) throw error;
       return data.signedUrl;
