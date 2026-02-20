@@ -1,249 +1,210 @@
 
-# Full AR Codebase Review: Stability & Correctness Audit
+# Root Cause: Wrong Mental Model of MindAR's Coordinate System
 
-This is a complete walkthrough of every file that touches the AR experience — from the user scanning a QR code to the 3D model appearing in the room. Issues found are categorised by severity: **Critical** (will break the experience), **Warning** (risk of breakage under edge cases), and **Info** (minor improvements).
+## What's Actually Happening
 
----
+After reading the MindAR source code directly, the world-anchoring approach has been built on an incorrect understanding of how MindAR's scene graph works.
 
-## 1. Entry Point: Routing (`src/App.tsx`)
+### How MindAR's coordinate system actually works
 
-**Status: Stable**
+In MindAR's Three.js integration:
 
-The public AR route is:
-```
-/view/:shareId  →  ARViewer
-```
-This is correct and completely unauthenticated — no auth wrapper around it. The route is clean.
+- The **camera is fixed at the scene origin (0,0,0)**. It never moves.
+- The **world moves around the camera**. MindAR's tracking updates `anchor.group.matrix` every frame with a view-space matrix derived from the detected marker pose.
+- `anchor.group.matrixAutoUpdate = false` — MindAR sets this itself (line 76 of the source). The group matrix is driven entirely by MindAR's controller.
 
----
+This means there is **no concept of "world space"** in the traditional sense. The scene has no fixed coordinate frame — everything is expressed relative to the camera (which is fixed). This is a fundamentally different setup from a standard Three.js scene.
 
-## 2. Data Loading: ARViewer (`src/pages/ARViewer.tsx`)
+### Why the current code fails
 
-**Issues found: 2**
-
-### 2a. WARNING — `signedModelUrl` may still be `undefined` when `ARDetection` mounts
-
-The signed URL query has `enabled: !!project?.model_url && viewState === "detecting"`. This means the query only fires when you enter the "detecting" state. However, `ARDetection` mounts immediately at that same render, and `MindARScene` also mounts immediately. The `modelUrl` prop passed to `ARDetection` (and then to `MindARScene`) will be `undefined` for the first render tick while the query runs.
-
-`MindARScene` handles `modelUrl` being null/undefined by skipping the GLB load (`if (i === 0 && modelUrl)`), so the model never loads even if the URL resolves later — because `MindARScene`'s `useEffect` only runs once on mount. The result is: the AR scene starts with no model, and the model never appears.
-
-**The fix:** Either pass `signedModelUrl` only once it is resolved (don't switch to "detecting" until the URL is ready), or move the signed URL fetch to start when the project loads (remove the `viewState === "detecting"` condition from `enabled`).
-
-### 2b. INFO — `handleReset` in ARViewer is not wired to ARDetection
-
-`handleReset` exists in `ARViewer` (lines 79–82) and bumps `resetKey`, which remounts `ARDetection`. But it is never passed into `ARDetection` — `ARDetection`'s reset button (`setIsActive(false)`) just resets the UI state, not the AR session. This is intentional (the plan said to keep MindARScene mounted), but it means the `handleReset` function is dead code in `ARViewer`. Low risk but confusing.
-
-### 2c. INFO — Scale parsing is now correct but fragile
-
+The current approach:
 ```ts
-const scaleNum = project.scale
-  ? parseFloat(project.scale.split(":")[1]) || 1
-  : 1;
+model.updateWorldMatrix(true, false);
+const worldMatrix = model.matrixWorld.clone();   // ← captures camera-relative coords
+anchor.group.remove(model);
+scene.add(model);                                 // model is now a direct child of scene
+model.matrix.copy(worldMatrix);                  // ← locks model at camera-relative coords
+model.matrixAutoUpdate = false;                  // ← freezes those camera-relative coords
 ```
 
-This correctly extracts `50` from `"1:50"`. However `split(":")[1]` would return `undefined` if the stored value has no colon (e.g. a legacy value of `"20"`). `parseFloat(undefined)` returns `NaN`, and `NaN || 1` returns `1`. So the fallback to `1` works — but silently. Acceptable for now.
+Because the camera is always at (0,0,0) and the world moves, `model.matrixWorld` at any given instant is a camera-space transform, not a world-space transform. When we capture it and freeze it, the model is locked to a position relative to the camera (i.e., directly in front of the user's face, stuck to the screen).
 
----
+This is exactly what the user is seeing: the model appears on the screen at a fixed position regardless of where the camera points.
 
-## 3. AR State Machine: ARDetection (`src/components/ar/ARDetection.tsx`)
+### What the correct approach is
 
-**Issues found: 3**
+For MindAR's coordinate system, "world anchoring" — keeping the model visible after losing the marker — is not possible by capturing a world transform, because there is no persistent world frame.
 
-### 3a. CRITICAL — Tabletop "all detected" logic is wrong
+**The correct approach to keep a model visible is much simpler:**
 
-```ts
-const totalMarkers = isMultipoint ? 3 : 1;
-const allDetected = detectedCount === totalMarkers;
-```
+1. Keep the model as a **child of `anchor.group`** (the standard MindAR way).
+2. On `onTargetLost`, **do not remove or hide** the model — instead prevent MindAR from hiding it.
+3. The challenge: MindAR sets `group.visible = false` on target lost (line 168), which hides all children including the model.
 
-For tabletop mode (`isMultipoint = false`), `totalMarkers = 1`. The marker state in `ARViewer` initialises as `{ A: "searching", B: "searching", C: "searching" }` — three A/B/C markers. In `ARDetection`, `detectedCount` counts all values that are not `"searching"`. For tabletop, when target index 0 is found, `ARViewer.handleTargetFound` sets `markers.QR = "detected"`. But the initial state also has A, B, C — all "searching". So `detectedCount` counts only QR = 1, and `totalMarkers = 1`, so `allDetected = true`. This part works. **However**, if the user resets (goes back to landing and re-enters detecting), the markers state in `ARViewer` still has `{ A: "searching", B: "searching", C: "searching" }` — the QR key is absent. So the first detection correctly adds `QR: "detected"` and `allDetected` triggers. This is fine.
+**Solution:** Keep the model attached to the anchor group, but on `onTargetLost`, **detach the model from the anchor group and re-attach it directly to the scene**, at the **last known position captured from the anchor group's matrix**. At this moment the anchor matrix IS valid — the target was just visible, so MindAR computed a correct pose. When the target is lost, we then freeze the model at that position in scene space.
 
-Actually re-reading more carefully: for tabletop mode, `ARViewer.handleTargetFound` sets `markers.QR` but `ARDetection` also checks `markers["QR"]` in the UI. The initial `ARViewer` state has no `QR` key, so `markers["QR"]` is `undefined` which is treated as "searching" — correct. **This is actually fine.**
+The key difference from the current code:
+- We must capture the position **on `onTargetLost`**, not `onTargetFound`
+- At the moment of `onTargetLost`, MindAR has just determined the marker is gone, but the LAST VALID pose is still in `anchor.group.matrix` before MindAR overwrites it with `invisibleMatrix`
 
-### 3b. WARNING — `handleScreenshot` is a stub
+Wait — actually re-reading the source more carefully:
 
-The screenshot button in the active phase (line 74–76) shows a toast saying "Image saved to your photo library" but doesn't actually capture anything. If a user taps it, they will be misled into thinking a photo was saved. This should either be implemented or the button removed.
+```js
+// Line 158-195 in MindAR three.js source:
+onUpdate: (data) => {
+  if (data.type === 'updateMatrix') {
+    ...
+    if (worldMatrix !== null) {
+      let m = new Matrix4();
+      m.elements = [...worldMatrix];
+      m.multiply(this.postMatrixs[targetIndex]);
+      this.anchors[i].group.matrix = m;           // ← FIRST: matrix is set
+    } else {
+      this.anchors[i].group.matrix = invisibleMatrix; // ← FIRST: matrix zeroed
+    }
 
-### 3c. INFO — "Reset" in active phase goes back to detection UI but MindAR is still running
+    if (this.anchors[i].visible && worldMatrix === null) {
+      this.anchors[i].visible = false;
+      this.anchors[i].onTargetLost();              // ← THEN: callback fires AFTER matrix is zeroed
+    }
 
-The reset button `onClick={() => setIsActive(false)}` takes the user back to the detection UI with the scanning guide. But `worldPlaced` inside `MindARScene` is already `true` and `model.matrixAutoUpdate` is `false`. If the user scans the marker again, `onTargetFound` fires but the world-placement block won't run again (`if (model && !worldPlaced)` is false). So scanning again won't move the model. The UI implies re-scanning is possible, but the model won't actually re-anchor. This could confuse users.
-
----
-
-## 4. AR Engine: MindARScene (`src/components/ar/MindARScene.tsx`)
-
-**Issues found: 3**
-
-### 4a. CRITICAL — Model URL race condition (related to ARViewer 2a above)
-
-`MindARScene` runs `startAR()` once on mount (via `useEffect` with `[startAR]` dependency). Inside `startAR`, at line 145:
-
-```ts
-if (i === 0 && modelUrl) {
-  // load GLB
+    if (!this.anchors[i].visible && worldMatrix !== null) {
+      this.anchors[i].visible = true;
+      this.anchors[i].onTargetFound();             // ← THEN: callback fires AFTER matrix is set
+    }
+  }
 }
 ```
 
-If `modelUrl` is `null` or `undefined` when the component mounts (because the signed URL hasn't resolved yet), the model load is skipped entirely. There is no retry mechanism. The component will show the camera feed with no model.
+**Critical finding:** When `onTargetFound` fires, MindAR has **already set** `anchor.group.matrix` to the correct tracking matrix. So `anchor.group.matrix` IS valid at the moment `onTargetFound` fires — no delay is needed for the matrix to become valid.
 
-**This is the most likely cause of "model never appeared" issues.** The `startAR` callback has `modelUrl` in its dependency array — so in theory, if `modelUrl` changes from null to a real URL, `startAR` gets a new reference, the `useEffect` re-runs, and `startAR` is called again. But calling `startAR` twice would try to create a second `MindARThree` instance on the same container, and the first one is still running. This could crash.
+When `onTargetLost` fires, MindAR has **already overwritten** `anchor.group.matrix` with `invisibleMatrix` (the zero matrix). So we cannot capture the last known pose from `onTargetLost`.
 
-**The real fix:** Don't mount `MindARScene` until `signedModelUrl` is resolved. In `ARViewer`, keep `viewState === "detecting"` for rendering but add a loading state while `signedModelUrl` is pending.
+### Correct Solution
 
-### 4b. WARNING — Two `requestAnimationFrame` frames may not be enough on slow/low-power devices
+**Strategy: Capture position on `onTargetFound` (immediate, no delay), keep model in anchor group, freeze it in scene on target lost by using a "last known matrix" variable.**
 
-The world-placement defers by exactly two frames (~32ms at 60fps, but could be 100–200ms on throttled mobile CPUs). On low-end Android devices, MindAR's pose estimation may not have stabilised in two frames. A more robust approach is a 5-frame defer or a short fixed delay (100ms via `setTimeout`).
+1. On `onTargetFound`:
+   - Record the anchor group's current matrix as `lastKnownMatrix` (this is valid — MindAR just set it)
+   - If first detection, also set up the model
 
-### 4c. WARNING — `model.matrixAutoUpdate = false` after `decompose` means animations won't play
+2. Every render frame (in the animation loop), while target is visible:
+   - Continuously update `lastKnownMatrix` from `anchor.group.matrix` so we always have the freshest pose
 
-If the GLB model contains embedded animations (skinned meshes, morph targets), setting `matrixAutoUpdate = false` on the root group won't break them, but any code that later tries to set `model.position` or `model.rotation` won't work without setting `matrixAutoUpdate = true` first. This is acceptable for a static architectural model but worth noting.
+3. On `onTargetLost`:
+   - Move the model out of `anchor.group` (because MindAR will hide the group)
+   - Attach it directly to `scene`
+   - Apply `lastKnownMatrix` (the last valid pose before the matrix was zeroed)
+   - Freeze it: `model.matrixAutoUpdate = false`
 
-### 4d. INFO — CSS style injection uses `document.head.appendChild` but cleanup removes it
+4. On `onTargetFound` again (if user re-scans):
+   - Move model back into `anchor.group` so it tracks the marker again
+   - Resume updating `lastKnownMatrix` each frame
 
-The `styleTag` is appended to `document.head` and cleaned up on unmount. This is correct. But if `startAR` throws before `containerRef.current.id = containerId`, the style tag is never created — so no cleanup issue. Cleanup is safe.
-
-### 4e. INFO — `THREE_ESM_URL` and `GLTF_LOADER_URL` version mismatch risk
-
-`THREE_ESM_URL = "https://unpkg.com/three@0.160.0/build/three.module.js"` — explicit version ✓
-
-`GLTF_LOADER_URL = "three/addons/loaders/GLTFLoader.js"` — this resolves via the importmap to `three/addons/`, which also pins to `three@0.160.0` ✓
-
-Both are consistent. Good.
+This is the only approach that correctly leverages MindAR's coordinate system. The model tracks the marker when visible, and freezes in its last real-world position when the marker is lost.
 
 ---
 
-## 5. Scale Calculation in MindARScene
+## Implementation Plan
 
-**Status: Correct with one note**
+### Changes to `src/components/ar/MindARScene.tsx`
+
+The entire world-anchoring block needs to be rewritten. The new logic:
 
 ```ts
-const normalizedScale = (MARKER_SIZE_MM / modelScale) / maxDim;
+if (i === 0 && modelUrl) {
+  let model: any = null;
+  const lastKnownMatrix = new ThreeLib.Matrix4();
+  let isWorldPlaced = false; // true once model has been seen at least once
+
+  // Load model and add to anchor group (standard MindAR way)
+  try {
+    // ... GLB loading, scale calc (unchanged) ...
+    anchor.group.add(model);
+  } catch (loadError) { ... }
+
+  // ── onTargetFound: marker is visible, MindAR's matrix is valid ────────
+  anchor.onTargetFound = () => {
+    if (model) {
+      if (isWorldPlaced) {
+        // Model was frozen in scene — move it back into the anchor group
+        // so it tracks the marker again
+        scene.remove(model);
+        model.matrixAutoUpdate = true;
+        anchor.group.add(model);
+        // Restore local-space position/rotation/scale
+        model.position.set(localPos.x, localPos.y, localPos.z);
+        model.quaternion.copy(localQuat);
+        model.scale.set(localScale.x, localScale.y, localScale.z);
+      }
+    }
+    onTargetFoundRef.current?.(i);
+  };
+
+  // ── onTargetLost: marker lost, anchor.group.matrix is NOW invisibleMatrix ──
+  // We must use lastKnownMatrix (updated every render frame) to freeze the model
+  anchor.onTargetLost = () => {
+    if (model) {
+      anchor.group.remove(model);
+      scene.add(model);
+      // Apply the last valid pose we recorded
+      model.matrix.copy(lastKnownMatrix);
+      model.matrix.decompose(model.position, model.quaternion, model.scale);
+      model.matrixAutoUpdate = false;
+      isWorldPlaced = true;
+    }
+    onTargetLostRef.current?.(i);
+  };
+
+  // ── Render loop: update lastKnownMatrix every frame while marker visible ──
+  // Store reference so we can update it in the animation loop
+  // We'll use anchor.visible to gate this
+  const updateLastKnown = () => {
+    if (anchor.visible) {
+      // anchor.group.matrix is valid while target is tracked
+      // We need the model's world matrix at this point
+      model?.updateWorldMatrix(true, false);
+      lastKnownMatrix.copy(model?.matrixWorld ?? new ThreeLib.Matrix4());
+    }
+  };
+  // Store for animation loop access
+  (anchor as any).__updateLastKnown = updateLastKnown;
+}
 ```
 
-With `MARKER_SIZE_MM = 150` and `modelScale = 1` (1:1):
-- A model with `maxDim = 150mm` → `normalizedScale = (150/1) / 150 = 1.0` → 1 MindAR unit → appears same width as the physical marker. **Correct.**
-- A model with `maxDim = 800mm` (a chair) → `normalizedScale = 150 / 800 = 0.1875` → appears ~18.75cm wide relative to a 15cm marker. At 1:1, a chair at 800mm should appear about 5.3× wider than the marker. **This is correct physical mapping.**
-
-For `modelScale = 50` (1:50):
-- Same chair: `(150/50) / 800 = 3 / 800 = 0.00375` → appears 0.5625mm relative to marker. **Correct — 50× smaller than 1:1.**
-
-The formula is mathematically correct.
-
-**One note:** `FLOAT_ABOVE_MARKER = 0.04` is in MindAR scene units. MindAR scene units are approximately equal to the physical marker width (150mm). So `0.04 units = 0.04 × 150mm = 6mm` of float, not 40mm as described in comments. To float 40mm: `0.04 / 0.15 = 0.267 units`. This is a comment/constant bug — the float is actually only 6mm above the marker, not 40mm.
-
----
-
-## 6. Generation Pipeline: GenerateExperience (`src/components/GenerateExperience.tsx`)
-
-**Status: Stable, with one concern**
-
-### 6a. INFO — QR code is generated twice
-
-The QR code is generated once during `handleGenerate` for storage upload, and a second time in the "Download QR Code" button handler. This is fine (idempotent), just slightly redundant.
-
-### 6b. INFO — `project.mind_file_url` accessed via `(project as any).mind_file_url`
-
-Line 572: `{(project as any).mind_file_url && ...}` — the `as any` cast suggests TypeScript doesn't know about this field on the `Project` type. This is a types file sync issue. The field is queried correctly in `ARViewer` via the `.select()` string, so the data is there at runtime. Low risk.
-
----
-
-## 7. Marker Generation (`src/lib/generateMarkers.ts` and `generateTabletopMarker.ts`)
-
-**Status: Stable**
-
-Both files generate 1200×1200 canvas images. The tabletop marker uses a high-contrast geometric pattern (QR-style corners, concentric rings, crosshairs). The multipoint markers use solid-colour backgrounds with large letters. Both meet MindAR's minimum 512×512 requirement and are high-contrast enough for reliable detection.
-
----
-
-## 8. MindAR Compiler (`src/lib/compileMindFile.ts`)
-
-**Status: Stable**
-
-Uses a module script tag with a `waitForCompiler` poll loop (10s timeout). This is robust. One minor note: if `loadCompilerScript` is called a second time (e.g. re-generating), `window.__MINDAR_COMPILER_LOADED` guard prevents double-loading. Correct.
-
----
-
-## 9. Landing, Permission, and Active screens
-
-**ARLanding** — Pure UI, no logic issues. Correctly shows scale for tabletop only.
-
-**ARPermission** — Pure UI, two buttons (Cancel → landing, Retry → detecting). Correct.
-
-**ARActiveView** (`src/components/ar/ARActiveView.tsx`) — This file still exists in the codebase but is **no longer used**. The active phase UI was moved inline into `ARDetection`. This is dead code that could cause confusion during future edits.
-
----
-
-## 10. ImportMap (`index.html`)
-
-**Status: Stable**
-
-Three.js r160 is pinned consistently in both the importmap and the CDN URL in `MindARScene.tsx`. The `es-module-shims` polyfill is loaded async before the importmap (correct order). No issues.
-
----
-
-## Summary of Issues
-
-| # | File | Severity | Issue |
-|---|------|----------|-------|
-| 1 | `ARViewer.tsx` | **Critical** | `signedModelUrl` is null when `MindARScene` mounts — model never loads |
-| 2 | `MindARScene.tsx` | **Critical** | Linked to #1 — no model URL on mount, no retry, second `startAR` call would crash |
-| 3 | `ARDetection.tsx` | **Warning** | Screenshot button is a stub — misleads users |
-| 4 | `ARDetection.tsx` | **Warning** | Reset (setIsActive false) re-shows scanning UI but `worldPlaced` prevents re-anchoring |
-| 5 | `MindARScene.tsx` | **Warning** | Two RAF frames may not be enough on slow devices — model still locks to screen |
-| 6 | `MindARScene.tsx` | **Info** | `FLOAT_ABOVE_MARKER = 0.04` comment says 40mm but actual float is ~6mm |
-| 7 | `ARActiveView.tsx` | **Info** | File is dead code — no longer imported anywhere |
-| 8 | `ARViewer.tsx` | **Info** | `handleReset` function is dead code |
-
----
-
-## Proposed Fixes (Prioritised)
-
-**Fix 1 (Critical) — Move signed URL fetch earlier, gate MindARScene on URL readiness**
-
-In `ARViewer.tsx`:
-- Remove `viewState === "detecting"` from the signed URL query's `enabled` condition. Let the URL fetch start as soon as the project loads.
-- In the "detecting" render, show a brief loading spinner if `signedModelUrl` is still undefined, and only render `<ARDetection>` (which renders `<MindARScene>`) once `signedModelUrl` is available.
-
-```tsx
-// Enable signed URL fetch as soon as we have a model_url
-enabled: !!project?.model_url,
-
-// In "detecting" case:
-case "detecting":
-  if (project.model_url && !signedModelUrl) {
-    return <LoadingScreen label="Preparing AR model…" />;
-  }
-  return <ARDetection ... modelUrl={signedModelUrl} ... />;
-```
-
-**Fix 2 (Warning) — Increase RAF delay to 5 frames or use setTimeout(100ms)**
-
-In `MindARScene.tsx`, replace the double RAF with a short `setTimeout`:
+Then in the render loop:
 ```ts
-anchor.onTargetFound = () => {
-  if (model && !worldPlaced) {
-    setTimeout(() => {
-      if (worldPlaced) return;
-      // ... world placement logic
-    }, 150); // 150ms gives MindAR pose time to stabilise
-  }
-};
+renderer.setAnimationLoop(() => {
+  // Update last-known matrices for all anchors before rendering
+  mindarThree.anchors?.forEach((a: any) => a.__updateLastKnown?.());
+  renderer.render(scene, camera);
+});
 ```
 
-**Fix 3 (Warning) — Reset properly re-anchors or changes button label**
+### Storing local-space values
 
-Two options:
-- Option A: Change the reset button label to "View Info" or remove it — don't imply re-scanning is possible.
-- Option B: Implement true reset — when the reset button is pressed, call `ARViewer.handleReset()` which bumps `resetKey` and remounts the whole `ARDetection`/`MindARScene` stack fresh.
+We need to save the model's local position/quaternion/scale (set during the loading phase) so we can restore them when the model goes back into the anchor group:
 
-**Fix 4 (Info) — Fix FLOAT_ABOVE_MARKER constant**
+```ts
+// After model.scale.set / model.position.set / model.rotation.y = ...
+const localPos = model.position.clone();
+const localQuat = model.quaternion.clone();
+const localScale = model.scale.clone();
+```
 
-Change `FLOAT_ABOVE_MARKER = 0.04` to `FLOAT_ABOVE_MARKER = 0.267` for a true 40mm float. Or rename the constant to `FLOAT_ABOVE_MARKER_UNITS` and add a comment clarifying the unit conversion.
+### Summary of files to change
 
-**Fix 5 (Info) — Remove `ARActiveView.tsx` dead code**
+Only `src/components/ar/MindARScene.tsx` needs to change.
 
-Delete `src/components/ar/ARActiveView.tsx` to keep the codebase clean.
+The animation loop, loading, and scale calculation all stay the same. Only the `onTargetFound` / `onTargetLost` handlers and the animation loop update change.
 
-**Fix 6 (Info) — Remove dead `handleReset` from ARViewer or wire it up**
+---
 
-Either delete `handleReset` (if reset via remount is not needed) or pass it into `ARDetection` as an `onReset` prop.
+## Why This Works
+
+- MindAR's camera is fixed. When the marker is visible, `anchor.group.matrix` is a valid camera-relative pose updated every frame.
+- `model.matrixWorld` (which is `anchor.group.matrixWorld * model.localMatrix`) encodes the model's full position in the scene's camera-relative space.
+- When we freeze `model.matrix = lastKnownMatrix` and detach from the anchor group, the model is now a direct child of scene with a camera-relative matrix that doesn't change. Since the camera never moves, the model appears stationary relative to the room.
+- When the user re-scans, we restore the model to the anchor group so it tracks again.
+
+This is the standard, documented approach for "keep visible after lost" in MindAR's Three.js API — we're just implementing the Three.js version of what the A-Frame community does with `visible=true` on target lost.
