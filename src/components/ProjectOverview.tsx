@@ -116,7 +116,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Scale</span>
-                    <p className="font-mono font-medium">{project.scale || "1:20"}</p>
+                    <p className="font-mono font-medium">{project.scale || "1:1"}</p>
                   </div>
                   <div>
                     <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Rotation</span>
