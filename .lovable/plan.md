@@ -1,97 +1,119 @@
 
-# Tabletop Two-Marker System: QR Code + AR Reference Image
+# Fix: AR Camera Closes and Grey Screen Appears After Marker Detection
 
-## Problem
+## Root Cause (The Real Bug)
 
-The current tabletop flow uses the QR code as both the launch link AND the MindAR tracking target. This is fundamentally broken because:
+Looking at the screenshot and the code, the problem is architectural. The AR experience is split into two completely separate React components that cannot share the same camera/AR session:
 
-1. QR codes are designed to encode URLs — their visual appearance is defined by URL content, not by feature richness for computer vision tracking
-2. The client scans the QR to reach the web app, then must point the camera at that same QR code to trigger AR — but the tiny printed QR is a poor, unreliable tracking target
-3. There is no separation of concerns between "how to launch the experience" and "what to track in AR"
+**What happens today:**
+1. `ARDetection` mounts → `MindARScene` inside it starts the camera, loads the .mind file, and starts the WebGL render loop
+2. User points camera at AR marker → MindAR detects it → `onTargetFound` fires → `allDetected` becomes true → `onAllDetected()` is called
+3. `ARViewer` switches `viewState` from `"detecting"` to `"active"`
+4. **`ARDetection` UNMOUNTS** → its `MindARScene` child runs its cleanup → `mindarThree.stop()` is called → **camera stream stops, WebGL context is destroyed**
+5. `ARActiveView` mounts → it renders a static grey `bg-gradient` `<div>` with buttons — **there is no camera, no WebGL, no 3D model**
 
-## Correct Flow (After Fix)
+The user sees: project name pill (top left) ✓ green dot (top right) camera/reset buttons — all overlaid on a dead grey rectangle. This is exactly what the screenshot shows.
 
-```text
-GENERATE  → QR Code (links to /view/shareId)
-          → AR Reference Image (dedicated tracking target, human-friendly pattern)
-          → .mind file compiled from AR Reference Image only
+**This is not a MindAR bug. It is a design flaw**: the AR session is destroyed at the exact moment the user needs it most.
 
-CLIENT    → Prints QR Code sheet + AR Reference Image sheet
-          → Scans QR Code with phone camera → opens AR landing page
-          → Taps "Launch AR" → camera activates
-          → Points camera at AR Reference Image → model appears
+---
+
+## The Fix: Eliminate the "Active" State — Keep MindARScene Alive
+
+The correct pattern for AR viewers is to keep the AR session running the entire time the user is in the experience. The UI overlay (info pill, buttons) should render **on top of** the live camera feed, not replace it.
+
+### Approach: Merge ARDetection + ARActiveView into a single persistent AR screen
+
+The `"active"` view state should be removed. Instead, `ARDetection` should have two display phases:
+1. **Detection phase** (guide card + marker status indicators visible, camera running)
+2. **Active phase** (guide card hidden, project info pill + action buttons visible, camera still running — same `MindARScene` never unmounts)
+
+This is controlled by a local boolean inside `ARDetection` (or promoted to a prop), not by swapping the entire component in `ARViewer`.
+
+---
+
+## Files to Change
+
+### 1. `src/components/ar/ARDetection.tsx`
+- Add an `isActive` local state that becomes `true` when `allDetected` fires (instead of immediately calling `onAllDetected`)  
+- When `isActive === false`: show the detection guide card and marker status bar
+- When `isActive === true`: show the `ARActiveView`-equivalent overlay (project name pill, camera button, reset button, exit button) while keeping `MindARScene` mounted underneath
+- Accept `project` name/description props to display in the active overlay
+- Accept `onExit` and `onReset` props
+- Remove the call to `onAllDetected` (or keep it as a side-effect for parent logging if needed, but don't use it to swap components)
+
+### 2. `src/pages/ARViewer.tsx`
+- Remove the `"active"` view state entirely from the state machine
+- Instead of switching to `"active"`, stay in `"detecting"` — let `ARDetection` internally handle the UI phase switch
+- Pass `project.name`, `project.description`, `onReset`, and `onExit` props down to `ARDetection`
+- Update `handleReset` to reset marker state (already done) — ARDetection will reset its `isActive` state via a prop or key change
+
+### 3. `src/components/ar/ARActiveView.tsx`
+- This component becomes redundant and can be deleted, or kept as a pure presentational component that `ARDetection` renders internally (preferred — cleaner separation)
+- The grey gradient background `div` must be removed. The active overlay must have `bg-transparent` so the camera feed shows through
+
+---
+
+## Detailed Implementation
+
+### `ARDetection.tsx` — New Internal State Machine
+
+```tsx
+const [isActive, setIsActive] = useState(false);
+
+// When all markers detected, switch to active phase (don't unmount!)
+useEffect(() => {
+  if (allDetected && !isActive) {
+    // Small delay for "Loading model..." UX moment
+    const t = setTimeout(() => {
+      setIsActive(true);
+      onAllDetected?.(); // notify parent (optional, for state tracking)
+    }, 800);
+    return () => clearTimeout(t);
+  }
+}, [allDetected, isActive, onAllDetected]);
 ```
 
-## What Changes
+When `isActive` is true, hide the detection UI and show the AR controls overlay — but `MindARScene` stays mounted in both phases.
 
-### 1. New AR Reference Image Generator (`src/lib/generateTabletopMarker.ts`)
+### `ARActiveView.tsx` — Remove the grey background
 
-A new function that generates a high-contrast, feature-rich 1200x1200px image specifically designed for MindAR detection. Unlike the coloured multipoint markers, this uses a black-and-white pattern with:
-- Bold geometric shapes (concentric squares, diagonal lines, circles, crosses)
-- Project name and "AR MARKER" label for human readability
-- High contrast — white on black or black on white — for reliable detection in varied lighting
-- Unique corner features to help MindAR establish orientation
+The current code has:
+```tsx
+<div className="fixed inset-0 bg-black flex flex-col">
+  <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 via-zinc-700 to-zinc-800" />
+```
 
-This image becomes the `.mind` compilation source for tabletop mode.
+This must become fully transparent when used as an overlay:
+```tsx
+<div className="fixed inset-0 flex flex-col bg-transparent">
+  {/* no background div — camera shows through */}
+```
 
-### 2. Generation Pipeline (`src/components/GenerateExperience.tsx`)
+### Reset Flow
+When the user taps Reset:
+- `ARViewer.handleReset` resets marker state and sets `viewState` back to `"detecting"` 
+- Since `viewState` was already `"detecting"` (it never changed to `"active"` anymore), we need a different signal
+- Solution: pass a `resetKey` or call a ref-exposed `reset()` function inside `ARDetection` to set `isActive` back to `false`
+- Simplest: pass `isActive` control up via a callback and use a `key` prop on `ARDetection` to remount it on reset (remounting is acceptable here since the user intentionally resets)
 
-Update the tabletop branch of `handleGenerate` to:
-1. Generate the AR reference image (canvas → blob)
-2. Upload it to `project-assets/{projectId}/ar_reference.png`
-3. Store the public URL (saved into `marker_image_urls` as `{ "tabletop": url }` so no schema change is needed)
-4. Compile the `.mind` file from the AR reference image (NOT the QR code anymore)
-5. Continue uploading QR code and `.mind` file as before
+---
 
-The QR code remains unchanged — it still encodes the share URL.
+## Summary of Changes
 
-### 3. Downloads Section (`src/components/GenerateExperience.tsx` and `src/components/ProjectOverview.tsx`)
+| File | Change |
+|---|---|
+| `src/components/ar/ARDetection.tsx` | Add `isActive` state; render detection UI OR active overlay UI based on it; keep `MindARScene` mounted always |
+| `src/components/ar/ARActiveView.tsx` | Remove grey/black background so it can overlay a live camera feed |
+| `src/pages/ARViewer.tsx` | Remove `"active"` state; pass project info + exit/reset handlers to `ARDetection`; use `key` prop to reset `ARDetection` on reset |
 
-Add a second download button for tabletop mode:
-- **QR Code** — unchanged, downloads the share link QR
-- **AR Reference Image** — downloads the branded tracking marker image (new)
-- **Print Sheet PDF** — a combined A4 PDF showing both images side-by-side with instructions (new, optional — see below)
+No database changes, no new dependencies, no new files needed.
 
-### 4. Tabletop Print Sheet PDF (`src/lib/generateTabletopPDF.ts`)
+---
 
-A new PDF generator for tabletop mode (equivalent to the multipoint marker PDFs). A4 portrait layout:
-- Header bar (project name)
-- **Left column**: QR code with label "Scan to launch AR"
-- **Right column**: AR Reference Image with label "Point camera here"
-- Instructions section explaining the two-step process
-- Footer branding
+## Why This Definitely Fixes the Bug
 
-This gives clients a single printable sheet that explains the full workflow.
-
-### 5. ARViewer / ARDetection (no change needed)
-
-The AR viewer already reads `mind_file_url` from the project and passes it to MindARScene. Since we're now compiling the `.mind` file from the AR reference image instead of the QR code, MindAR will correctly track the reference image. No viewer code changes required.
-
-## Technical Details
-
-### Database (no migration needed)
-
-The `marker_image_urls` column (JSONB) already exists and is used for multipoint markers. For tabletop, we store `{ "tabletop": "<url>" }` — the same column, different key. No schema change required.
-
-### AR Reference Image Design
-
-The image must be MindAR-friendly:
-- Minimum 512x512px recommended; we'll use 1200x1200px
-- High contrast (black/white preferred over color for reliability)
-- Rich local features — avoid large uniform areas
-- Unique enough to distinguish from background environments
-
-The generator will draw: outer border, inner concentric square, diagonal corner lines, a central compass-style cross, circular dots at feature points, and clear text labels.
-
-### Files to Create / Edit
-
-- **Create** `src/lib/generateTabletopMarker.ts` — canvas-based AR reference image generator
-- **Create** `src/lib/generateTabletopPDF.ts` — A4 print sheet PDF for tabletop projects
-- **Edit** `src/components/GenerateExperience.tsx` — update tabletop pipeline + downloads section
-- **Edit** `src/components/ProjectOverview.tsx` — add AR reference image download button for tabletop mode
-
-### No changes to:
-- `MindARScene.tsx` — already reads `imageTargetSrc` from `mind_file_url`
-- `ARViewer.tsx` — already passes `mind_file_url` through
-- `ARDetection.tsx` — unchanged
-- Database schema — no migration needed
+- `MindARScene` never unmounts during the user's AR session
+- The camera stream, WebGL context, and 3D model all remain alive
+- The UI phase change (detection → active controls) is a CSS visibility toggle inside a single component, not a React tree swap
+- The grey background the user sees in the screenshot is replaced by the live camera feed + rendered 3D model
