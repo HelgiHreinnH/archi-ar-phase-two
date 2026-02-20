@@ -190,17 +190,21 @@ const MindARScene = ({
             // Standard MindAR way: model lives inside anchor.group
             anchor.group.add(model);
 
-            // ── Render loop hook: update lastKnownMatrix every frame while visible ──
-            // MindAR's camera is fixed at (0,0,0); anchor.group.matrix is the
-            // camera-relative pose of the marker. model.matrixWorld combines both.
-            // We sample it every frame so we always have the freshest valid pose.
-            const updateLastKnown = () => {
-              if (anchor.visible && model) {
+            // ── onTargetUpdate: fires every frame MindAR has a valid pose ──────
+            // This callback is driven directly by MindAR's tracking pipeline and
+            // only fires when worldMatrix is non-null — making it structurally
+            // impossible to receive a zero/invisible matrix here.
+            // The previous render-loop approach had a race condition: the loop
+            // could sample model.matrixWorld between MindAR zeroing group.matrix
+            // (step 2) and updating anchor.visible (step 3), poisoning
+            // lastKnownMatrix with the invisibleMatrix and causing the
+            // "stuck to screen" bug.
+            anchor.onTargetUpdate = () => {
+              if (model) {
                 model.updateWorldMatrix(true, false);
                 lastKnownMatrix.copy(model.matrixWorld);
               }
             };
-            (anchor as any).__updateLastKnown = updateLastKnown;
 
             // ── onTargetFound: MindAR has already set anchor.group.matrix ─
             anchor.onTargetFound = () => {
@@ -250,9 +254,9 @@ const MindARScene = ({
       setIsStarting(false);
       onReadyRef.current?.();
 
-      // Render loop — sample lastKnownMatrix for every anchor before rendering
+      // Render loop — pose sampling is handled by anchor.onTargetUpdate,
+      // so the animation loop only needs to render the scene.
       renderer.setAnimationLoop(() => {
-        mindarThree.anchors?.forEach((a: any) => a.__updateLastKnown?.());
         renderer.render(scene, camera);
       });
     } catch (err) {
