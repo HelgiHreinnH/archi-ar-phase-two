@@ -37,10 +37,12 @@ const MINDAR_THREE_URL =
 const MARKER_SIZE_MM = 150;
 
 /**
- * Float height above the marker plane in MindAR scene units (metres ≈ units here).
- * 0.04 ≈ 40 mm above the printed marker.
+ * Float height above the marker plane in MindAR scene units.
+ * 1 MindAR unit = MARKER_SIZE_MM (150mm) in real space.
+ * To float 40mm: 40 / 150 ≈ 0.267 units.
+ * (The old value 0.04 was only ~6mm — a comment/constant mismatch.)
  */
-const FLOAT_ABOVE_MARKER = 0.04;
+const FLOAT_ABOVE_MARKER = 0.267;
 
 async function loadMindAR(): Promise<void> {
   if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
@@ -192,28 +194,28 @@ const MindARScene = ({
           // After this, the model is visible regardless of where the camera points.
           anchor.onTargetFound = () => {
             if (model && !worldPlaced) {
-              // Defer capture by two render frames so Three.js has propagated
-              // the anchor's real-world matrix before we read matrixWorld.
-              // Without this delay, matrixWorld is the identity matrix (origin =
-              // directly in front of the camera) and the model locks to screen-space.
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  if (worldPlaced) return; // guard against double-fire
-                  model.updateWorldMatrix(true, false);
-                  const worldMatrix = model.matrixWorld.clone();
+              // Defer capture by 150ms — gives MindAR's pose estimation time to
+              // stabilise before we read matrixWorld. Double-RAF (~32ms) is not
+              // enough on slow/low-power mobile devices: the anchor matrix may
+              // still be identity if the tracking pass hasn't completed yet,
+              // causing the model to lock to screen-space (directly in front of camera).
+              setTimeout(() => {
+                if (worldPlaced) return; // guard against double-fire
 
-                  anchor.group.remove(model);
-                  scene.add(model);
+                model.updateWorldMatrix(true, false);
+                const worldMatrix = model.matrixWorld.clone();
 
-                  // Decompose the captured world matrix back into position/quat/scale
-                  model.matrix.copy(worldMatrix);
-                  model.matrix.decompose(model.position, model.quaternion, model.scale);
-                  // Freeze matrix so Three.js doesn't overwrite it with local-space values
-                  model.matrixAutoUpdate = false;
+                anchor.group.remove(model);
+                scene.add(model);
 
-                  worldPlaced = true;
-                });
-              });
+                // Decompose the captured world matrix back into position/quat/scale
+                model.matrix.copy(worldMatrix);
+                model.matrix.decompose(model.position, model.quaternion, model.scale);
+                // Freeze matrix so Three.js doesn't overwrite it with local-space values
+                model.matrixAutoUpdate = false;
+
+                worldPlaced = true;
+              }, 150);
             }
             onTargetFoundRef.current?.(i);
           };

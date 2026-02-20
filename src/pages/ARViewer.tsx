@@ -76,10 +76,13 @@ const ARViewer = () => {
 
   const [resetKey, setResetKey] = useState(0);
 
-  const handleReset = () => {
+  // True reset: bump resetKey to remount ARDetection + MindARScene entirely.
+  // This is wired to the reset button in the active phase so the user can
+  // re-anchor the model from scratch without leaving the AR session.
+  const handleReset = useCallback(() => {
     setMarkers({ A: "searching", B: "searching", C: "searching" });
     setResetKey((k) => k + 1);
-  };
+  }, []);
 
   const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
 
@@ -88,8 +91,10 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Resolve the model URL (generate signed URL for Supabase storage)
-  const { data: signedModelUrl } = useQuery({
+  // Resolve the model URL as soon as the project loads — NOT gated on viewState.
+  // If we wait until "detecting" to fetch this, MindARScene mounts before the URL
+  // is ready, modelUrl is null on mount, and the GLB is never loaded.
+  const { data: signedModelUrl, isLoading: isSignedUrlLoading } = useQuery({
     queryKey: ["signed-model-url", project?.model_url],
     queryFn: async () => {
       if (!project?.model_url) return null;
@@ -102,7 +107,7 @@ const ARViewer = () => {
       if (error) throw error;
       return data.signedUrl;
     },
-    enabled: !!project?.model_url && viewState === "detecting",
+    enabled: !!project?.model_url,
   });
 
   // Loading state
@@ -152,6 +157,19 @@ const ARViewer = () => {
       );
 
     case "detecting":
+      // Gate MindARScene on the signed URL being ready.
+      // Without this guard, MindARScene mounts with modelUrl=undefined and
+      // the GLB load is skipped entirely with no retry path.
+      if (project.model_url && isSignedUrlLoading) {
+        return (
+          <div className="fixed inset-0 bg-black flex items-center justify-center">
+            <div className="text-center space-y-3">
+              <Loader2 className="h-8 w-8 animate-spin text-white/70 mx-auto" />
+              <p className="text-white/50 text-sm">Preparing AR model…</p>
+            </div>
+          </div>
+        );
+      }
       return (
         <ARDetection
           key={resetKey}
@@ -161,6 +179,7 @@ const ARViewer = () => {
           onTargetLost={handleTargetLost}
           onCancel={() => setViewState("landing")}
           onExit={() => setViewState("landing")}
+          onReset={handleReset}
           onError={(err) => handleARError(err)}
           imageTargetSrc={project.mind_file_url || undefined}
           modelUrl={signedModelUrl}
