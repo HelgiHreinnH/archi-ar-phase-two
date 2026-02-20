@@ -1,41 +1,35 @@
 
-# Fix: Replace Render-Loop Matrix Sampling with `onTargetUpdate`
+# Update MindARScene.tsx: Apply the Three Deep-Research Fixes
 
-## What the Research Confirmed
+## What the Current File Has
 
-The previous two implementation attempts both failed for the same underlying reason, just at different layers. The research into MindAR's source code identified the exact sequence of events that happens every tracking frame:
+The last approved plan successfully switched from the render-loop race condition to `onTargetUpdate`. That was the right architectural move. However, three specific issues remain in the current implementation that the deep research pinpointed:
 
-```
-1. group.visible = (worldMatrix !== null)         ← Three.js Group shown/hidden
-2. group.matrix = worldMatrix OR invisibleMatrix  ← pose set or zeroed
-3. anchor.visible = true/false                    ← the JS flag updated
-4. onTargetLost() / onTargetFound() fires         ← our callbacks
-5. onTargetUpdate() fires (every frame, tracked)  ← only while valid
-```
+---
 
-The current code updates `lastKnownMatrix` inside `renderer.setAnimationLoop` by checking `anchor.visible` (the JS flag, set in step 3). The render loop runs independently of MindAR's tracking loop — if the render loop executes between step 1 (group hidden, matrix zeroed) and step 3 (flag updated), `anchor.visible` is still `true` but `group.matrix` is already `invisibleMatrix`. The code then calls `model.updateWorldMatrix()` and copies a near-zero/garbage matrix into `lastKnownMatrix`. When `onTargetLost` fires and applies this poisoned matrix, the model snaps to a garbage position or screen-centre.
+## The Three Remaining Issues
 
-**This is the race condition that causes the "stuck to screen" behaviour.**
+### Issue 1: Missing `model.updateMatrix()` in `onTargetFound`
 
-The fix: **`anchor.onTargetUpdate`** fires directly from MindAR's own tracking pipeline, only and always when `worldMatrix` is valid. It is structurally impossible for this callback to fire with a zero matrix. Using it to sample `lastKnownMatrix` eliminates the race condition entirely.
-
-## Changes: Only `src/components/ar/MindARScene.tsx`
-
-### What gets removed
-- The `updateLastKnown` function (lines 197–202)
-- The `(anchor as any).__updateLastKnown = updateLastKnown` assignment (line 203)
-- The `mindarThree.anchors?.forEach(...)` call inside `renderer.setAnimationLoop` (line 255)
-
-### What gets added
-In place of the removed `updateLastKnown` block, a single callback:
-
+**Current code (line 217–219):**
 ```ts
-// ── onTargetUpdate: fires every frame MindAR has a valid pose ──────────
-// This is MindAR's own tracking callback — it only fires when worldMatrix
-// is non-null, making it race-condition-free.
-// The render loop approach (previous implementation) had a race between
-// group.visible being set to false and anchor.visible being updated, which
-// could poison lastKnownMatrix with the invisibleMatrix (zero matrix).
+model.position.set(localPos.x, localPos.y, localPos.z);
+model.quaternion.copy(localQuat);
+model.scale.set(localScale.x, localScale.y, localScale.z);
+isWorldPlaced = false;
+// ← onTargetUpdate fires IMMEDIATELY after this in the same MindAR frame
+```
+
+**The problem:** Three.js does not immediately recompute `model.matrix` when you set `position`/`quaternion`/`scale`. It defers that recomputation until the next `renderer.render()` traversal. But `onTargetUpdate` fires in the same MindAR frame, right after `onTargetFound` — before `renderer.render()` has run. So when `onTargetUpdate` calls `model.updateWorldMatrix(true, false)`, `model.matrix` still holds the **old frozen matrix** from when the model was in scene space.
+
+**Fix:** Call `model.updateMatrix()` after restoring transforms. This forces Three.js to recompute `model.matrix` from the current `position`/`quaternion`/`scale` immediately, so `onTargetUpdate` samples the correct local transform.
+
+---
+
+### Issue 2: `onTargetUpdate` Uses `updateWorldMatrix` + `matrixWorld` (Timing-Dependent)
+
+**Current code (line 202–207):**
+```ts
 anchor.onTargetUpdate = () => {
   if (model) {
     model.updateWorldMatrix(true, false);
@@ -44,34 +38,120 @@ anchor.onTargetUpdate = () => {
 };
 ```
 
-The render loop becomes clean — just the render call:
+**The problem:** `updateWorldMatrix(true, false)` walks UP the parent chain to compose `matrixWorld`. This depends on Three.js's internal matrix propagation state being current for all ancestors. Given the interplay between MindAR's tracking loop and Three.js's update cycle, this can sample a stale or partially-updated matrix.
+
+**Fix:** Compute `lastKnownMatrix` by directly multiplying `anchor.group.matrix` (which MindAR has just written with a valid pose — no timing dependency) by `model.matrix` (the model's local transform within the group). This is mathematically identical to `matrixWorld` but bypasses Three.js propagation entirely:
 
 ```ts
-renderer.setAnimationLoop(() => {
-  renderer.render(scene, camera);
-});
+anchor.onTargetUpdate = () => {
+  if (model && !isWorldPlaced) {
+    // Force local matrix current from position/quat/scale
+    model.updateMatrix();
+    // Build world matrix directly: group pose × model local offset
+    // anchor.group.matrix is set by MindAR just before this fires — always valid
+    lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
+  }
+};
 ```
 
-### Everything else stays identical
+The `!isWorldPlaced` guard is also added — we should only update `lastKnownMatrix` while the model is inside the anchor group being tracked. If the model is frozen in scene space (`isWorldPlaced = true`), sampling makes no sense.
 
-- `onTargetFound` logic (re-attach model to anchor group, restore local transforms) — unchanged
-- `onTargetLost` logic (detach from anchor group, attach to scene, apply `lastKnownMatrix`, freeze) — unchanged  
-- `isWorldPlaced` flag — unchanged
-- `localPos` / `localQuat` / `localScale` capture — unchanged
-- Scale calculation, float constant, lighting, camera, CSS injection — all unchanged
-- `ARViewer.tsx`, `ARDetection.tsx` — not touched
+---
 
-## Why This Works
+### Issue 3: Redundant `model.matrix.decompose(...)` in `onTargetLost`
 
-MindAR's camera sits fixed at `(0,0,0)`. The anchor group moves around it. `model.matrixWorld` while inside `anchor.group` is therefore a camera-relative transform — when the marker is in a fixed physical position in the room, this matrix is constant (or near-constant, modulo tracking jitter). Freezing `model.matrix = lastKnownMatrix` and moving the model to the scene root means: direct child of scene, fixed camera-relative matrix, camera never moves → model appears stationary in the room.
+**Current code (line 233–235):**
+```ts
+model.matrix.copy(lastKnownMatrix);
+model.matrix.decompose(model.position, model.quaternion, model.scale);
+model.matrixAutoUpdate = false;
+```
 
-`onTargetUpdate` guarantees that every value ever written into `lastKnownMatrix` came from a frame where MindAR had a valid pose. The last value before the marker is lost is therefore the freshest valid pose — exactly what we want for the freeze.
+**The problem:** After setting `model.matrixAutoUpdate = false`, Three.js uses `model.matrix` directly for rendering — it ignores `model.position`, `model.quaternion`, `model.scale`. The `decompose` call writes into those properties unnecessarily and introduces floating point precision loss (decompose → recompose is lossy). It also reads from `model.matrix` which was just set — a no-op that adds overhead.
 
-## Summary
+**Fix:** Remove the `decompose` line. `model.matrix.copy(lastKnownMatrix)` is all that is needed. With `matrixAutoUpdate = false`, the renderer uses the matrix directly.
 
-| Location | Change |
-|---|---|
-| `MindARScene.tsx` line 197–203 | Remove `updateLastKnown` fn and `__updateLastKnown` assignment |
-| `MindARScene.tsx` (same location) | Add `anchor.onTargetUpdate` callback |
-| `MindARScene.tsx` line 254–257 | Remove `forEach(__updateLastKnown)` from animation loop |
-| All other files | No changes |
+---
+
+## The Complete Change Set (One File Only)
+
+**File:** `src/components/ar/MindARScene.tsx`
+
+### Change A — `onTargetFound` (around line 217): Add `model.updateMatrix()`
+
+```ts
+anchor.onTargetFound = () => {
+  if (model && isWorldPlaced) {
+    scene.remove(model);
+    model.matrixAutoUpdate = true;
+    anchor.group.add(model);
+    model.position.set(localPos.x, localPos.y, localPos.z);
+    model.quaternion.copy(localQuat);
+    model.scale.set(localScale.x, localScale.y, localScale.z);
+    model.updateMatrix(); // ← NEW: force local matrix current before onTargetUpdate samples
+    isWorldPlaced = false;
+  }
+  onTargetFoundRef.current?.(i);
+};
+```
+
+### Change B — `onTargetUpdate` (around line 202): Replace with direct matrix multiplication
+
+```ts
+anchor.onTargetUpdate = () => {
+  if (model && !isWorldPlaced) {
+    // Force local matrix current from current position/quat/scale
+    model.updateMatrix();
+    // Compute world matrix directly: MindAR group pose × model local offset.
+    // anchor.group.matrix is written by MindAR immediately before this callback fires
+    // — no Three.js propagation timing dependency.
+    lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
+  }
+};
+```
+
+### Change C — `onTargetLost` (around line 233): Remove the `decompose` call
+
+```ts
+anchor.onTargetLost = () => {
+  if (model && !isWorldPlaced) {
+    anchor.group.remove(model);
+    scene.add(model);
+    model.matrix.copy(lastKnownMatrix);
+    // matrixAutoUpdate = false tells Three.js to use model.matrix directly.
+    // No need to decompose — decompose adds floating point error with no benefit.
+    model.matrixAutoUpdate = false;
+    isWorldPlaced = true;
+  }
+  onTargetLostRef.current?.(i);
+};
+```
+
+---
+
+## Why This Is Now Correct
+
+MindAR's camera sits fixed at `(0,0,0)`. The scene root is identity. `anchor.group.matrix` holds the marker's current camera-relative pose, written directly by MindAR's CV pipeline.
+
+`lastKnownMatrix = anchor.group.matrix × model.matrix` is the model's position in camera-relative scene space. This value is computed using only data MindAR has just written (no propagation timing dependency).
+
+When the model moves to scene root with `model.matrix = lastKnownMatrix` and `matrixAutoUpdate = false`:
+- Camera never moves (always at origin)
+- Model matrix is a fixed camera-relative transform
+- Model appears stationary in the physical room
+
+When the marker is re-detected:
+- `model.updateMatrix()` ensures `model.matrix` reflects the restored `localPos/localQuat/localScale`
+- MindAR resumes updating `anchor.group.matrix` with live tracking
+- `onTargetUpdate` computes correct `lastKnownMatrix` immediately
+
+---
+
+## Summary Table
+
+| Change | Location | Lines | Reason |
+|---|---|---|---|
+| Add `model.updateMatrix()` | `onTargetFound`, after scale/pos/quat restore | ~219 | Ensures local matrix is current before `onTargetUpdate` samples it in the same frame |
+| Replace `onTargetUpdate` body | `anchor.onTargetUpdate` callback | ~202–207 | Direct matrix multiplication bypasses Three.js propagation timing; add `!isWorldPlaced` guard |
+| Remove `model.matrix.decompose(...)` | `onTargetLost` | ~234 | Unnecessary with `matrixAutoUpdate = false`; adds floating point loss |
+| No other files | — | — | `ARViewer.tsx`, `ARDetection.tsx`, all other files untouched |
