@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Copy, Link2, Download, Pencil,
-  MapPin, ChevronDown, ChevronUp, FileText, ExternalLink,
+  MapPin, ChevronDown, ChevronUp, FileText, ExternalLink, Image,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
@@ -12,6 +12,7 @@ import type { MarkerData } from "@/components/MarkerCoordinateEditor";
 import QRCode from "qrcode";
 import ModelViewer3D from "@/components/ModelViewer3D";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
+import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 
 type Project = Tables<"projects">;
 
@@ -201,6 +202,43 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     QR Code
                   </Button>
 
+                  {/* Tabletop downloads */}
+                  {mode === "tabletop" && (() => {
+                    const markerImageUrlsData = project.marker_image_urls as Record<string, string> | null;
+                    const arRefUrl = markerImageUrlsData?.tabletop;
+                    return arRefUrl ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full justify-start gap-2 h-8"
+                          asChild
+                        >
+                          <a href={arRefUrl} download={`ar_marker_${project.name.replace(/\s+/g, "_")}.png`} target="_blank" rel="noopener noreferrer">
+                            <Image className="h-3.5 w-3.5" />
+                            AR Reference Image
+                          </a>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full justify-start gap-2 h-8"
+                          onClick={async () => {
+                            try {
+                              await downloadTabletopPrintSheet(project.name, shareUrl!, arRefUrl);
+                            } catch {
+                              toast({ title: "PDF generation failed", variant: "destructive" });
+                            }
+                          }}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          Print Sheet (PDF)
+                        </Button>
+                      </>
+                    ) : null;
+                  })()}
+
+                  {/* Multipoint marker downloads */}
                   {mode === "multipoint" && markerData && (
                     <>
                       <div className="space-y-1">

@@ -15,6 +15,8 @@ import QRCode from "qrcode";
 import { generateAllMarkerImages, canvasToImage, type MarkerPoint } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
+import { generateTabletopMarkerImage, markerCanvasToImage } from "@/lib/generateTabletopMarker";
+import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 
 type Project = Tables<"projects">;
 
@@ -199,21 +201,31 @@ const GenerateExperience = ({
         .from("project-assets")
         .getPublicUrl(qrPath);
 
-      // ── Tabletop: compile QR image into .mind target ──
+      // ── Tabletop: generate AR reference image → compile into .mind target ──
       if (mode === "tabletop" && !mindFileUrl) {
+        setStep("markers");
+
+        // 1. Generate the dedicated AR tracking reference image
+        const { canvas: arCanvas, blob: arBlob } = await generateTabletopMarkerImage(project.name);
+
+        // 2. Upload the AR reference image
+        const arRefPath = `${projectPath}/ar_reference.png`;
+        const { error: arUploadErr } = await supabase.storage
+          .from("project-assets")
+          .upload(arRefPath, arBlob, { contentType: "image/png", upsert: true });
+        if (arUploadErr) throw arUploadErr;
+
+        const { data: arRefUrlData } = supabase.storage
+          .from("project-assets")
+          .getPublicUrl(arRefPath);
+        markerImageUrls = { tabletop: arRefUrlData.publicUrl };
+
+        // 3. Compile .mind file from the AR reference image (not the QR code)
         setStep("compiling");
         setCompileProgress(0);
 
-        // Convert QR canvas to an HTMLImageElement for the compiler
-        const qrDataUrl = qrCanvas.toDataURL("image/png");
-        const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new window.Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = qrDataUrl;
-        });
-
-        const { blob: mindBlob } = await compileMindFile([qrImg], (p) =>
+        const arImg = await markerCanvasToImage(arCanvas);
+        const { blob: mindBlob } = await compileMindFile([arImg], (p) =>
           setCompileProgress(p)
         );
 
@@ -242,7 +254,8 @@ const GenerateExperience = ({
         mind_file_url: mindFileUrl,
       };
 
-      if (mode === "multipoint") {
+      // Store marker_image_urls for both modes
+      if (Object.keys(markerImageUrls).length > 0) {
         updatePayload.marker_image_urls = markerImageUrls;
       }
 
@@ -460,6 +473,49 @@ const GenerateExperience = ({
               <Download className="h-3 w-3" />
               Download QR Code
             </Button>
+
+            {/* Tabletop downloads */}
+            {mode === "tabletop" && (() => {
+              const markerImageUrlsData = project.marker_image_urls as Record<string, string> | null;
+              const arRefUrl = markerImageUrlsData?.tabletop;
+              return (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Print both files — scan the QR to launch, point camera at the AR Marker to activate.
+                  </p>
+                  {arRefUrl && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start gap-2"
+                      asChild
+                    >
+                      <a href={arRefUrl} download={`ar_marker_${project.name.replace(/\s+/g, "_")}.png`} target="_blank" rel="noopener noreferrer">
+                        <Download className="h-3 w-3" />
+                        Download AR Reference Image
+                      </a>
+                    </Button>
+                  )}
+                  {arRefUrl && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start gap-2"
+                      onClick={async () => {
+                        try {
+                          await downloadTabletopPrintSheet(project.name, shareUrl!, arRefUrl);
+                        } catch {
+                          toast({ title: "PDF generation failed", variant: "destructive" });
+                        }
+                      }}
+                    >
+                      <FileText className="h-3 w-3" />
+                      Download Print Sheet (PDF)
+                    </Button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Marker PDFs — multipoint only */}
             {mode === "multipoint" && markerData && (
