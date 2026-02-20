@@ -7,10 +7,9 @@ import type { Tables } from "@/integrations/supabase/types";
 import ARLanding from "@/components/ar/ARLanding";
 import ARPermission from "@/components/ar/ARPermission";
 import ARDetection from "@/components/ar/ARDetection";
-import ARActiveView from "@/components/ar/ARActiveView";
 
 type Project = Tables<"projects">;
-type ViewerState = "landing" | "permission-denied" | "detecting" | "active";
+type ViewerState = "landing" | "permission-denied" | "detecting";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const ARViewer = () => {
@@ -71,18 +70,15 @@ const ARViewer = () => {
     }
   }, [project?.mode]);
 
-  // Transition to active when all markers detected
-  const handleAllDetected = useCallback(() => {
-    setViewState("active");
-  }, []);
-
   const handleLaunchAR = () => {
     launchDetecting();
   };
 
+  const [resetKey, setResetKey] = useState(0);
+
   const handleReset = () => {
     setMarkers({ A: "searching", B: "searching", C: "searching" });
-    setViewState("detecting");
+    setResetKey((k) => k + 1);
   };
 
   const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
@@ -155,26 +151,19 @@ const ARViewer = () => {
     case "detecting":
       return (
         <ARDetection
+          key={resetKey}
           mode={project.mode}
           markers={markers}
           onTargetFound={handleTargetFound}
           onTargetLost={handleTargetLost}
-          onAllDetected={handleAllDetected}
           onCancel={() => setViewState("landing")}
+          onExit={() => setViewState("landing")}
           onError={(err) => handleARError(err)}
           imageTargetSrc={project.mind_file_url || undefined}
           modelUrl={signedModelUrl}
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
-        />
-      );
-
-    case "active":
-      return (
-        <ARActiveView
           project={project}
-          onReset={handleReset}
-          onExit={() => setViewState("landing")}
         />
       );
   }
