@@ -146,11 +146,13 @@ const MindARScene = ({
         // Load GLB model onto the first anchor only
         if (i === 0 && modelUrl) {
           let model: any = null;
-          // lastKnownMatrix is updated every render frame while the marker is visible.
+          // lastKnownMatrix is updated every frame while the marker is visible.
           // It holds the model's world matrix in MindAR's camera-fixed coordinate system.
           // On target lost we freeze the model at this matrix so it appears stationary.
           const lastKnownMatrix = new ThreeLib.Matrix4();
-          let isWorldPlaced = false; // true once the model has been frozen into scene space
+          let isWorldPlaced = false;   // true once the model has been frozen into scene space
+          let isMatrixValid = false;   // true once onTargetUpdate has written at least one real pose
+          let updateFrameCount = 0;    // counts frames since last target found — guards cold-start
 
           try {
             const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_URL);
@@ -191,22 +193,30 @@ const MindARScene = ({
             anchor.group.add(model);
 
             // ── onTargetUpdate: fires every frame MindAR has a valid pose ──────
-            // This callback is driven directly by MindAR's tracking pipeline and
-            // only fires when worldMatrix is non-null — making it structurally
-            // impossible to receive a zero/invisible matrix here.
-            // The previous render-loop approach had a race condition: the loop
-            // could sample model.matrixWorld between MindAR zeroing group.matrix
-            // (step 2) and updating anchor.visible (step 3), poisoning
-            // lastKnownMatrix with the invisibleMatrix and causing the
-            // "stuck to screen" bug.
+            // MindAR writes anchor.group.matrix with the live tracking pose immediately
+            // BEFORE this callback fires — so it is always valid here (never the zero matrix).
+            // We compute lastKnownMatrix by direct multiplication to bypass Three.js
+            // matrixWorld propagation timing entirely.
             anchor.onTargetUpdate = () => {
               if (model && !isWorldPlaced) {
-                // Force local matrix current from current position/quat/scale
+                updateFrameCount++;
+
+                // Force model's local matrix to be current from position/quat/scale.
+                // Three.js defers this normally until renderer.render() — we need it now.
                 model.updateMatrix();
-                // Compute world matrix directly: MindAR group pose × model local offset.
-                // anchor.group.matrix is written by MindAR immediately before this callback fires
-                // — no Three.js propagation timing dependency.
+
+                // Build the world matrix by directly multiplying:
+                //   anchor.group.matrix  (MindAR's live camera-relative pose — just written)
+                // × model.matrix         (model's local offset within the anchor group)
+                // This is equivalent to matrixWorld but has zero timing dependency.
                 lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
+
+                // Mark the matrix as valid after a short stabilisation window.
+                // This prevents the cold-start race where onTargetLost fires
+                // on the very first frame before onTargetUpdate has run.
+                if (!isMatrixValid && updateFrameCount >= 3) {
+                  isMatrixValid = true;
+                }
               }
             };
 
@@ -218,26 +228,42 @@ const MindARScene = ({
                 scene.remove(model);
                 model.matrixAutoUpdate = true;
                 anchor.group.add(model);
+
+                // Restore the model's local transforms inside the anchor group
                 model.position.set(localPos.x, localPos.y, localPos.z);
                 model.quaternion.copy(localQuat);
                 model.scale.set(localScale.x, localScale.y, localScale.z);
-                model.updateMatrix(); // force local matrix current before onTargetUpdate samples
+
+                // Force model.matrix to reflect position/quat/scale RIGHT NOW,
+                // before onTargetUpdate fires in the same MindAR frame.
+                // Without this, onTargetUpdate would sample the stale frozen matrix.
+                model.updateMatrix();
+
                 isWorldPlaced = false;
+                // Reset frame counter — give the tracker a few frames to stabilise
+                // before we allow onTargetLost to freeze at a new position.
+                updateFrameCount = 0;
+                isMatrixValid = false;
               }
               onTargetFoundRef.current?.(i);
             };
 
             // ── onTargetLost: anchor.group.matrix is NOW the invisible zero matrix ─
-            // Use lastKnownMatrix (sampled the frame before the marker was lost)
-            // to freeze the model in place inside the scene.
+            // Use lastKnownMatrix (sampled by onTargetUpdate the frame before loss)
+            // to freeze the model in place in scene space.
             anchor.onTargetLost = () => {
-              if (model && !isWorldPlaced) {
+              // Guard: only freeze if we have captured a valid pose.
+              // If the matrix is not yet valid (cold start / re-scan before stabilisation),
+              // skip the freeze — the model stays inside the anchor group (invisible) rather
+              // than being placed at world origin (which looks broken).
+              if (model && !isWorldPlaced && isMatrixValid) {
                 anchor.group.remove(model);
                 scene.add(model);
-                // Apply last valid pose captured in the render loop
+
+                // Copy the last valid camera-relative pose into model.matrix.
+                // With matrixAutoUpdate = false, Three.js uses model.matrix directly
+                // for rendering — position/quaternion/scale are ignored.
                 model.matrix.copy(lastKnownMatrix);
-                // matrixAutoUpdate = false tells Three.js to use model.matrix directly.
-                // No need to decompose — decompose adds floating point error with no benefit.
                 model.matrixAutoUpdate = false;
                 isWorldPlaced = true;
               }
