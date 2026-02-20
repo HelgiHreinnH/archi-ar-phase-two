@@ -10,12 +10,12 @@ import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 
 const SCALE_PRESETS = [
-  { value: "1:10", label: "1:10", description: "Very large detail — furniture studies" },
-  { value: "1:20", label: "1:20", description: "Large detail — room layouts" },
-  { value: "1:50", label: "1:50", description: "Standard presentation — buildings" },
-  { value: "1:100", label: "1:100", description: "Overview — building exteriors" },
-  { value: "1:200", label: "1:200", description: "Master planning — campus / site" },
-  { value: "1:500", label: "1:500", description: "Urban planning — city blocks" },
+  { value: "1:1",   label: "1:1",   description: "True size — furniture & objects" },
+  { value: "1:10",  label: "1:10",  description: "Large furniture & room objects" },
+  { value: "1:25",  label: "1:25",  description: "Room-scale interiors" },
+  { value: "1:50",  label: "1:50",  description: "Standard floor plan" },
+  { value: "1:100", label: "1:100", description: "Building overview" },
+  { value: "1:200", label: "1:200", description: "Site plan / master planning" },
 ] as const;
 
 const ROTATION_PRESETS = [
@@ -38,7 +38,7 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
     client_name: project.client_name || "",
     location: project.location || "",
     description: project.description || "",
-    scale: project.scale || "1:20",
+    scale: project.scale || "1:1",
     qr_size: project.qr_size || "medium",
     initial_rotation: project.initial_rotation || 0,
   });

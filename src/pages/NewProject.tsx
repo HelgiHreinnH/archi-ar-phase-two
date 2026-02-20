@@ -26,7 +26,7 @@ const NewProject = () => {
       const project = await createProject.mutateAsync({
         name,
         mode,
-        scale: mode === "tabletop" ? "1:20" : "1:1",
+        scale: "1:1",
       });
       toast({ title: "Experience created!" });
       navigate(`/dashboard/experiences/${project.id}`);
