@@ -1,210 +1,77 @@
 
-# Root Cause: Wrong Mental Model of MindAR's Coordinate System
+# Fix: Replace Render-Loop Matrix Sampling with `onTargetUpdate`
 
-## What's Actually Happening
+## What the Research Confirmed
 
-After reading the MindAR source code directly, the world-anchoring approach has been built on an incorrect understanding of how MindAR's scene graph works.
+The previous two implementation attempts both failed for the same underlying reason, just at different layers. The research into MindAR's source code identified the exact sequence of events that happens every tracking frame:
 
-### How MindAR's coordinate system actually works
-
-In MindAR's Three.js integration:
-
-- The **camera is fixed at the scene origin (0,0,0)**. It never moves.
-- The **world moves around the camera**. MindAR's tracking updates `anchor.group.matrix` every frame with a view-space matrix derived from the detected marker pose.
-- `anchor.group.matrixAutoUpdate = false` — MindAR sets this itself (line 76 of the source). The group matrix is driven entirely by MindAR's controller.
-
-This means there is **no concept of "world space"** in the traditional sense. The scene has no fixed coordinate frame — everything is expressed relative to the camera (which is fixed). This is a fundamentally different setup from a standard Three.js scene.
-
-### Why the current code fails
-
-The current approach:
-```ts
-model.updateWorldMatrix(true, false);
-const worldMatrix = model.matrixWorld.clone();   // ← captures camera-relative coords
-anchor.group.remove(model);
-scene.add(model);                                 // model is now a direct child of scene
-model.matrix.copy(worldMatrix);                  // ← locks model at camera-relative coords
-model.matrixAutoUpdate = false;                  // ← freezes those camera-relative coords
+```
+1. group.visible = (worldMatrix !== null)         ← Three.js Group shown/hidden
+2. group.matrix = worldMatrix OR invisibleMatrix  ← pose set or zeroed
+3. anchor.visible = true/false                    ← the JS flag updated
+4. onTargetLost() / onTargetFound() fires         ← our callbacks
+5. onTargetUpdate() fires (every frame, tracked)  ← only while valid
 ```
 
-Because the camera is always at (0,0,0) and the world moves, `model.matrixWorld` at any given instant is a camera-space transform, not a world-space transform. When we capture it and freeze it, the model is locked to a position relative to the camera (i.e., directly in front of the user's face, stuck to the screen).
+The current code updates `lastKnownMatrix` inside `renderer.setAnimationLoop` by checking `anchor.visible` (the JS flag, set in step 3). The render loop runs independently of MindAR's tracking loop — if the render loop executes between step 1 (group hidden, matrix zeroed) and step 3 (flag updated), `anchor.visible` is still `true` but `group.matrix` is already `invisibleMatrix`. The code then calls `model.updateWorldMatrix()` and copies a near-zero/garbage matrix into `lastKnownMatrix`. When `onTargetLost` fires and applies this poisoned matrix, the model snaps to a garbage position or screen-centre.
 
-This is exactly what the user is seeing: the model appears on the screen at a fixed position regardless of where the camera points.
+**This is the race condition that causes the "stuck to screen" behaviour.**
 
-### What the correct approach is
+The fix: **`anchor.onTargetUpdate`** fires directly from MindAR's own tracking pipeline, only and always when `worldMatrix` is valid. It is structurally impossible for this callback to fire with a zero matrix. Using it to sample `lastKnownMatrix` eliminates the race condition entirely.
 
-For MindAR's coordinate system, "world anchoring" — keeping the model visible after losing the marker — is not possible by capturing a world transform, because there is no persistent world frame.
+## Changes: Only `src/components/ar/MindARScene.tsx`
 
-**The correct approach to keep a model visible is much simpler:**
+### What gets removed
+- The `updateLastKnown` function (lines 197–202)
+- The `(anchor as any).__updateLastKnown = updateLastKnown` assignment (line 203)
+- The `mindarThree.anchors?.forEach(...)` call inside `renderer.setAnimationLoop` (line 255)
 
-1. Keep the model as a **child of `anchor.group`** (the standard MindAR way).
-2. On `onTargetLost`, **do not remove or hide** the model — instead prevent MindAR from hiding it.
-3. The challenge: MindAR sets `group.visible = false` on target lost (line 168), which hides all children including the model.
+### What gets added
+In place of the removed `updateLastKnown` block, a single callback:
 
-**Solution:** Keep the model attached to the anchor group, but on `onTargetLost`, **detach the model from the anchor group and re-attach it directly to the scene**, at the **last known position captured from the anchor group's matrix**. At this moment the anchor matrix IS valid — the target was just visible, so MindAR computed a correct pose. When the target is lost, we then freeze the model at that position in scene space.
-
-The key difference from the current code:
-- We must capture the position **on `onTargetLost`**, not `onTargetFound`
-- At the moment of `onTargetLost`, MindAR has just determined the marker is gone, but the LAST VALID pose is still in `anchor.group.matrix` before MindAR overwrites it with `invisibleMatrix`
-
-Wait — actually re-reading the source more carefully:
-
-```js
-// Line 158-195 in MindAR three.js source:
-onUpdate: (data) => {
-  if (data.type === 'updateMatrix') {
-    ...
-    if (worldMatrix !== null) {
-      let m = new Matrix4();
-      m.elements = [...worldMatrix];
-      m.multiply(this.postMatrixs[targetIndex]);
-      this.anchors[i].group.matrix = m;           // ← FIRST: matrix is set
-    } else {
-      this.anchors[i].group.matrix = invisibleMatrix; // ← FIRST: matrix zeroed
-    }
-
-    if (this.anchors[i].visible && worldMatrix === null) {
-      this.anchors[i].visible = false;
-      this.anchors[i].onTargetLost();              // ← THEN: callback fires AFTER matrix is zeroed
-    }
-
-    if (!this.anchors[i].visible && worldMatrix !== null) {
-      this.anchors[i].visible = true;
-      this.anchors[i].onTargetFound();             // ← THEN: callback fires AFTER matrix is set
-    }
+```ts
+// ── onTargetUpdate: fires every frame MindAR has a valid pose ──────────
+// This is MindAR's own tracking callback — it only fires when worldMatrix
+// is non-null, making it race-condition-free.
+// The render loop approach (previous implementation) had a race between
+// group.visible being set to false and anchor.visible being updated, which
+// could poison lastKnownMatrix with the invisibleMatrix (zero matrix).
+anchor.onTargetUpdate = () => {
+  if (model) {
+    model.updateWorldMatrix(true, false);
+    lastKnownMatrix.copy(model.matrixWorld);
   }
-}
+};
 ```
 
-**Critical finding:** When `onTargetFound` fires, MindAR has **already set** `anchor.group.matrix` to the correct tracking matrix. So `anchor.group.matrix` IS valid at the moment `onTargetFound` fires — no delay is needed for the matrix to become valid.
+The render loop becomes clean — just the render call:
 
-When `onTargetLost` fires, MindAR has **already overwritten** `anchor.group.matrix` with `invisibleMatrix` (the zero matrix). So we cannot capture the last known pose from `onTargetLost`.
-
-### Correct Solution
-
-**Strategy: Capture position on `onTargetFound` (immediate, no delay), keep model in anchor group, freeze it in scene on target lost by using a "last known matrix" variable.**
-
-1. On `onTargetFound`:
-   - Record the anchor group's current matrix as `lastKnownMatrix` (this is valid — MindAR just set it)
-   - If first detection, also set up the model
-
-2. Every render frame (in the animation loop), while target is visible:
-   - Continuously update `lastKnownMatrix` from `anchor.group.matrix` so we always have the freshest pose
-
-3. On `onTargetLost`:
-   - Move the model out of `anchor.group` (because MindAR will hide the group)
-   - Attach it directly to `scene`
-   - Apply `lastKnownMatrix` (the last valid pose before the matrix was zeroed)
-   - Freeze it: `model.matrixAutoUpdate = false`
-
-4. On `onTargetFound` again (if user re-scans):
-   - Move model back into `anchor.group` so it tracks the marker again
-   - Resume updating `lastKnownMatrix` each frame
-
-This is the only approach that correctly leverages MindAR's coordinate system. The model tracks the marker when visible, and freezes in its last real-world position when the marker is lost.
-
----
-
-## Implementation Plan
-
-### Changes to `src/components/ar/MindARScene.tsx`
-
-The entire world-anchoring block needs to be rewritten. The new logic:
-
-```ts
-if (i === 0 && modelUrl) {
-  let model: any = null;
-  const lastKnownMatrix = new ThreeLib.Matrix4();
-  let isWorldPlaced = false; // true once model has been seen at least once
-
-  // Load model and add to anchor group (standard MindAR way)
-  try {
-    // ... GLB loading, scale calc (unchanged) ...
-    anchor.group.add(model);
-  } catch (loadError) { ... }
-
-  // ── onTargetFound: marker is visible, MindAR's matrix is valid ────────
-  anchor.onTargetFound = () => {
-    if (model) {
-      if (isWorldPlaced) {
-        // Model was frozen in scene — move it back into the anchor group
-        // so it tracks the marker again
-        scene.remove(model);
-        model.matrixAutoUpdate = true;
-        anchor.group.add(model);
-        // Restore local-space position/rotation/scale
-        model.position.set(localPos.x, localPos.y, localPos.z);
-        model.quaternion.copy(localQuat);
-        model.scale.set(localScale.x, localScale.y, localScale.z);
-      }
-    }
-    onTargetFoundRef.current?.(i);
-  };
-
-  // ── onTargetLost: marker lost, anchor.group.matrix is NOW invisibleMatrix ──
-  // We must use lastKnownMatrix (updated every render frame) to freeze the model
-  anchor.onTargetLost = () => {
-    if (model) {
-      anchor.group.remove(model);
-      scene.add(model);
-      // Apply the last valid pose we recorded
-      model.matrix.copy(lastKnownMatrix);
-      model.matrix.decompose(model.position, model.quaternion, model.scale);
-      model.matrixAutoUpdate = false;
-      isWorldPlaced = true;
-    }
-    onTargetLostRef.current?.(i);
-  };
-
-  // ── Render loop: update lastKnownMatrix every frame while marker visible ──
-  // Store reference so we can update it in the animation loop
-  // We'll use anchor.visible to gate this
-  const updateLastKnown = () => {
-    if (anchor.visible) {
-      // anchor.group.matrix is valid while target is tracked
-      // We need the model's world matrix at this point
-      model?.updateWorldMatrix(true, false);
-      lastKnownMatrix.copy(model?.matrixWorld ?? new ThreeLib.Matrix4());
-    }
-  };
-  // Store for animation loop access
-  (anchor as any).__updateLastKnown = updateLastKnown;
-}
-```
-
-Then in the render loop:
 ```ts
 renderer.setAnimationLoop(() => {
-  // Update last-known matrices for all anchors before rendering
-  mindarThree.anchors?.forEach((a: any) => a.__updateLastKnown?.());
   renderer.render(scene, camera);
 });
 ```
 
-### Storing local-space values
+### Everything else stays identical
 
-We need to save the model's local position/quaternion/scale (set during the loading phase) so we can restore them when the model goes back into the anchor group:
-
-```ts
-// After model.scale.set / model.position.set / model.rotation.y = ...
-const localPos = model.position.clone();
-const localQuat = model.quaternion.clone();
-const localScale = model.scale.clone();
-```
-
-### Summary of files to change
-
-Only `src/components/ar/MindARScene.tsx` needs to change.
-
-The animation loop, loading, and scale calculation all stay the same. Only the `onTargetFound` / `onTargetLost` handlers and the animation loop update change.
-
----
+- `onTargetFound` logic (re-attach model to anchor group, restore local transforms) — unchanged
+- `onTargetLost` logic (detach from anchor group, attach to scene, apply `lastKnownMatrix`, freeze) — unchanged  
+- `isWorldPlaced` flag — unchanged
+- `localPos` / `localQuat` / `localScale` capture — unchanged
+- Scale calculation, float constant, lighting, camera, CSS injection — all unchanged
+- `ARViewer.tsx`, `ARDetection.tsx` — not touched
 
 ## Why This Works
 
-- MindAR's camera is fixed. When the marker is visible, `anchor.group.matrix` is a valid camera-relative pose updated every frame.
-- `model.matrixWorld` (which is `anchor.group.matrixWorld * model.localMatrix`) encodes the model's full position in the scene's camera-relative space.
-- When we freeze `model.matrix = lastKnownMatrix` and detach from the anchor group, the model is now a direct child of scene with a camera-relative matrix that doesn't change. Since the camera never moves, the model appears stationary relative to the room.
-- When the user re-scans, we restore the model to the anchor group so it tracks again.
+MindAR's camera sits fixed at `(0,0,0)`. The anchor group moves around it. `model.matrixWorld` while inside `anchor.group` is therefore a camera-relative transform — when the marker is in a fixed physical position in the room, this matrix is constant (or near-constant, modulo tracking jitter). Freezing `model.matrix = lastKnownMatrix` and moving the model to the scene root means: direct child of scene, fixed camera-relative matrix, camera never moves → model appears stationary in the room.
 
-This is the standard, documented approach for "keep visible after lost" in MindAR's Three.js API — we're just implementing the Three.js version of what the A-Frame community does with `visible=true` on target lost.
+`onTargetUpdate` guarantees that every value ever written into `lastKnownMatrix` came from a frame where MindAR had a valid pose. The last value before the marker is lost is therefore the freshest valid pose — exactly what we want for the freeze.
+
+## Summary
+
+| Location | Change |
+|---|---|
+| `MindARScene.tsx` line 197–203 | Remove `updateLastKnown` fn and `__updateLastKnown` assignment |
+| `MindARScene.tsx` (same location) | Add `anchor.onTargetUpdate` callback |
+| `MindARScene.tsx` line 254–257 | Remove `forEach(__updateLastKnown)` from animation loop |
+| All other files | No changes |
