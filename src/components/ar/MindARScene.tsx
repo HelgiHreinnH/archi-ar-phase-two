@@ -5,7 +5,12 @@ interface MindARSceneProps {
   imageTargetSrc: string;
   /** URL of the .glb model to render on the anchor */
   modelUrl?: string | null;
-  /** Number of image targets in the .mind file */
+  /**
+   * "tabletop" — 1 marker, model floats above table surface.
+   * "multipoint" (anything else) — 3 markers, model sits at floor level on anchor 0.
+   */
+  mode?: string;
+  /** Number of image targets in the .mind file — derived from mode by caller */
   maxTrack?: number;
   /** Called when a target is found (index) */
   onTargetFound?: (index: number) => void;
@@ -23,6 +28,7 @@ interface MindARSceneProps {
   /** Initial Y rotation in degrees */
   initialRotation?: number;
 }
+
 
 const THREE_ESM_URL =
   "https://unpkg.com/three@0.160.0/build/three.module.js";
@@ -55,6 +61,7 @@ async function loadMindAR(): Promise<void> {
 const MindARScene = ({
   imageTargetSrc,
   modelUrl,
+  mode = "tabletop",
   maxTrack = 1,
   onTargetFound,
   onTargetLost,
@@ -63,6 +70,11 @@ const MindARScene = ({
   modelScale = 1,
   initialRotation = 0,
 }: MindARSceneProps) => {
+  const isTabletop = mode === "tabletop";
+  // Tabletop: 1 marker, model floats 40mm above table surface.
+  // Multi-point: 3 markers (A/B/C), model sits flush at marker-A floor plane.
+  const floatAboveMarker = isTabletop ? FLOAT_ABOVE_MARKER : 0;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mindarRef = useRef<any>(null);
   const [isStarting, setIsStarting] = useState(true);
@@ -139,16 +151,20 @@ const MindARScene = ({
       directionalLight.castShadow = true;
       scene.add(directionalLight);
 
-      // Create anchors for each target
+      // ── Create anchors ───────────────────────────────────────────────────────
+      // Tabletop mode:    1 anchor (index 0) — single AR reference marker.
+      // Multi-point mode: 3 anchors (index 0=A, 1=B, 2=C) — three position markers.
+      // The GLB model is ONLY loaded onto anchor 0 in both modes.
+      // Anchors 1 and 2 (multi-point only) are tracking-only — they trigger the
+      // status UI callbacks but do not carry any 3D content.
       for (let i = 0; i < maxTrack; i++) {
         const anchor = mindarThree.addAnchor(i);
 
-        // Load GLB model onto the first anchor only
+        // Load GLB model onto anchor 0 only
         if (i === 0 && modelUrl) {
           let model: any = null;
-          // lastKnownMatrix is updated every frame while the marker is visible.
-          // It holds the model's world matrix in MindAR's camera-fixed coordinate system.
-          // On target lost we freeze the model at this matrix so it appears stationary.
+          // lastKnownMatrix: updated every frame by onTargetUpdate while tracking.
+          // Used to freeze the model in world space when the marker is lost.
           const lastKnownMatrix = new ThreeLib.Matrix4();
           let isWorldPlaced = false;   // true once the model has been frozen into scene space
           let isMatrixValid = false;   // true once onTargetUpdate has written at least one real pose
@@ -174,9 +190,11 @@ const MindARScene = ({
 
             model.scale.set(normalizedScale, normalizedScale, normalizedScale);
 
-            // Position: base of model at Y=0 (marker plane), centred X/Z
+            // Position: centred X/Z on marker.
+            // Tabletop: float 40mm above marker surface so model sits on the table.
+            // Multi-point: sit flush at marker plane (floor level at marker A).
             model.position.x = -center.x * normalizedScale;
-            model.position.y = -box.min.y * normalizedScale + FLOAT_ABOVE_MARKER;
+            model.position.y = -box.min.y * normalizedScale + floatAboveMarker;
             model.position.z = -center.z * normalizedScale;
 
             // Apply initial rotation (compass direction)
@@ -276,6 +294,9 @@ const MindARScene = ({
             anchor.onTargetLost = () => onTargetLostRef.current?.(i);
           }
         } else {
+          // Anchors 1 (B) and 2 (C) — multi-point mode only.
+          // These are tracking-only anchors: they update the detection UI
+          // status but carry no 3D model. No world-anchoring logic needed.
           anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
           anchor.onTargetLost = () => onTargetLostRef.current?.(i);
         }
@@ -296,7 +317,7 @@ const MindARScene = ({
       setIsStarting(false);
       onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [imageTargetSrc, modelUrl, maxTrack, modelScale, initialRotation]);
+  }, [imageTargetSrc, modelUrl, mode, maxTrack, modelScale, initialRotation]);
 
   useEffect(() => {
     startAR();

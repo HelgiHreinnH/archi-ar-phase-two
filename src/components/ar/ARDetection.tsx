@@ -126,6 +126,7 @@ const ARDetection = ({
       <MindARScene
         imageTargetSrc={imageTargetSrc}
         modelUrl={modelUrl}
+        mode={mode}
         maxTrack={isMultipoint ? 3 : 1}
         modelScale={modelScale}
         initialRotation={initialRotation}
