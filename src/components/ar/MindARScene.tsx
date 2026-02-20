@@ -192,17 +192,28 @@ const MindARScene = ({
           // After this, the model is visible regardless of where the camera points.
           anchor.onTargetFound = () => {
             if (model && !worldPlaced) {
-              model.updateWorldMatrix(true, false);
-              const worldMatrix = model.matrixWorld.clone();
+              // Defer capture by two render frames so Three.js has propagated
+              // the anchor's real-world matrix before we read matrixWorld.
+              // Without this delay, matrixWorld is the identity matrix (origin =
+              // directly in front of the camera) and the model locks to screen-space.
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  if (worldPlaced) return; // guard against double-fire
+                  model.updateWorldMatrix(true, false);
+                  const worldMatrix = model.matrixWorld.clone();
 
-              anchor.group.remove(model);
-              scene.add(model);
+                  anchor.group.remove(model);
+                  scene.add(model);
 
-              // Decompose the captured world matrix back into position/quat/scale
-              model.matrix.copy(worldMatrix);
-              model.matrix.decompose(model.position, model.quaternion, model.scale);
+                  // Decompose the captured world matrix back into position/quat/scale
+                  model.matrix.copy(worldMatrix);
+                  model.matrix.decompose(model.position, model.quaternion, model.scale);
+                  // Freeze matrix so Three.js doesn't overwrite it with local-space values
+                  model.matrixAutoUpdate = false;
 
-              worldPlaced = true;
+                  worldPlaced = true;
+                });
+              });
             }
             onTargetFoundRef.current?.(i);
           };
