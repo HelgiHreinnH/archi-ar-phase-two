@@ -146,7 +146,11 @@ const MindARScene = ({
         // Load GLB model onto the first anchor only
         if (i === 0 && modelUrl) {
           let model: any = null;
-          let worldPlaced = false;
+          // lastKnownMatrix is updated every render frame while the marker is visible.
+          // It holds the model's world matrix in MindAR's camera-fixed coordinate system.
+          // On target lost we freeze the model at this matrix so it appears stationary.
+          const lastKnownMatrix = new ThreeLib.Matrix4();
+          let isWorldPlaced = false; // true once the model has been frozen into scene space
 
           try {
             const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_URL);
@@ -160,15 +164,10 @@ const MindARScene = ({
             // Models are built 1:1 in millimetres.
             // MindAR unit ≈ MARKER_SIZE_MM (physical marker width in mm).
             // At scale 1:N, real dimensions shrink by factor N.
-            // normalizedScale converts mm model units → MindAR scene units at the chosen scale.
             const box = new ThreeLib.Box3().setFromObject(model);
             const size = box.getSize(new ThreeLib.Vector3());
             const center = box.getCenter(new ThreeLib.Vector3());
-            // maxDim is in model units (mm if built 1:1 in Rhino)
             const maxDim = Math.max(size.x, size.y, size.z);
-            // normalizedScale: converts model mm → MindAR units, then applies scale ratio
-            // e.g. modelScale=1 (1:1): full size relative to marker
-            //      modelScale=50 (1:50): 50× smaller
             const normalizedScale = (MARKER_SIZE_MM / modelScale) / maxDim;
 
             model.scale.set(normalizedScale, normalizedScale, normalizedScale);
@@ -183,47 +182,63 @@ const MindARScene = ({
               model.rotation.y = ThreeLib.MathUtils.degToRad(initialRotation);
             }
 
+            // Save local-space transform so we can restore it when re-attaching
+            const localPos = model.position.clone();
+            const localQuat = model.quaternion.clone();
+            const localScale = model.scale.clone();
+
+            // Standard MindAR way: model lives inside anchor.group
             anchor.group.add(model);
-          } catch (loadError) {
-            console.warn("Failed to load GLB model:", loadError);
-          }
 
-          // ── World-anchor placement ─────────────────────────────────────
-          // On first target detection: capture world-space transform,
-          // detach model from the anchor group and attach to scene root.
-          // After this, the model is visible regardless of where the camera points.
-          anchor.onTargetFound = () => {
-            if (model && !worldPlaced) {
-              // Defer capture by 150ms — gives MindAR's pose estimation time to
-              // stabilise before we read matrixWorld. Double-RAF (~32ms) is not
-              // enough on slow/low-power mobile devices: the anchor matrix may
-              // still be identity if the tracking pass hasn't completed yet,
-              // causing the model to lock to screen-space (directly in front of camera).
-              setTimeout(() => {
-                if (worldPlaced) return; // guard against double-fire
-
+            // ── Render loop hook: update lastKnownMatrix every frame while visible ──
+            // MindAR's camera is fixed at (0,0,0); anchor.group.matrix is the
+            // camera-relative pose of the marker. model.matrixWorld combines both.
+            // We sample it every frame so we always have the freshest valid pose.
+            const updateLastKnown = () => {
+              if (anchor.visible && model) {
                 model.updateWorldMatrix(true, false);
-                const worldMatrix = model.matrixWorld.clone();
+                lastKnownMatrix.copy(model.matrixWorld);
+              }
+            };
+            (anchor as any).__updateLastKnown = updateLastKnown;
 
+            // ── onTargetFound: MindAR has already set anchor.group.matrix ─
+            anchor.onTargetFound = () => {
+              if (model && isWorldPlaced) {
+                // Model was frozen in scene space — move it back into the anchor
+                // group so it tracks the marker again.
+                scene.remove(model);
+                model.matrixAutoUpdate = true;
+                anchor.group.add(model);
+                model.position.set(localPos.x, localPos.y, localPos.z);
+                model.quaternion.copy(localQuat);
+                model.scale.set(localScale.x, localScale.y, localScale.z);
+                isWorldPlaced = false;
+              }
+              onTargetFoundRef.current?.(i);
+            };
+
+            // ── onTargetLost: anchor.group.matrix is NOW the invisible zero matrix ─
+            // Use lastKnownMatrix (sampled the frame before the marker was lost)
+            // to freeze the model in place inside the scene.
+            anchor.onTargetLost = () => {
+              if (model && !isWorldPlaced) {
                 anchor.group.remove(model);
                 scene.add(model);
-
-                // Decompose the captured world matrix back into position/quat/scale
-                model.matrix.copy(worldMatrix);
+                // Apply last valid pose captured in the render loop
+                model.matrix.copy(lastKnownMatrix);
                 model.matrix.decompose(model.position, model.quaternion, model.scale);
-                // Freeze matrix so Three.js doesn't overwrite it with local-space values
                 model.matrixAutoUpdate = false;
+                isWorldPlaced = true;
+              }
+              onTargetLostRef.current?.(i);
+            };
 
-                worldPlaced = true;
-              }, 150);
-            }
-            onTargetFoundRef.current?.(i);
-          };
-
-          anchor.onTargetLost = () => {
-            // Model stays visible — do NOT hide it
-            onTargetLostRef.current?.(i);
-          };
+          } catch (loadError) {
+            console.warn("Failed to load GLB model:", loadError);
+            anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
+            anchor.onTargetLost = () => onTargetLostRef.current?.(i);
+          }
         } else {
           anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
           anchor.onTargetLost = () => onTargetLostRef.current?.(i);
@@ -235,8 +250,9 @@ const MindARScene = ({
       setIsStarting(false);
       onReadyRef.current?.();
 
-      // Render loop
+      // Render loop — sample lastKnownMatrix for every anchor before rendering
       renderer.setAnimationLoop(() => {
+        mindarThree.anchors?.forEach((a: any) => a.__updateLastKnown?.());
         renderer.render(scene, camera);
       });
     } catch (err) {
