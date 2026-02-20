@@ -133,7 +133,10 @@ const ARViewer = () => {
   }
 
   // Parse scale to a number
-  const scaleNum = project.scale ? parseFloat(project.scale.replace(/[^0-9.]/g, "")) || 1 : 1;
+  // Extract the denominator from "1:N" format (e.g. "1:50" → 50, "1:1" → 1)
+  const scaleNum = project.scale
+    ? parseFloat(project.scale.split(":")[1]) || 1
+    : 1;
 
   switch (viewState) {
     case "landing":

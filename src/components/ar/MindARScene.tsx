@@ -15,24 +15,14 @@ interface MindARSceneProps {
   onReady?: () => void;
   /** Called on error */
   onError?: (error: Error) => void;
-  /** Scale multiplier for the model */
+  /**
+   * Scale denominator. The model is assumed to be built 1:1 in millimetres.
+   * e.g. 1 = true size, 50 = 1:50 scale, 100 = 1:100 scale.
+   */
   modelScale?: number;
   /** Initial Y rotation in degrees */
   initialRotation?: number;
 }
-
-/**
- * MindAR v1.2.5 ships as ES modules:
- *   - `mindar-image-three.prod.js`  imports `from "three"`
- *   - `mindar-image.prod.js`        imports `from "./controller-*.js"`
- *
- * To make these work in the browser we inject an **import-map** so the
- * bare-specifier `"three"` resolves to the Three.js r160 ES-module build
- * (the last version that still exposes `sRGBEncoding`, which MindAR needs).
- *
- * We then load the MindAR entry point with `<script type="module">` and
- * poll for `window.MINDAR.IMAGE.MindARThree` to become available.
- */
 
 const THREE_ESM_URL =
   "https://unpkg.com/three@0.160.0/build/three.module.js";
@@ -41,19 +31,20 @@ const MINDAR_THREE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 
 /**
- * Load MindAR via dynamic import() so the browser's import-map (or the
- * es-module-shims polyfill) correctly resolves the bare "three" specifier.
- *
- * A dynamically-injected <script type="module"> is NOT intercepted by
- * es-module-shims, which is why the old approach timed out on Safari.
+ * Physical size of the printed AR marker in millimetres.
+ * 1 MindAR unit ≈ 1 marker width. Used to convert real-world mm to scene units.
  */
+const MARKER_SIZE_MM = 150;
+
+/**
+ * Float height above the marker plane in MindAR scene units (metres ≈ units here).
+ * 0.04 ≈ 40 mm above the printed marker.
+ */
+const FLOAT_ABOVE_MARKER = 0.04;
+
 async function loadMindAR(): Promise<void> {
   if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
-
-  // Dynamic import goes through the module graph → import map applies
   await import(/* @vite-ignore */ MINDAR_THREE_URL);
-
-  // MindAR attaches itself to window.MINDAR after execution
   if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
     throw new Error("MindAR module loaded but runtime not found on window.MINDAR");
   }
@@ -74,7 +65,6 @@ const MindARScene = ({
   const mindarRef = useRef<any>(null);
   const [isStarting, setIsStarting] = useState(true);
 
-  // Store callbacks in refs to avoid restarting MindAR on parent re-renders
   const onTargetFoundRef = useRef(onTargetFound);
   const onTargetLostRef = useRef(onTargetLost);
   const onReadyRef = useRef(onReady);
@@ -91,22 +81,17 @@ const MindARScene = ({
     if (!containerRef.current) return;
 
     try {
-      // Pre-flight: check secure context & getUserMedia support
       if (!window.isSecureContext) {
-        throw new Error("Camera requires a secure (HTTPS) connection. Please access this page via HTTPS.");
+        throw new Error("Camera requires a secure (HTTPS) connection.");
       }
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("Your browser does not support camera access. Please use a modern browser like Safari, Chrome, or Firefox.");
+        throw new Error("Your browser does not support camera access.");
       }
 
       await loadMindAR();
 
       const MINDAR = (window as any).MINDAR;
-      const THREE = (window as any).THREE;
-
-      // THREE might not be on window when loaded via import-map (it's an
-      // ES module). We need to get it from the dynamic import instead.
-      let ThreeLib = THREE;
+      let ThreeLib = (window as any).THREE;
       if (!ThreeLib) {
         ThreeLib = await import(/* @vite-ignore */ THREE_ESM_URL);
       }
@@ -114,6 +99,22 @@ const MindARScene = ({
       if (!MINDAR?.IMAGE?.MindARThree) {
         throw new Error("MindAR not available after loading");
       }
+
+      // Assign a stable ID so our injected CSS can target it
+      const containerId = "mindar-ar-container";
+      containerRef.current.id = containerId;
+
+      // ─── Inject persistent CSS to override MindAR's inline pixel styles ───
+      // MindAR sets width/height in pixels via JS style attributes.
+      // A <style> tag with !important beats inline styles in all browsers.
+      const styleTag = document.createElement("style");
+      styleTag.id = "mindar-fill-style";
+      styleTag.textContent = `
+        #${containerId} { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; overflow: hidden !important; }
+        #${containerId} canvas { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; }
+        #${containerId} video  { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; }
+      `;
+      document.head.appendChild(styleTag);
 
       const mindarThree = new MINDAR.IMAGE.MindARThree({
         container: containerRef.current,
@@ -131,7 +132,6 @@ const MindARScene = ({
       // Setup lighting
       const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.8);
       scene.add(ambientLight);
-
       const directionalLight = new ThreeLib.DirectionalLight(0xffffff, 1.2);
       directionalLight.position.set(5, 10, 7.5);
       directionalLight.castShadow = true;
@@ -141,39 +141,42 @@ const MindARScene = ({
       for (let i = 0; i < maxTrack; i++) {
         const anchor = mindarThree.addAnchor(i);
 
-        anchor.onTargetFound = () => {
-          onTargetFoundRef.current?.(i);
-        };
-        anchor.onTargetLost = () => {
-          onTargetLostRef.current?.(i);
-        };
-
-        // Load GLB model onto the first anchor
+        // Load GLB model onto the first anchor only
         if (i === 0 && modelUrl) {
+          let model: any = null;
+          let worldPlaced = false;
+
           try {
-            const { GLTFLoader } = await import(
-              /* @vite-ignore */ GLTF_LOADER_URL
-            );
+            const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_URL);
             const loader = new GLTFLoader();
             const gltf = await new Promise<any>((resolve, reject) => {
               loader.load(modelUrl, resolve, undefined, reject);
             });
-            const model = gltf.scene;
+            model = gltf.scene;
 
-            // Calculate bounding box and normalize size
+            // ── Scale calculation ──────────────────────────────────────────
+            // Models are built 1:1 in millimetres.
+            // MindAR unit ≈ MARKER_SIZE_MM (physical marker width in mm).
+            // At scale 1:N, real dimensions shrink by factor N.
+            // normalizedScale converts mm model units → MindAR scene units at the chosen scale.
             const box = new ThreeLib.Box3().setFromObject(model);
             const size = box.getSize(new ThreeLib.Vector3());
             const center = box.getCenter(new ThreeLib.Vector3());
+            // maxDim is in model units (mm if built 1:1 in Rhino)
             const maxDim = Math.max(size.x, size.y, size.z);
-            const normalizedScale = (modelScale / maxDim) * 0.5;
+            // normalizedScale: converts model mm → MindAR units, then applies scale ratio
+            // e.g. modelScale=1 (1:1): full size relative to marker
+            //      modelScale=50 (1:50): 50× smaller
+            const normalizedScale = (MARKER_SIZE_MM / modelScale) / maxDim;
+
             model.scale.set(normalizedScale, normalizedScale, normalizedScale);
 
-            // Centre X/Z on marker; place model BASE at Y=0 (sits on marker)
+            // Position: base of model at Y=0 (marker plane), centred X/Z
             model.position.x = -center.x * normalizedScale;
-            model.position.y = -box.min.y * normalizedScale;
+            model.position.y = -box.min.y * normalizedScale + FLOAT_ABOVE_MARKER;
             model.position.z = -center.z * normalizedScale;
 
-            // Apply initial rotation
+            // Apply initial rotation (compass direction)
             if (initialRotation) {
               model.rotation.y = ThreeLib.MathUtils.degToRad(initialRotation);
             }
@@ -182,30 +185,42 @@ const MindARScene = ({
           } catch (loadError) {
             console.warn("Failed to load GLB model:", loadError);
           }
+
+          // ── World-anchor placement ─────────────────────────────────────
+          // On first target detection: capture world-space transform,
+          // detach model from the anchor group and attach to scene root.
+          // After this, the model is visible regardless of where the camera points.
+          anchor.onTargetFound = () => {
+            if (model && !worldPlaced) {
+              model.updateWorldMatrix(true, false);
+              const worldMatrix = model.matrixWorld.clone();
+
+              anchor.group.remove(model);
+              scene.add(model);
+
+              // Decompose the captured world matrix back into position/quat/scale
+              model.matrix.copy(worldMatrix);
+              model.matrix.decompose(model.position, model.quaternion, model.scale);
+
+              worldPlaced = true;
+            }
+            onTargetFoundRef.current?.(i);
+          };
+
+          anchor.onTargetLost = () => {
+            // Model stays visible — do NOT hide it
+            onTargetLostRef.current?.(i);
+          };
+        } else {
+          anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
+          anchor.onTargetLost = () => onTargetLostRef.current?.(i);
         }
       }
 
-      // Start MindAR
+      // Start MindAR (requests camera, loads target)
       await mindarThree.start();
       setIsStarting(false);
       onReadyRef.current?.();
-
-      // Force MindAR's internal canvas and video to fill the container
-      // This fixes the black strip on iOS Safari caused by viewport miscalculation
-      if (containerRef.current) {
-        const canvas = containerRef.current.querySelector("canvas");
-        const video = containerRef.current.querySelector("video");
-        if (canvas) {
-          canvas.style.width = "100%";
-          canvas.style.height = "100%";
-          canvas.style.objectFit = "cover";
-        }
-        if (video) {
-          video.style.width = "100%";
-          video.style.height = "100%";
-          video.style.objectFit = "cover";
-        }
-      }
 
       // Render loop
       renderer.setAnimationLoop(() => {
@@ -222,6 +237,9 @@ const MindARScene = ({
     startAR();
 
     return () => {
+      // Clean up injected style tag
+      document.getElementById("mindar-fill-style")?.remove();
+
       if (mindarRef.current) {
         try {
           mindarRef.current.stop();
@@ -236,8 +254,14 @@ const MindARScene = ({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 overflow-hidden"
-      style={{ zIndex: 0, width: "100%", height: "100%" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        zIndex: 0,
+      }}
     />
   );
 };
