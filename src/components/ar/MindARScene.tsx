@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { computeWorldTransform } from "@/lib/computeWorldTransform";
 
 interface MindARSceneProps {
   /** URL of the .mind compiled image target file */
@@ -27,6 +28,8 @@ interface MindARSceneProps {
   modelScale?: number;
   /** Initial Y rotation in degrees */
   initialRotation?: number;
+  /** Rhino marker coordinates for multi-point triangulation */
+  markerData?: { A: { x: number; y: number; z: number }; B: { x: number; y: number; z: number }; C: { x: number; y: number; z: number } } | null;
 }
 
 
@@ -46,9 +49,11 @@ const MARKER_SIZE_MM = 150;
  * Float height above the marker plane in MindAR scene units.
  * 1 MindAR unit = MARKER_SIZE_MM (150mm) in real space.
  * To float 40mm: 40 / 150 ≈ 0.267 units.
- * (The old value 0.04 was only ~6mm — a comment/constant mismatch.)
  */
 const FLOAT_ABOVE_MARKER = 0.267;
+
+/** Number of stable tracking frames before we lock the model */
+const STABLE_FRAME_THRESHOLD = 10;
 
 async function loadMindAR(): Promise<void> {
   if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
@@ -56,6 +61,26 @@ async function loadMindAR(): Promise<void> {
   if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
     throw new Error("MindAR module loaded but runtime not found on window.MINDAR");
   }
+}
+
+/**
+ * Convert deviceorientation alpha/beta/gamma to a quaternion.
+ * Uses the standard ZXY Euler convention for device orientation.
+ */
+function deviceOrientationToQuaternion(
+  alpha: number,
+  beta: number,
+  gamma: number,
+  ThreeLib: any
+): any {
+  const degToRad = Math.PI / 180;
+  const euler = new ThreeLib.Euler(
+    beta * degToRad,
+    alpha * degToRad,
+    -gamma * degToRad,
+    "YXZ"
+  );
+  return new ThreeLib.Quaternion().setFromEuler(euler);
 }
 
 const MindARScene = ({
@@ -69,10 +94,9 @@ const MindARScene = ({
   onError,
   modelScale = 1,
   initialRotation = 0,
+  markerData,
 }: MindARSceneProps) => {
   const isTabletop = mode === "tabletop";
-  // Tabletop: 1 marker, model floats 40mm above table surface.
-  // Multi-point: 3 markers (A/B/C), model sits flush at marker-A floor plane.
   const floatAboveMarker = isTabletop ? FLOAT_ABOVE_MARKER : 0;
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -114,13 +138,30 @@ const MindARScene = ({
         throw new Error("MindAR not available after loading");
       }
 
+      // ── DeviceOrientation gyroscope listener ──────────────────────────
+      // Captures the phone's rotation for gyro-compensated world anchoring.
+      const deviceQuaternionRef = { current: null as any };
+      let hasGyro = false;
+
+      const onDeviceOrientation = (event: DeviceOrientationEvent) => {
+        if (event.alpha != null && event.beta != null && event.gamma != null) {
+          hasGyro = true;
+          deviceQuaternionRef.current = deviceOrientationToQuaternion(
+            event.alpha,
+            event.beta,
+            event.gamma,
+            ThreeLib
+          );
+        }
+      };
+
+      window.addEventListener("deviceorientation", onDeviceOrientation, true);
+
       // Assign a stable ID so our injected CSS can target it
       const containerId = "mindar-ar-container";
       containerRef.current.id = containerId;
 
       // ─── Inject persistent CSS to override MindAR's inline pixel styles ───
-      // MindAR sets width/height in pixels via JS style attributes.
-      // A <style> tag with !important beats inline styles in all browsers.
       const styleTag = document.createElement("style");
       styleTag.id = "mindar-fill-style";
       styleTag.textContent = `
@@ -151,37 +192,41 @@ const MindARScene = ({
       directionalLight.castShadow = true;
       scene.add(directionalLight);
 
-      // ── Create anchors ───────────────────────────────────────────────────────
-      // Tabletop mode:    1 anchor (index 0) — single AR reference marker.
-      // Multi-point mode: 3 anchors (index 0=A, 1=B, 2=C) — three position markers.
-      // The GLB model is ONLY loaded onto anchor 0 in both modes.
-      // Anchors 1 and 2 (multi-point only) are tracking-only — they trigger the
-      // status UI callbacks but do not carry any 3D content.
+      // ── 3-state machine for world anchoring ───────────────────────────
+      // 'tracking' — model inside anchor.group, follows marker live
+      // 'locked'   — model in scene root, gyro-compensated each frame
+      // 'reanchoring' — marker re-detected while locked; return to tracking
+      type AnchorState = "tracking" | "locked" | "reanchoring";
+      let anchorState: AnchorState = "tracking";
+
+      // Gyro lock state
+      let lockedMatrix: any = null;       // THREE.Matrix4
+      let lockedDeviceQuat: any = null;   // THREE.Quaternion at lock time
+      let modelRef: any = null;           // The loaded GLB scene
+      let localPos: any = null;           // Saved local position
+      let localQuat: any = null;          // Saved local quaternion
+      let localScale: any = null;         // Saved local scale
+
+      // Per-anchor stable frame counts (for multi-point)
+      const stableFrameCounts = [0, 0, 0];
+      const anchorPoseMatrices: (any | null)[] = [null, null, null];
+
+      // ── Create anchors ────────────────────────────────────────────────
       for (let i = 0; i < maxTrack; i++) {
         const anchor = mindarThree.addAnchor(i);
 
         // Load GLB model onto anchor 0 only
         if (i === 0 && modelUrl) {
-          let model: any = null;
-          // lastKnownMatrix: updated every frame by onTargetUpdate while tracking.
-          // Used to freeze the model in world space when the marker is lost.
-          const lastKnownMatrix = new ThreeLib.Matrix4();
-          let isWorldPlaced = false;   // true once the model has been frozen into scene space
-          let isMatrixValid = false;   // true once onTargetUpdate has written at least one real pose
-          let updateFrameCount = 0;    // counts frames since last target found — guards cold-start
-
           try {
             const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_URL);
             const loader = new GLTFLoader();
             const gltf = await new Promise<any>((resolve, reject) => {
               loader.load(modelUrl, resolve, undefined, reject);
             });
-            model = gltf.scene;
+            const model = gltf.scene;
+            modelRef = model;
 
-            // ── Scale calculation ──────────────────────────────────────────
-            // Models are built 1:1 in millimetres.
-            // MindAR unit ≈ MARKER_SIZE_MM (physical marker width in mm).
-            // At scale 1:N, real dimensions shrink by factor N.
+            // ── Scale calculation ────────────────────────────────────────
             const box = new ThreeLib.Box3().setFromObject(model);
             const size = box.getSize(new ThreeLib.Vector3());
             const center = box.getCenter(new ThreeLib.Vector3());
@@ -190,101 +235,82 @@ const MindARScene = ({
 
             model.scale.set(normalizedScale, normalizedScale, normalizedScale);
 
-            // Position: centred X/Z on marker.
-            // Tabletop: float 40mm above marker surface so model sits on the table.
-            // Multi-point: sit flush at marker plane (floor level at marker A).
             model.position.x = -center.x * normalizedScale;
             model.position.y = -box.min.y * normalizedScale + floatAboveMarker;
             model.position.z = -center.z * normalizedScale;
 
-            // Apply initial rotation (compass direction)
             if (initialRotation) {
               model.rotation.y = ThreeLib.MathUtils.degToRad(initialRotation);
             }
 
-            // Save local-space transform so we can restore it when re-attaching
-            const localPos = model.position.clone();
-            const localQuat = model.quaternion.clone();
-            const localScale = model.scale.clone();
+            // Save local-space transform for restoration on re-anchor
+            localPos = model.position.clone();
+            localQuat = model.quaternion.clone();
+            localScale = model.scale.clone();
 
-            // Standard MindAR way: model lives inside anchor.group
             anchor.group.add(model);
 
-            // ── onTargetUpdate: fires every frame MindAR has a valid pose ──────
-            // MindAR writes anchor.group.matrix with the live tracking pose immediately
-            // BEFORE this callback fires — so it is always valid here (never the zero matrix).
-            // We compute lastKnownMatrix by direct multiplication to bypass Three.js
-            // matrixWorld propagation timing entirely.
+            // ── onTargetUpdate: fires every frame with valid pose ────────
             anchor.onTargetUpdate = () => {
-              if (model && !isWorldPlaced) {
-                updateFrameCount++;
+              if (!model) return;
 
-                // Force model's local matrix to be current from position/quat/scale.
-                // Three.js defers this normally until renderer.render() — we need it now.
+              if (anchorState === "tracking") {
+                stableFrameCounts[0]++;
+
                 model.updateMatrix();
 
-                // Build the world matrix by directly multiplying:
-                //   anchor.group.matrix  (MindAR's live camera-relative pose — just written)
-                // × model.matrix         (model's local offset within the anchor group)
-                // This is equivalent to matrixWorld but has zero timing dependency.
-                lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
+                // Capture the camera-relative world matrix
+                const worldMatrix = new ThreeLib.Matrix4();
+                worldMatrix.copy(anchor.group.matrix).multiply(model.matrix);
 
-                // Mark the matrix as valid after a short stabilisation window.
-                // This prevents the cold-start race where onTargetLost fires
-                // on the very first frame before onTargetUpdate has run.
-                if (!isMatrixValid && updateFrameCount >= 3) {
-                  isMatrixValid = true;
+                anchorPoseMatrices[0] = anchor.group.matrix.clone();
+
+                // ── Check if we should lock ──────────────────────────────
+                if (stableFrameCounts[0] >= STABLE_FRAME_THRESHOLD) {
+                  if (isTabletop || !markerData) {
+                    // Tabletop mode OR multi-point without markerData: lock on anchor 0 only
+                    if (!isTabletop && !markerData) {
+                      console.warn("[MindARScene] Multi-point mode but no markerData — falling back to anchor-A-only placement");
+                    }
+                    lockModel(model, worldMatrix, anchor, scene, ThreeLib);
+                  } else {
+                    // Multi-point with markerData: wait for all 3 anchors
+                    tryMultiPointLock(model, anchor, scene, ThreeLib);
+                  }
                 }
               }
             };
 
-            // ── onTargetFound: MindAR has already set anchor.group.matrix ─
+            // ── onTargetFound: re-anchor if locked ──────────────────────
             anchor.onTargetFound = () => {
-              if (model && isWorldPlaced) {
-                // Model was frozen in scene space — move it back into the anchor
-                // group so it tracks the marker again.
+              if (model && anchorState === "locked") {
+                // Return model to anchor group for live tracking
                 scene.remove(model);
                 model.matrixAutoUpdate = true;
                 anchor.group.add(model);
 
-                // Restore the model's local transforms inside the anchor group
                 model.position.set(localPos.x, localPos.y, localPos.z);
                 model.quaternion.copy(localQuat);
                 model.scale.set(localScale.x, localScale.y, localScale.z);
-
-                // Force model.matrix to reflect position/quat/scale RIGHT NOW,
-                // before onTargetUpdate fires in the same MindAR frame.
-                // Without this, onTargetUpdate would sample the stale frozen matrix.
                 model.updateMatrix();
 
-                isWorldPlaced = false;
-                // Reset frame counter — give the tracker a few frames to stabilise
-                // before we allow onTargetLost to freeze at a new position.
-                updateFrameCount = 0;
-                isMatrixValid = false;
+                anchorState = "tracking";
+                stableFrameCounts[0] = 0;
+                stableFrameCounts[1] = 0;
+                stableFrameCounts[2] = 0;
+                lockedMatrix = null;
+                lockedDeviceQuat = null;
               }
               onTargetFoundRef.current?.(i);
             };
 
-            // ── onTargetLost: anchor.group.matrix is NOW the invisible zero matrix ─
-            // Use lastKnownMatrix (sampled by onTargetUpdate the frame before loss)
-            // to freeze the model in place in scene space.
+            // ── onTargetLost ────────────────────────────────────────────
             anchor.onTargetLost = () => {
-              // Guard: only freeze if we have captured a valid pose.
-              // If the matrix is not yet valid (cold start / re-scan before stabilisation),
-              // skip the freeze — the model stays inside the anchor group (invisible) rather
-              // than being placed at world origin (which looks broken).
-              if (model && !isWorldPlaced && isMatrixValid) {
-                anchor.group.remove(model);
-                scene.add(model);
-
-                // Copy the last valid camera-relative pose into model.matrix.
-                // With matrixAutoUpdate = false, Three.js uses model.matrix directly
-                // for rendering — position/quaternion/scale are ignored.
-                model.matrix.copy(lastKnownMatrix);
-                model.matrixAutoUpdate = false;
-                isWorldPlaced = true;
-              }
+              // In the new system, we don't freeze on loss — the model
+              // is already locked via gyro if it was stable enough.
+              // If it wasn't stable enough (anchorState === 'tracking'),
+              // the model disappears with the anchor group (acceptable).
+              stableFrameCounts[0] = 0;
               onTargetLostRef.current?.(i);
             };
 
@@ -294,30 +320,143 @@ const MindARScene = ({
             anchor.onTargetLost = () => onTargetLostRef.current?.(i);
           }
         } else {
-          // Anchors 1 (B) and 2 (C) — multi-point mode only.
-          // These are tracking-only anchors: they update the detection UI
-          // status but carry no 3D model. No world-anchoring logic needed.
-          anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
-          anchor.onTargetLost = () => onTargetLostRef.current?.(i);
+          // Anchors 1 (B) and 2 (C) — multi-point tracking-only
+          anchor.onTargetUpdate = () => {
+            if (anchorState === "tracking") {
+              stableFrameCounts[i]++;
+              anchorPoseMatrices[i] = anchor.group.matrix.clone();
+            }
+          };
+
+          anchor.onTargetFound = () => {
+            onTargetFoundRef.current?.(i);
+          };
+
+          anchor.onTargetLost = () => {
+            stableFrameCounts[i] = 0;
+            onTargetLostRef.current?.(i);
+          };
         }
       }
 
-      // Start MindAR (requests camera, loads target)
+      // ── Lock helper: move model to scene root with gyro compensation ──
+      function lockModel(
+        model: any,
+        worldMatrix: any,
+        _anchor: any,
+        targetScene: any,
+        T: any
+      ) {
+        // Capture the current gyro quaternion at lock time
+        lockedDeviceQuat = deviceQuaternionRef.current
+          ? deviceQuaternionRef.current.clone()
+          : null;
+        lockedMatrix = worldMatrix.clone();
+
+        // Move model from anchor group to scene root
+        _anchor.group.remove(model);
+        targetScene.add(model);
+
+        model.matrix.copy(lockedMatrix);
+        model.matrixAutoUpdate = false;
+        anchorState = "locked";
+
+        console.log(
+          "[MindARScene] Model locked.",
+          hasGyro ? "Gyro compensation active." : "No gyro — static freeze."
+        );
+      }
+
+      // ── Multi-point lock: all 3 anchors must be stable ────────────────
+      function tryMultiPointLock(
+        model: any,
+        anchorA: any,
+        targetScene: any,
+        T: any
+      ) {
+        if (
+          stableFrameCounts[0] < STABLE_FRAME_THRESHOLD ||
+          stableFrameCounts[1] < STABLE_FRAME_THRESHOLD ||
+          stableFrameCounts[2] < STABLE_FRAME_THRESHOLD
+        ) {
+          return; // Not all anchors stable yet
+        }
+
+        if (!anchorPoseMatrices[0] || !anchorPoseMatrices[1] || !anchorPoseMatrices[2]) {
+          return;
+        }
+
+        // Extract flat Float32Arrays from THREE.Matrix4 elements
+        const matrices: [Float32Array, Float32Array, Float32Array] = [
+          new Float32Array(anchorPoseMatrices[0].elements),
+          new Float32Array(anchorPoseMatrices[1].elements),
+          new Float32Array(anchorPoseMatrices[2].elements),
+        ];
+
+        const result = computeWorldTransform(matrices, markerData!, MARKER_SIZE_MM);
+
+        if (!result) {
+          console.warn("[MindARScene] computeWorldTransform returned null — falling back to anchor-A-only");
+          // Fall back to anchor-A-only
+          model.updateMatrix();
+          const fallbackMatrix = new T.Matrix4();
+          fallbackMatrix.copy(anchorA.group.matrix).multiply(model.matrix);
+          lockModel(model, fallbackMatrix, anchorA, targetScene, T);
+          return;
+        }
+
+        // Use the computed world transform as the locked matrix
+        const worldMat = new T.Matrix4();
+        worldMat.fromArray(result);
+        lockModel(model, worldMat, anchorA, targetScene, T);
+      }
+
+      // Start MindAR
       await mindarThree.start();
       setIsStarting(false);
       onReadyRef.current?.();
 
-      // Render loop — pose sampling is handled by anchor.onTargetUpdate,
-      // so the animation loop only needs to render the scene.
+      // ── Render loop with gyro compensation ────────────────────────────
       renderer.setAnimationLoop(() => {
+        // When locked and gyro is available, compensate for device rotation
+        if (
+          anchorState === "locked" &&
+          modelRef &&
+          lockedMatrix &&
+          lockedDeviceQuat &&
+          deviceQuaternionRef.current
+        ) {
+          // deltaQuat = inverse(lockedDeviceQuat) * currentDeviceQuat
+          const deltaQuat = lockedDeviceQuat
+            .clone()
+            .invert()
+            .multiply(deviceQuaternionRef.current.clone());
+
+          // Build a rotation matrix from deltaQuat, then invert it
+          // (we want to cancel the device rotation, not apply it)
+          const deltaMatrix = new ThreeLib.Matrix4().makeRotationFromQuaternion(deltaQuat);
+          deltaMatrix.invert();
+
+          // Apply: model.matrix = deltaMatrix * lockedMatrix
+          const compensated = new ThreeLib.Matrix4();
+          compensated.multiplyMatrices(deltaMatrix, lockedMatrix);
+          modelRef.matrix.copy(compensated);
+        }
+
         renderer.render(scene, camera);
       });
+
+      // Store cleanup for the deviceorientation listener
+      mindarRef.current._cleanupGyro = () => {
+        window.removeEventListener("deviceorientation", onDeviceOrientation, true);
+      };
+
     } catch (err) {
       console.error("MindAR initialization error:", err);
       setIsStarting(false);
       onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
     }
-  }, [imageTargetSrc, modelUrl, mode, maxTrack, modelScale, initialRotation]);
+  }, [imageTargetSrc, modelUrl, mode, maxTrack, modelScale, initialRotation, markerData, isTabletop, floatAboveMarker]);
 
   useEffect(() => {
     startAR();
@@ -328,6 +467,7 @@ const MindARScene = ({
 
       if (mindarRef.current) {
         try {
+          mindarRef.current._cleanupGyro?.();
           mindarRef.current.stop();
         } catch {
           // Ignore cleanup errors
