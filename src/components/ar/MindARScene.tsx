@@ -29,7 +29,7 @@ interface MindARSceneProps {
   /** Initial Y rotation in degrees */
   initialRotation?: number;
   /** Rhino marker coordinates for multi-point triangulation */
-  markerData?: { A: { x: number; y: number; z: number }; B: { x: number; y: number; z: number }; C: { x: number; y: number; z: number } } | null;
+  markerData?: import("@/lib/markerTypes").MarkerPoint[] | null;
 }
 
 
@@ -386,14 +386,15 @@ const MindARScene = ({
           return;
         }
 
-        // Extract flat Float32Arrays from THREE.Matrix4 elements
-        const matrices: [Float32Array, Float32Array, Float32Array] = [
-          new Float32Array(anchorPoseMatrices[0].elements),
-          new Float32Array(anchorPoseMatrices[1].elements),
-          new Float32Array(anchorPoseMatrices[2].elements),
-        ];
+        // Extract VisibleAnchor objects for computeWorldTransform
+        const visibleAnchors = [0, 1, 2]
+          .filter((idx) => anchorPoseMatrices[idx])
+          .map((idx) => ({
+            index: markerData![idx]?.index ?? (idx + 1),
+            matrix: new Float32Array(anchorPoseMatrices[idx].elements),
+          }));
 
-        const result = computeWorldTransform(matrices, markerData!, MARKER_SIZE_MM);
+        const result = computeWorldTransform(visibleAnchors, markerData!, MARKER_SIZE_MM);
 
         if (!result) {
           console.warn("[MindARScene] computeWorldTransform returned null — falling back to anchor-A-only");

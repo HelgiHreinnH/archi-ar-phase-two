@@ -10,9 +10,9 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
-import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import QRCode from "qrcode";
-import { generateAllMarkerImages, canvasToImage, type MarkerPoint } from "@/lib/generateMarkers";
+import { generateAllMarkerImages, canvasToImage } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { generateTabletopMarkerImage, markerCanvasToImage } from "@/lib/generateTabletopMarker";
@@ -25,7 +25,7 @@ interface GenerateExperienceProps {
   hasModel: boolean;
   hasValidMarkers: boolean;
   mode: "tabletop" | "multipoint";
-  markerData: MarkerData | null;
+  markerData: MarkerPoint[] | null;
   onGenerated: () => void;
 }
 
@@ -87,8 +87,8 @@ const GenerateExperience = ({
         ]
       : [
           { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
-          { label: "Marker coordinates set", passed: hasValidMarkers, hint: "Enter coordinates for points A, B, C" },
-          { label: "Triangle quality sufficient", passed: hasValidMarkers, hint: "Ensure points form a valid triangle" },
+          { label: `Marker coordinates set (${markerData?.length ?? 0} points)`, passed: hasValidMarkers, hint: "Enter coordinates for at least 3 points" },
+          { label: "Spacing quality sufficient", passed: hasValidMarkers, hint: "Ensure points form a valid configuration" },
         ];
 
   const allPassed = checks.every((c) => c.passed);
@@ -115,18 +115,8 @@ const GenerateExperience = ({
       let markerImageUrls: Record<string, string> = {};
       let mindFileUrl: string | null = null;
 
-      if (mode === "multipoint" && markerData) {
-        const points: Record<string, MarkerPoint> = {};
-        for (const [id, data] of Object.entries(markerData)) {
-          points[id] = {
-            x: data.x,
-            y: data.y,
-            z: data.z,
-            label: data.label || `Point ${id}`,
-          };
-        }
-
-        const generatedMarkers = await generateAllMarkerImages(points, project.name);
+      if (mode === "multipoint" && markerData && markerData.length >= 3) {
+        const generatedMarkers = await generateAllMarkerImages(markerData, project.name);
 
         // ── Step 2: Compile .mind file ──
         setStep("compiling");
@@ -147,7 +137,7 @@ const GenerateExperience = ({
 
         // Upload marker images
         for (const marker of generatedMarkers) {
-          const filePath = `${projectPath}/markers/marker_${marker.id}.png`;
+          const filePath = `${projectPath}/markers/marker_${marker.index}.png`;
           const { error: uploadErr } = await supabase.storage
             .from("project-assets")
             .upload(filePath, marker.blob, {
@@ -159,7 +149,7 @@ const GenerateExperience = ({
           const { data: urlData } = supabase.storage
             .from("project-assets")
             .getPublicUrl(filePath);
-          markerImageUrls[marker.id] = urlData.publicUrl;
+          markerImageUrls[String(marker.index)] = urlData.publicUrl;
         }
 
         // Upload .mind file
@@ -204,11 +194,8 @@ const GenerateExperience = ({
       // ── Tabletop: generate AR reference image → compile into .mind target ──
       if (mode === "tabletop" && !mindFileUrl) {
         setStep("markers");
-
-        // 1. Generate the dedicated AR tracking reference image
         const { canvas: arCanvas, blob: arBlob } = await generateTabletopMarkerImage(project.name);
 
-        // 2. Upload the AR reference image
         const arRefPath = `${projectPath}/ar_reference.png`;
         const { error: arUploadErr } = await supabase.storage
           .from("project-assets")
@@ -220,7 +207,6 @@ const GenerateExperience = ({
           .getPublicUrl(arRefPath);
         markerImageUrls = { tabletop: arRefUrlData.publicUrl };
 
-        // 3. Compile .mind file from the AR reference image (not the QR code)
         setStep("compiling");
         setCompileProgress(0);
 
@@ -254,7 +240,6 @@ const GenerateExperience = ({
         mind_file_url: mindFileUrl,
       };
 
-      // Store marker_image_urls for both modes
       if (Object.keys(markerImageUrls).length > 0) {
         updatePayload.marker_image_urls = markerImageUrls;
       }
@@ -269,7 +254,7 @@ const GenerateExperience = ({
       setStep("done");
       toast({
         title: "AR Experience Generated! 🚀",
-        description: "Marker images compiled, assets uploaded, and experience is live.",
+        description: `${mode === "multipoint" && markerData ? `${markerData.length} markers compiled` : "Assets uploaded"} and experience is live.`,
       });
       onGenerated();
     } catch (err: any) {
@@ -310,7 +295,7 @@ const GenerateExperience = ({
           {checks.map((check) => (
             <div key={check.label} className="flex items-center gap-2 text-sm">
               {check.passed ? (
-                <CheckCircle2 className="h-4 w-4 text-marker-green shrink-0" />
+                <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
               ) : (
                 <AlertCircle className="h-4 w-4 text-muted-foreground shrink-0" />
               )}
@@ -329,7 +314,7 @@ const GenerateExperience = ({
           <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               {step === "done" ? (
-                <CheckCircle2 className="h-4 w-4 text-marker-green" />
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
               ) : step === "error" ? (
                 <AlertCircle className="h-4 w-4 text-destructive" />
               ) : (
@@ -350,16 +335,12 @@ const GenerateExperience = ({
                 const currentIdx = stepKeys.indexOf(step);
                 const thisIdx = stepKeys.indexOf(key as GenerationStep);
                 const isDone = currentIdx > thisIdx || step === "done";
-                const isActive = key === step;
+                const isCurrent = key === step;
                 return (
                   <div
                     key={key}
                     className={`flex flex-col items-center gap-0.5 ${
-                      isDone
-                        ? "text-marker-green"
-                        : isActive
-                        ? "text-primary font-medium"
-                        : ""
+                      isDone ? "text-green-600" : isCurrent ? "text-primary font-medium" : ""
                     }`}
                   >
                     <Icon className="h-3 w-3" />
@@ -373,12 +354,7 @@ const GenerateExperience = ({
 
         {/* Generate Button */}
         {!isActive ? (
-          <Button
-            className="w-full"
-            size="lg"
-            disabled={!allPassed || generating}
-            onClick={handleGenerate}
-          >
+          <Button className="w-full" size="lg" disabled={!allPassed || generating} onClick={handleGenerate}>
             {generating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -393,15 +369,13 @@ const GenerateExperience = ({
           </Button>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-lg border border-marker-green/30 bg-marker-green/5 p-3">
-              <CheckCircle2 className="h-5 w-5 text-marker-green shrink-0" />
+            <div className="flex items-center gap-2 rounded-lg border border-green-600/30 bg-green-600/5 p-3">
+              <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">Experience is Live</p>
-                {shareUrl && (
-                  <p className="text-xs text-muted-foreground truncate">{shareUrl}</p>
-                )}
+                {shareUrl && <p className="text-xs text-muted-foreground truncate">{shareUrl}</p>}
               </div>
-              <Badge className="bg-marker-green/10 text-marker-green border-0">Active</Badge>
+              <Badge className="bg-green-600/10 text-green-600 border-0">Active</Badge>
             </div>
 
             {shareUrl && (
@@ -419,12 +393,7 @@ const GenerateExperience = ({
               </div>
             )}
 
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={handleGenerate}
-              disabled={generating}
-            >
+            <Button variant="outline" className="w-full" onClick={handleGenerate} disabled={generating}>
               {generating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -456,11 +425,7 @@ const GenerateExperience = ({
               onClick={async () => {
                 try {
                   const qrCanvas = document.createElement("canvas");
-                  await QRCode.toCanvas(qrCanvas, shareUrl, {
-                    width: 600,
-                    margin: 2,
-                    color: { dark: "#212121", light: "#FFFFFF" },
-                  });
+                  await QRCode.toCanvas(qrCanvas, shareUrl, { width: 600, margin: 2, color: { dark: "#212121", light: "#FFFFFF" } });
                   const a = document.createElement("a");
                   a.href = qrCanvas.toDataURL("image/png");
                   a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
@@ -484,12 +449,7 @@ const GenerateExperience = ({
                     Print both files — scan the QR to launch, point camera at the AR Marker to activate.
                   </p>
                   {arRefUrl && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start gap-2"
-                      asChild
-                    >
+                    <Button variant="outline" size="sm" className="w-full justify-start gap-2" asChild>
                       <a href={arRefUrl} download={`ar_marker_${project.name.replace(/\s+/g, "_")}.png`} target="_blank" rel="noopener noreferrer">
                         <Download className="h-3 w-3" />
                         Download AR Reference Image
@@ -518,34 +478,28 @@ const GenerateExperience = ({
             })()}
 
             {/* Marker PDFs — multipoint only */}
-            {mode === "multipoint" && markerData && (
+            {mode === "multipoint" && markerData && markerData.length > 0 && (
               <>
                 <p className="text-xs text-muted-foreground">
                   Download print-ready A4 PDFs with marker image, QR code, and placement instructions.
                 </p>
                 <div className="grid gap-2 sm:grid-cols-3">
-                  {(["A", "B", "C"] as const).map((pointId) => {
-                    const point = markerData[pointId];
-                    if (!point) return null;
+                  {markerData.map((marker) => {
+                    const color = getMarkerColor(marker.index);
                     return (
                       <Button
-                        key={pointId}
+                        key={marker.index}
                         variant="outline"
                         size="sm"
                         className="justify-start gap-2"
-                        onClick={() =>
-                          downloadMarkerPDF(pointId, point, project.name, shareUrl!)
-                        }
+                        onClick={() => downloadMarkerPDF(marker, project.name, shareUrl!)}
                       >
                         <div
                           className="h-3 w-3 rounded-full shrink-0"
-                          style={{
-                            backgroundColor:
-                              pointId === "A" ? "hsl(0 100% 60%)" : pointId === "B" ? "hsl(145 63% 49%)" : "hsl(211 100% 50%)",
-                          }}
+                          style={{ backgroundColor: color.bg }}
                         />
                         <FileText className="h-3 w-3" />
-                        Marker {pointId} PDF
+                        Marker {marker.index} PDF
                       </Button>
                     );
                   })}
@@ -554,13 +508,7 @@ const GenerateExperience = ({
                   variant="outline"
                   size="sm"
                   className="w-full justify-start gap-2"
-                  onClick={() => {
-                    const points: Record<string, { x: number; y: number; z: number; label: string }> = {};
-                    for (const id of ["A", "B", "C"] as const) {
-                      if (markerData[id]) points[id] = markerData[id];
-                    }
-                    downloadAllMarkerPDFs(points, project.name, shareUrl!);
-                  }}
+                  onClick={() => downloadAllMarkerPDFs(markerData, project.name, shareUrl!)}
                 >
                   <Download className="h-3 w-3" />
                   Download All Marker PDFs
@@ -570,12 +518,7 @@ const GenerateExperience = ({
 
             {/* .mind file download */}
             {(project as any).mind_file_url && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start gap-2"
-                asChild
-              >
+              <Button variant="outline" size="sm" className="w-full justify-start gap-2" asChild>
                 <a
                   href={(project as any).mind_file_url}
                   download={`targets_${project.name.replace(/\s+/g, "_")}.mind`}

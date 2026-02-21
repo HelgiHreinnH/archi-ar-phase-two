@@ -1,19 +1,22 @@
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import type { MarkerPoint } from "@/lib/markerTypes";
 
-const MARKER_NAMES = ["marker_a", "marker_b", "marker_c"] as const;
-const MARKER_KEYS: Record<(typeof MARKER_NAMES)[number], "A" | "B" | "C"> = {
-  marker_a: "A",
-  marker_b: "B",
-  marker_c: "C",
+const MAX_MARKERS = 20;
+
+/** Legacy name → index mapping */
+const LEGACY_MAP: Record<string, number> = {
+  marker_a: 1,
+  marker_b: 2,
+  marker_c: 3,
 };
 
 /**
- * Parses a GLB file and looks for objects named marker_A, marker_B, marker_C
- * (case-insensitive). Returns their world positions as MarkerData, or null
- * if not all three are found.
+ * Parses a GLB file and looks for objects named marker_1 through marker_20
+ * (case-insensitive, spaces/hyphens normalized to underscores).
+ * Also supports legacy marker_A/B/C names (remapped to 1/2/3).
+ * Returns sorted MarkerPoint[] or null if fewer than 3 found.
  */
-export async function parseGlbMarkers(file: File): Promise<MarkerData | null> {
+export async function parseGlbMarkers(file: File): Promise<MarkerPoint[] | null> {
   const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
   if (ext !== ".glb") return null;
 
@@ -25,41 +28,61 @@ export async function parseGlbMarkers(file: File): Promise<MarkerData | null> {
       buffer,
       "",
       (gltf) => {
-        const found: Partial<Record<"A" | "B" | "C", { x: number; y: number; z: number }>> = {};
+        const found = new Map<number, { x: number; y: number; z: number }>();
 
         gltf.scene.traverse((obj) => {
           const name = obj.name.toLowerCase().replace(/[\s-]/g, "_");
-          for (const markerName of MARKER_NAMES) {
-            if (name === markerName) {
-              // Get world position (accounts for parent transforms)
+
+          // Check legacy names first
+          if (LEGACY_MAP[name] !== undefined) {
+            obj.updateWorldMatrix(true, false);
+            const pos = obj.getWorldPosition(
+              new (obj.position.constructor as new () => typeof obj.position)()
+            );
+            found.set(LEGACY_MAP[name], {
+              x: Math.round(pos.x),
+              y: Math.round(pos.y),
+              z: Math.round(pos.z),
+            });
+            return;
+          }
+
+          // Check marker_N pattern
+          const match = name.match(/^marker_(\d+)$/);
+          if (match) {
+            const idx = parseInt(match[1], 10);
+            if (idx >= 1 && idx <= MAX_MARKERS) {
               obj.updateWorldMatrix(true, false);
               const pos = obj.getWorldPosition(
-                new (
-                  // Dynamic import to avoid pulling in full THREE at module level
-                  obj.position.constructor as new () => typeof obj.position
-                )()
+                new (obj.position.constructor as new () => typeof obj.position)()
               );
-              found[MARKER_KEYS[markerName]] = {
+              found.set(idx, {
                 x: Math.round(pos.x),
                 y: Math.round(pos.y),
                 z: Math.round(pos.z),
-              };
+              });
             }
           }
         });
 
-        if (found.A && found.B && found.C) {
-          resolve({
-            A: { ...found.A, label: "Anchor Point" },
-            B: { ...found.B, label: "Reference Point" },
-            C: { ...found.C, label: "Reference Point" },
-          });
-        } else {
+        if (found.size < 3) {
           resolve(null);
+          return;
         }
+
+        const markers: MarkerPoint[] = Array.from(found.entries())
+          .sort(([a], [b]) => a - b)
+          .map(([index, pos]) => ({
+            index,
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+            label: `Marker ${index}`,
+          }));
+
+        resolve(markers);
       },
       () => {
-        // Parse error — silently return null, user can enter manually
         resolve(null);
       }
     );

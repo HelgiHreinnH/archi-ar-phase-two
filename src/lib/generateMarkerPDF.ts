@@ -1,71 +1,53 @@
 /**
  * Generate print-ready A4 PDFs for marker placement sheets.
- * Each PDF contains: branded marker image, QR code, placement instructions,
- * and coordinate details for on-site installation.
+ * Supports N markers with dynamic numbering.
  */
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
-import { generateMarkerCanvas, type MarkerPoint } from "@/lib/generateMarkers";
+import { generateMarkerCanvas } from "@/lib/generateMarkers";
+import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 
-const A4_W = 210; // mm
-const A4_H = 297; // mm
-const MARGIN = 15; // mm
+const A4_W = 210;
+const A4_H = 297;
+const MARGIN = 15;
 
-const MARKER_COLORS: Record<string, { hex: string; name: string }> = {
-  A: { hex: "#FF3B30", name: "Red" },
-  B: { hex: "#34C759", name: "Green" },
-  C: { hex: "#007AFF", name: "Blue" },
-};
-
-/**
- * Generate a single A4 marker PDF for one point.
- * Layout (top → bottom):
- *   - Header bar with project name + point label
- *   - Large marker image (centered, ~130 mm)
- *   - Coordinate details
- *   - QR code + share URL
- *   - Placement instructions footer
- */
 export async function generateMarkerPDF(
-  pointId: string,
-  coords: MarkerPoint,
+  marker: MarkerPoint,
   projectName: string,
   shareUrl: string
 ): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const color = MARKER_COLORS[pointId] || MARKER_COLORS.A;
+  const color = getMarkerColor(marker.index);
   const contentW = A4_W - MARGIN * 2;
   let y = MARGIN;
 
-  // ── Header bar ──
-  doc.setFillColor(color.hex);
+  // Header bar
+  doc.setFillColor(color.bg);
   doc.rect(0, 0, A4_W, 18, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(11);
   doc.setFont("helvetica", "bold");
   doc.text(projectName.toUpperCase(), MARGIN, 12);
-  doc.text(`MARKER ${pointId}`, A4_W - MARGIN, 12, { align: "right" });
+  doc.text(`MARKER ${marker.index}`, A4_W - MARGIN, 12, { align: "right" });
 
   y = 26;
 
-  // ── Point label ──
+  // Point label
   doc.setTextColor(50, 50, 50);
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(`Point ${pointId} — ${coords.label || `Marker ${pointId}`}`, A4_W / 2, y, {
-    align: "center",
-  });
+  doc.text(`Point ${marker.index} — ${marker.label || `Marker ${marker.index}`}`, A4_W / 2, y, { align: "center" });
   y += 10;
 
-  // ── Marker image ──
-  const markerCanvas = generateMarkerCanvas(pointId, coords, projectName);
+  // Marker image
+  const markerCanvas = generateMarkerCanvas(marker, projectName);
   const markerDataUrl = markerCanvas.toDataURL("image/png");
-  const markerSize = 130; // mm square
+  const markerSize = 130;
   const markerX = (A4_W - markerSize) / 2;
   doc.addImage(markerDataUrl, "PNG", markerX, y, markerSize, markerSize);
   y += markerSize + 8;
 
-  // ── Coordinates ──
+  // Coordinates
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 100, 100);
@@ -75,22 +57,15 @@ export async function generateMarkerPDF(
   doc.setFontSize(13);
   doc.setFont("courier", "bold");
   doc.setTextColor(40, 40, 40);
-  doc.text(`X: ${coords.x}    Y: ${coords.y}    Z: ${coords.z}  (mm)`, A4_W / 2, y, {
-    align: "center",
-  });
+  doc.text(`X: ${marker.x}    Y: ${marker.y}    Z: ${marker.z}  (mm)`, A4_W / 2, y, { align: "center" });
   y += 10;
 
-  // ── QR code ──
+  // QR code
   const qrCanvas = document.createElement("canvas");
-  await QRCode.toCanvas(qrCanvas, shareUrl, {
-    width: 400,
-    margin: 1,
-    color: { dark: "#212121", light: "#FFFFFF" },
-  });
+  await QRCode.toCanvas(qrCanvas, shareUrl, { width: 400, margin: 1, color: { dark: "#212121", light: "#FFFFFF" } });
   const qrDataUrl = qrCanvas.toDataURL("image/png");
   const qrSize = 32;
-  const qrX = (A4_W - qrSize) / 2;
-  doc.addImage(qrDataUrl, "PNG", qrX, y, qrSize, qrSize);
+  doc.addImage(qrDataUrl, "PNG", (A4_W - qrSize) / 2, y, qrSize, qrSize);
   y += qrSize + 4;
 
   doc.setFontSize(8);
@@ -102,7 +77,7 @@ export async function generateMarkerPDF(
   doc.text(shareUrl, A4_W / 2, y, { align: "center" });
   y += 8;
 
-  // ── Instructions footer ──
+  // Instructions footer
   doc.setDrawColor(220, 220, 220);
   doc.line(MARGIN, y, A4_W - MARGIN, y);
   y += 5;
@@ -118,9 +93,9 @@ export async function generateMarkerPDF(
   doc.setTextColor(100, 100, 100);
   const instructions = [
     `1. Print this page at 100% scale (no fit-to-page). The marker must be actual size for accurate AR tracking.`,
-    `2. Place this sheet at the coordinates shown above (X: ${coords.x}, Y: ${coords.y}, Z: ${coords.z} mm).`,
+    `2. Place this sheet at the coordinates shown above (X: ${marker.x}, Y: ${marker.y}, Z: ${marker.z} mm).`,
     `3. Ensure the marker is flat, well-lit, and unobstructed. Avoid reflective surfaces or glass overlays.`,
-    `4. All three markers (A, B, C) must be placed before the AR experience can align the 3D model.`,
+    `4. At least 3 markers must be placed before the AR experience can align the 3D model.`,
   ];
   instructions.forEach((line) => {
     const split = doc.splitTextToSize(line, contentW);
@@ -128,7 +103,6 @@ export async function generateMarkerPDF(
     y += split.length * 3.5 + 1.5;
   });
 
-  // ── Footer branding ──
   doc.setFontSize(6.5);
   doc.setTextColor(180, 180, 180);
   doc.text("Generated by Archi AR", A4_W / 2, A4_H - 8, { align: "center" });
@@ -138,25 +112,23 @@ export async function generateMarkerPDF(
 
 /** Generate and trigger download of a single marker PDF. */
 export async function downloadMarkerPDF(
-  pointId: string,
-  coords: MarkerPoint,
+  marker: MarkerPoint,
   projectName: string,
   shareUrl: string
 ): Promise<void> {
-  const doc = await generateMarkerPDF(pointId, coords, projectName, shareUrl);
+  const doc = await generateMarkerPDF(marker, projectName, shareUrl);
   const safeName = projectName.replace(/\s+/g, "_");
-  doc.save(`Marker_${pointId}_${safeName}.pdf`);
+  doc.save(`Marker_${marker.index}_${safeName}.pdf`);
 }
 
-/** Generate and download all marker PDFs (A, B, C) as separate files. */
+/** Generate and download all marker PDFs as separate files. */
 export async function downloadAllMarkerPDFs(
-  markerData: Record<string, MarkerPoint>,
+  markers: MarkerPoint[],
   projectName: string,
   shareUrl: string
 ): Promise<void> {
-  for (const [id, coords] of Object.entries(markerData)) {
-    await downloadMarkerPDF(id, coords, projectName, shareUrl);
-    // Small delay between downloads so browser doesn't block them
+  for (const marker of markers) {
+    await downloadMarkerPDF(marker, projectName, shareUrl);
     await new Promise((r) => setTimeout(r, 300));
   }
 }

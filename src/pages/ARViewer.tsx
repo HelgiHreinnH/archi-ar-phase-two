@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
+import { normalizeMarkerData } from "@/lib/markerTypes";
 import ARLanding from "@/components/ar/ARLanding";
 import ARPermission from "@/components/ar/ARPermission";
 import ARDetection from "@/components/ar/ARDetection";
@@ -15,11 +16,6 @@ type MarkerStatus = "searching" | "detected" | "locked";
 const ARViewer = () => {
   const { shareId } = useParams<{ shareId: string }>();
   const [viewState, setViewState] = useState<ViewerState>("landing");
-  const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({
-    A: "searching",
-    B: "searching",
-    C: "searching",
-  });
 
   const { data: project, isLoading, error } = useQuery({
     queryKey: ["public-project", shareId],
@@ -36,13 +32,27 @@ const ARViewer = () => {
     enabled: !!shareId,
   });
 
-  // Go straight to detecting – let MindAR request the camera in a single
-  // getUserMedia call.  A double request (pre-check then MindAR) breaks on
-  // mobile Safari because the second call loses the user-gesture context.
-  //
-  // Also request DeviceOrientation permission (iOS 13+). This MUST happen
-  // during a user gesture — the "Start AR" button tap provides that context.
-  // If denied or unavailable, AR still works but without gyro compensation.
+  // Parse marker data once project loads
+  const markerData = project ? normalizeMarkerData(project.marker_data) : null;
+  const isMultipoint = project?.mode !== "tabletop";
+  const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
+
+  // Dynamic marker status state
+  const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({});
+
+  // Initialize markers when project loads
+  const getInitialMarkers = useCallback((): Record<string, MarkerStatus> => {
+    const m: Record<string, MarkerStatus> = {};
+    if (isMultipoint && markerData) {
+      for (const mp of markerData) m[String(mp.index)] = "searching";
+    } else if (isMultipoint) {
+      for (let i = 1; i <= 3; i++) m[String(i)] = "searching";
+    } else {
+      m["QR"] = "searching";
+    }
+    return m;
+  }, [isMultipoint, markerData]);
+
   const launchDetecting = useCallback(async () => {
     try {
       const DOE = DeviceOrientationEvent as any;
@@ -52,49 +62,34 @@ const ARViewer = () => {
     } catch {
       // Silently ignore — gyro compensation will gracefully degrade
     }
+    setMarkers(getInitialMarkers());
     setViewState("detecting");
-  }, []);
+  }, [getInitialMarkers]);
 
-  // MindAR target found callback — update marker status
   const handleTargetFound = useCallback((index: number) => {
-    const isMultipoint = project?.mode !== "tabletop";
     if (isMultipoint) {
-      const markerIds = ["A", "B", "C"];
-      const markerId = markerIds[index];
-      if (markerId) {
-        setMarkers((prev) => ({ ...prev, [markerId]: "detected" }));
-      }
+      const key = markerData ? String(markerData[index]?.index ?? index + 1) : String(index + 1);
+      setMarkers((prev) => ({ ...prev, [key]: "detected" }));
     } else {
       setMarkers((prev) => ({ ...prev, QR: "detected" }));
     }
-  }, [project?.mode]);
+  }, [isMultipoint, markerData]);
 
   const handleTargetLost = useCallback((index: number) => {
-    const isMultipoint = project?.mode !== "tabletop";
     if (isMultipoint) {
-      const markerIds = ["A", "B", "C"];
-      const markerId = markerIds[index];
-      if (markerId) {
-        setMarkers((prev) => ({ ...prev, [markerId]: "searching" }));
-      }
+      const key = markerData ? String(markerData[index]?.index ?? index + 1) : String(index + 1);
+      setMarkers((prev) => ({ ...prev, [key]: "searching" }));
     } else {
       setMarkers((prev) => ({ ...prev, QR: "searching" }));
     }
-  }, [project?.mode]);
-
-  const handleLaunchAR = () => {
-    launchDetecting();
-  };
+  }, [isMultipoint, markerData]);
 
   const [resetKey, setResetKey] = useState(0);
 
-  // True reset: bump resetKey to remount ARDetection + MindARScene entirely.
-  // This is wired to the reset button in the active phase so the user can
-  // re-anchor the model from scratch without leaving the AR session.
   const handleReset = useCallback(() => {
-    setMarkers({ A: "searching", B: "searching", C: "searching" });
+    setMarkers(getInitialMarkers());
     setResetKey((k) => k + 1);
-  }, []);
+  }, [getInitialMarkers]);
 
   const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
 
@@ -103,16 +98,11 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Resolve the model URL as soon as the project loads — NOT gated on viewState.
-  // If we wait until "detecting" to fetch this, MindARScene mounts before the URL
-  // is ready, modelUrl is null on mount, and the GLB is never loaded.
   const { data: signedModelUrl, isLoading: isSignedUrlLoading } = useQuery({
     queryKey: ["signed-model-url", project?.model_url],
     queryFn: async () => {
       if (!project?.model_url) return null;
-      // If it's already a full URL, use it directly
       if (project.model_url.startsWith("http")) return project.model_url;
-      // Otherwise generate a signed URL from Supabase storage
       const { data, error } = await supabase.storage
         .from("project-models")
         .createSignedUrl(project.model_url, 3600);
@@ -122,7 +112,6 @@ const ARViewer = () => {
     enabled: !!project?.model_url,
   });
 
-  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -134,7 +123,6 @@ const ARViewer = () => {
     );
   }
 
-  // Error state
   if (error || !project) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6">
@@ -149,15 +137,13 @@ const ARViewer = () => {
     );
   }
 
-  // Parse scale to a number
-  // Extract the denominator from "1:N" format (e.g. "1:50" → 50, "1:1" → 1)
   const scaleNum = project.scale
     ? parseFloat(project.scale.split(":")[1]) || 1
     : 1;
 
   switch (viewState) {
     case "landing":
-      return <ARLanding project={project} onLaunchAR={handleLaunchAR} />;
+      return <ARLanding project={project} onLaunchAR={launchDetecting} />;
 
     case "permission-denied":
       return (
@@ -169,9 +155,6 @@ const ARViewer = () => {
       );
 
     case "detecting":
-      // Gate MindARScene on the signed URL being ready.
-      // Without this guard, MindARScene mounts with modelUrl=undefined and
-      // the GLB load is skipped entirely with no retry path.
       if (project.model_url && isSignedUrlLoading) {
         return (
           <div className="fixed inset-0 bg-black flex items-center justify-center">
@@ -187,6 +170,7 @@ const ARViewer = () => {
           key={resetKey}
           mode={project.mode}
           markers={markers}
+          markerCount={markerCount}
           onTargetFound={handleTargetFound}
           onTargetLost={handleTargetLost}
           onCancel={() => setViewState("landing")}
@@ -198,7 +182,7 @@ const ARViewer = () => {
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
           project={project}
-          markerData={project.marker_data as any}
+          markerData={markerData}
         />
       );
   }

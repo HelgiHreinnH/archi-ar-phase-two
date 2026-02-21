@@ -1,6 +1,6 @@
 import GenerateExperience from "@/components/GenerateExperience";
 import type { Tables } from "@/integrations/supabase/types";
-import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import type { MarkerPoint } from "@/lib/markerTypes";
 
 type Project = Tables<"projects">;
 
@@ -9,7 +9,7 @@ interface StepGenerateProps {
   hasModel: boolean;
   hasValidMarkers: boolean;
   mode: "tabletop" | "multipoint";
-  markerData: MarkerData | null;
+  markerData: MarkerPoint[] | null;
   onGenerated: () => void;
 }
 
