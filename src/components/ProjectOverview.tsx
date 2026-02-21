@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
-import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import { type MarkerPoint, getMarkerColor, normalizeMarkerData } from "@/lib/markerTypes";
 import QRCode from "qrcode";
 import ModelViewer3D from "@/components/ModelViewer3D";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
@@ -21,16 +21,10 @@ interface ProjectOverviewProps {
   onEdit: () => void;
 }
 
-const MARKER_COLORS: Record<string, string> = {
-  A: "#E53935",
-  B: "#43A047",
-  C: "#1E88E5",
-};
-
 const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
   const [downloadsOpen, setDownloadsOpen] = useState(false);
   const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
-  const markerData = project.marker_data as unknown as MarkerData | null;
+  const markerData = normalizeMarkerData(project.marker_data);
   const shareUrl = project.share_link
     ? `${window.location.origin}/view/${project.share_link}`
     : null;
@@ -61,17 +55,14 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
 
   return (
     <div className="space-y-3">
-      {/* Top row: 3D Preview (landscape) + Info card (portrait) */}
+      {/* Top row: 3D Preview + Info card */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
-        {/* 3D Model Preview — 16:9ish */}
         {project.model_url && (
           <ModelViewer3D modelUrl={project.model_url} className="aspect-video w-full rounded-lg" />
         )}
 
-        {/* Info card */}
         <Card className="flex flex-col">
           <CardContent className="pt-4 pb-4 space-y-3 flex-1">
-            {/* Status + share row */}
             {shareUrl ? (
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
@@ -93,7 +84,6 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
               <Badge variant="secondary" className="text-xs">Draft</Badge>
             )}
 
-            {/* Key details — stacked in narrow card */}
             <div className="space-y-2 text-sm">
               {project.client_name && (
                 <div>
@@ -126,7 +116,6 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
               )}
             </div>
 
-            {/* Edit button at bottom of card */}
             <Button variant="outline" size="sm" className="w-full mt-auto" onClick={onEdit}>
               <Pencil className="mr-2 h-3.5 w-3.5" />
               Edit Experience
@@ -135,48 +124,48 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
         </Card>
       </div>
 
-      {/* Bottom row: Markers + Downloads side by side */}
+      {/* Bottom row: Markers + Downloads */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
-        {/* Marker Coordinates — multipoint only */}
-        {mode === "multipoint" && markerData ? (
+        {mode === "multipoint" && markerData && markerData.length > 0 ? (
           <Card>
             <CardContent className="pt-3 pb-3">
               <div className="flex items-center gap-2 mb-2">
                 <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-semibold">Markers</span>
+                <span className="text-xs font-semibold">Markers ({markerData.length})</span>
               </div>
               <div className="grid gap-2 grid-cols-3">
-                {(["A", "B", "C"] as const).map((id) => {
-                  const point = markerData[id];
-                  if (!point) return null;
+                {markerData.slice(0, 6).map((marker) => {
+                  const color = getMarkerColor(marker.index);
                   return (
-                    <div key={id} className="rounded-lg border p-2.5 space-y-1">
+                    <div key={marker.index} className="rounded-lg border p-2.5 space-y-1">
                       <div className="flex items-center gap-1.5">
                         <span
                           className="h-2 w-2 rounded-full shrink-0"
-                          style={{ backgroundColor: MARKER_COLORS[id] }}
+                          style={{ backgroundColor: color.bg }}
                         />
-                        <span className="text-xs font-bold">Point {id}</span>
+                        <span className="text-xs font-bold">Point {marker.index}</span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground">{point.label}</p>
+                      {marker.label && <p className="text-[11px] text-muted-foreground">{marker.label}</p>}
                       {(["x", "y", "z"] as const).map((axis) => (
                         <div key={axis} className="flex items-baseline gap-1">
                           <span className="text-[10px] font-medium text-muted-foreground uppercase shrink-0 w-5">{axis}</span>
-                          <span className="text-[10px] text-muted-foreground shrink-0">{point[axis] >= 0 ? "+" : "−"}</span>
-                          <span className="text-xs font-semibold font-mono">{Math.abs(point[axis])}</span>
+                          <span className="text-[10px] text-muted-foreground shrink-0">{marker[axis] >= 0 ? "+" : "−"}</span>
+                          <span className="text-xs font-semibold font-mono">{Math.abs(marker[axis])}</span>
                         </div>
                       ))}
                     </div>
                   );
                 })}
               </div>
+              {markerData.length > 6 && (
+                <p className="text-xs text-muted-foreground mt-2">+ {markerData.length - 6} more markers</p>
+              )}
             </CardContent>
           </Card>
         ) : (
           <div />
         )}
 
-        {/* Downloads */}
         {shareUrl && (
           <Card>
             <CardContent className="pt-0 pb-0">
@@ -202,18 +191,12 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     QR Code
                   </Button>
 
-                  {/* Tabletop downloads */}
                   {mode === "tabletop" && (() => {
                     const markerImageUrlsData = project.marker_image_urls as Record<string, string> | null;
                     const arRefUrl = markerImageUrlsData?.tabletop;
                     return arRefUrl ? (
                       <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full justify-start gap-2 h-8"
-                          asChild
-                        >
+                        <Button variant="outline" size="sm" className="w-full justify-start gap-2 h-8" asChild>
                           <a href={arRefUrl} download={`ar_marker_${project.name.replace(/\s+/g, "_")}.png`} target="_blank" rel="noopener noreferrer">
                             <Image className="h-3.5 w-3.5" />
                             AR Reference Image
@@ -238,27 +221,25 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                     ) : null;
                   })()}
 
-                  {/* Multipoint marker downloads */}
-                  {mode === "multipoint" && markerData && (
+                  {mode === "multipoint" && markerData && markerData.length > 0 && (
                     <>
                       <div className="space-y-1">
-                        {(["A", "B", "C"] as const).map((id) => {
-                          const point = markerData[id];
-                          if (!point) return null;
+                        {markerData.map((marker) => {
+                          const color = getMarkerColor(marker.index);
                           return (
                             <Button
-                              key={id}
+                              key={marker.index}
                               variant="ghost"
                               size="sm"
                               className="w-full justify-start gap-2 text-xs h-7"
-                              onClick={() => downloadMarkerPDF(id, point, project.name, shareUrl!)}
+                              onClick={() => downloadMarkerPDF(marker, project.name, shareUrl!)}
                             >
                               <span
                                 className="h-2 w-2 rounded-full shrink-0"
-                                style={{ backgroundColor: MARKER_COLORS[id] }}
+                                style={{ backgroundColor: color.bg }}
                               />
                               <FileText className="h-3 w-3" />
-                              Marker {id}
+                              Marker {marker.index}
                             </Button>
                           );
                         })}
@@ -267,13 +248,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
                         variant="outline"
                         size="sm"
                         className="w-full justify-start gap-2 h-8"
-                        onClick={() => {
-                          const points: Record<string, { x: number; y: number; z: number; label: string }> = {};
-                          for (const id of ["A", "B", "C"] as const) {
-                            if (markerData[id]) points[id] = markerData[id];
-                          }
-                          downloadAllMarkerPDFs(points, project.name, shareUrl!);
-                        }}
+                        onClick={() => downloadAllMarkerPDFs(markerData, project.name, shareUrl!)}
                       >
                         <Download className="h-3.5 w-3.5" />
                         All Markers (PDF)

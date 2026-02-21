@@ -1,30 +1,22 @@
 /**
  * Generate branded marker images optimized for MindAR feature detection.
  * Creates 1200x1200px PNG images with high contrast patterns.
+ * Supports N markers (3-20) with extended color palette.
  */
+import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 
-const MARKER_COLORS: Record<string, { bg: string; name: string }> = {
-  A: { bg: "#FF3B30", name: "Red" },
-  B: { bg: "#34C759", name: "Green" },
-  C: { bg: "#007AFF", name: "Blue" },
-};
-
-export interface MarkerPoint {
-  x: number;
-  y: number;
-  z: number;
-  label: string;
-}
+export type { MarkerPoint } from "@/lib/markerTypes";
 
 export interface GeneratedMarker {
   id: string;
+  index: number;
   canvas: HTMLCanvasElement;
   dataUrl: string;
   blob: Blob;
 }
 
 /** Add geometric feature patterns to help MindAR detect unique points */
-function addFeaturePatterns(ctx: CanvasRenderingContext2D, size: number) {
+function addFeaturePatterns(ctx: CanvasRenderingContext2D, size: number, index: number) {
   ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
 
   // Corner circles
@@ -41,7 +33,7 @@ function addFeaturePatterns(ctx: CanvasRenderingContext2D, size: number) {
     ctx.fill();
   });
 
-  // Add unique diagonal lines per quadrant for feature diversity
+  // Unique patterns per marker index for feature diversity
   ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
   ctx.lineWidth = 3;
 
@@ -53,19 +45,30 @@ function addFeaturePatterns(ctx: CanvasRenderingContext2D, size: number) {
     ctx.stroke();
   }
 
-  // Bottom-right quadrant pattern
+  // Bottom-right quadrant pattern (offset by index for uniqueness)
+  const offset = (index * 15) % 60;
   for (let i = 0; i < 4; i++) {
     ctx.beginPath();
-    ctx.moveTo(size - 60 - i * 40, size - 60);
-    ctx.lineTo(size - 60, size - 60 - i * 40);
+    ctx.moveTo(size - 60 - i * 40 - offset, size - 60);
+    ctx.lineTo(size - 60, size - 60 - i * 40 - offset);
     ctx.stroke();
+  }
+
+  // Additional uniqueness: small dots in a pattern based on index
+  ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+  for (let i = 0; i < index && i < 10; i++) {
+    const angle = (i / Math.max(index, 1)) * Math.PI * 2;
+    const cx = size / 2 + Math.cos(angle) * (size * 0.38);
+    const cy = size / 2 + Math.sin(angle) * (size * 0.38);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
 /** Generate a single branded marker image */
 export function generateMarkerCanvas(
-  pointId: string,
-  coords: MarkerPoint,
+  markerPoint: MarkerPoint,
   projectName: string
 ): HTMLCanvasElement {
   const size = 1200;
@@ -74,7 +77,8 @@ export function generateMarkerCanvas(
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
 
-  const color = MARKER_COLORS[pointId] || MARKER_COLORS.A;
+  const color = getMarkerColor(markerPoint.index);
+  const displayId = String(markerPoint.index);
 
   // 1. Solid background color
   ctx.fillStyle = color.bg;
@@ -85,31 +89,31 @@ export function generateMarkerCanvas(
   ctx.lineWidth = 16;
   ctx.strokeRect(30, 30, size - 60, size - 60);
 
-  // 3. Inner border for more features
+  // 3. Inner border
   ctx.lineWidth = 4;
   ctx.strokeRect(60, 60, size - 120, size - 120);
 
-  // 4. Large letter
+  // 4. Large number
   ctx.fillStyle = "#FFFFFF";
   ctx.font = "bold 360px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(pointId, size / 2, size * 0.35);
+  ctx.fillText(displayId, size / 2, size * 0.35);
 
-  // 5. "POINT X" label
+  // 5. "POINT N" label
   ctx.font = "bold 72px sans-serif";
-  ctx.fillText(`POINT ${pointId}`, size / 2, size * 0.55);
+  ctx.fillText(`POINT ${displayId}`, size / 2, size * 0.55);
 
   // 6. Marker label/description
   ctx.font = "48px sans-serif";
   ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-  ctx.fillText(coords.label || `Marker ${pointId}`, size / 2, size * 0.63);
+  ctx.fillText(markerPoint.label || `Marker ${displayId}`, size / 2, size * 0.63);
 
   // 7. Coordinates
   ctx.font = "bold 36px monospace";
   ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
   ctx.fillText(
-    `(${coords.x}, ${coords.y}, ${coords.z}) mm`,
+    `(${markerPoint.x}, ${markerPoint.y}, ${markerPoint.z}) mm`,
     size / 2,
     size * 0.72
   );
@@ -119,32 +123,38 @@ export function generateMarkerCanvas(
   ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
   ctx.fillText(projectName, size / 2, size * 0.88);
 
-  // 9. "Archi AR" branding
+  // 9. Branding
   ctx.font = "28px sans-serif";
   ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
   ctx.fillText("Archi AR", size / 2, size * 0.95);
 
-  // 10. Feature detection patterns
-  addFeaturePatterns(ctx, size);
+  // 10. Feature detection patterns (unique per marker)
+  addFeaturePatterns(ctx, size, markerPoint.index);
 
   return canvas;
 }
 
-/** Generate all marker images and return as blobs */
+/** Generate all marker images from MarkerPoint[] and return as blobs */
 export async function generateAllMarkerImages(
-  markers: Record<string, MarkerPoint>,
+  markers: MarkerPoint[],
   projectName: string
 ): Promise<GeneratedMarker[]> {
   const results: GeneratedMarker[] = [];
 
-  for (const [id, coords] of Object.entries(markers)) {
-    const canvas = generateMarkerCanvas(id, coords, projectName);
+  for (const marker of markers) {
+    const canvas = generateMarkerCanvas(marker, projectName);
     const dataUrl = canvas.toDataURL("image/png");
     const blob = await new Promise<Blob>((resolve) => {
       canvas.toBlob((b) => resolve(b!), "image/png");
     });
 
-    results.push({ id, canvas, dataUrl, blob });
+    results.push({
+      id: String(marker.index),
+      index: marker.index,
+      canvas,
+      dataUrl,
+      blob,
+    });
   }
 
   return results;

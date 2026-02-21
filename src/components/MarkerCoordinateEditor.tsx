@@ -5,63 +5,81 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ClipboardPaste, Check, AlertTriangle, Info } from "lucide-react";
+import { MapPin, ClipboardPaste, Check, AlertTriangle, Info, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  type MarkerPoint,
+  getMarkerColor,
+  normalizeMarkerData,
+  convertLegacyMarkerData,
+} from "@/lib/markerTypes";
 
-export interface MarkerPoint {
-  x: number;
-  y: number;
-  z: number;
-  label: string;
-}
-
-export interface MarkerData {
-  A: MarkerPoint;
-  B: MarkerPoint;
-  C: MarkerPoint;
-}
+// Re-export for backward compatibility
+export type { MarkerPoint } from "@/lib/markerTypes";
 
 interface MarkerCoordinateEditorProps {
   projectId: string;
-  markerData: MarkerData | null;
-  onUpdate: (data: MarkerData) => void;
+  markerData: MarkerPoint[] | null;
+  onUpdate: (data: MarkerPoint[]) => void;
 }
 
-const DEFAULT_MARKERS: MarkerData = {
-  A: { x: 0, y: 0, z: 0, label: "Anchor Point" },
-  B: { x: 2000, y: 0, z: 0, label: "Reference Point" },
-  C: { x: 0, y: 0, z: 1500, label: "Reference Point" },
-};
+const DEFAULT_MARKERS: MarkerPoint[] = [
+  { index: 1, x: 0, y: 0, z: 0, label: "Anchor Point" },
+  { index: 2, x: 2000, y: 0, z: 0, label: "Reference Point" },
+  { index: 3, x: 0, y: 0, z: 1500, label: "Reference Point" },
+];
 
-const MARKER_CONFIG = [
-  { id: "A" as const, color: "bg-marker-red", textColor: "text-marker-red", name: "Point A", defaultLabel: "Anchor Point" },
-  { id: "B" as const, color: "bg-marker-green", textColor: "text-marker-green", name: "Point B", defaultLabel: "Reference Point" },
-  { id: "C" as const, color: "bg-marker-blue", textColor: "text-marker-blue", name: "Point C", defaultLabel: "Reference Point" },
-] as const;
+const MIN_MARKERS = 3;
+const MAX_MARKERS = 20;
 
-function computeTriangleQuality(markers: MarkerData): { score: number; label: string; color: string } {
-  const ab = Math.sqrt(
-    (markers.B.x - markers.A.x) ** 2 +
-    (markers.B.y - markers.A.y) ** 2 +
-    (markers.B.z - markers.A.z) ** 2
-  );
-  const ac = Math.sqrt(
-    (markers.C.x - markers.A.x) ** 2 +
-    (markers.C.y - markers.A.y) ** 2 +
-    (markers.C.z - markers.A.z) ** 2
-  );
-  const bc = Math.sqrt(
-    (markers.C.x - markers.B.x) ** 2 +
-    (markers.C.y - markers.B.y) ** 2 +
-    (markers.C.z - markers.B.z) ** 2
-  );
+function computeSpacingQuality(markers: MarkerPoint[]): { score: number; label: string; color: string } {
+  if (markers.length < 3) {
+    return { score: 0, label: "Need at least 3 markers", color: "text-destructive" };
+  }
 
-  if (ab === 0 || ac === 0 || bc === 0) {
+  // Check all pairwise distances
+  const distances: number[] = [];
+  for (let i = 0; i < markers.length; i++) {
+    for (let j = i + 1; j < markers.length; j++) {
+      const d = Math.sqrt(
+        (markers[j].x - markers[i].x) ** 2 +
+        (markers[j].y - markers[i].y) ** 2 +
+        (markers[j].z - markers[i].z) ** 2
+      );
+      distances.push(d);
+    }
+  }
+
+  if (distances.some((d) => d === 0)) {
     return { score: 0, label: "Invalid — points overlap", color: "text-destructive" };
   }
 
-  // Calculate area using Heron's formula
+  const minDist = Math.min(...distances);
+  const maxDist = Math.max(...distances);
+
+  if (minDist < 1) {
+    return { score: 0, label: "Invalid — points too close", color: "text-destructive" };
+  }
+
+  // Check triangle quality using the 3 most spread points
+  // Use the first 3 for basic triangle check
+  const ab = Math.sqrt(
+    (markers[1].x - markers[0].x) ** 2 +
+    (markers[1].y - markers[0].y) ** 2 +
+    (markers[1].z - markers[0].z) ** 2
+  );
+  const ac = Math.sqrt(
+    (markers[2].x - markers[0].x) ** 2 +
+    (markers[2].y - markers[0].y) ** 2 +
+    (markers[2].z - markers[0].z) ** 2
+  );
+  const bc = Math.sqrt(
+    (markers[2].x - markers[1].x) ** 2 +
+    (markers[2].y - markers[1].y) ** 2 +
+    (markers[2].z - markers[1].z) ** 2
+  );
+
   const s = (ab + ac + bc) / 2;
   const area = Math.sqrt(Math.max(0, s * (s - ab) * (s - ac) * (s - bc)));
 
@@ -69,7 +87,6 @@ function computeTriangleQuality(markers: MarkerData): { score: number; label: st
     return { score: 0, label: "Invalid — points are collinear", color: "text-destructive" };
   }
 
-  // Check angles — ideal triangle has no angle too small or too large
   const angles = [
     Math.acos(Math.max(-1, Math.min(1, (ab * ab + ac * ac - bc * bc) / (2 * ab * ac)))),
     Math.acos(Math.max(-1, Math.min(1, (ab * ab + bc * bc - ac * ac) / (2 * ab * bc)))),
@@ -77,61 +94,92 @@ function computeTriangleQuality(markers: MarkerData): { score: number; label: st
   ].map((a) => (a * 180) / Math.PI);
 
   const minAngle = Math.min(...angles);
+  const spreadRatio = minDist / maxDist;
 
+  // Score based on angle quality and spacing consistency
   if (minAngle < 10) return { score: 1, label: "Poor — too narrow", color: "text-destructive" };
-  if (minAngle < 20) return { score: 2, label: "Fair", color: "text-marker-yellow" };
-  if (minAngle < 30) return { score: 3, label: "Good", color: "text-marker-yellow" };
-  if (minAngle < 40) return { score: 4, label: "Very Good", color: "text-marker-green" };
-  return { score: 5, label: "Excellent", color: "text-marker-green" };
+  if (minAngle < 20) return { score: 2, label: "Fair", color: "text-yellow-600" };
+  if (minAngle < 30) return { score: 3, label: "Good", color: "text-yellow-600" };
+  if (minAngle < 40) return { score: 4, label: "Very Good", color: "text-green-600" };
+  return { score: 5, label: `Excellent${markers.length > 3 ? ` (${markers.length} markers)` : ""}`, color: "text-green-600" };
 }
 
-const isValidMarkerData = (data: unknown): data is MarkerData => {
-  if (!data || typeof data !== "object") return false;
-  const d = data as Record<string, unknown>;
-  return ["A", "B", "C"].every(
-    (k) => d[k] && typeof d[k] === "object" && "x" in (d[k] as object)
-  );
-};
-
 const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoordinateEditorProps) => {
-  const [markers, setMarkers] = useState<MarkerData>(isValidMarkerData(markerData) ? markerData : DEFAULT_MARKERS);
+  const [markers, setMarkers] = useState<MarkerPoint[]>(
+    markerData && markerData.length >= 3 ? markerData : DEFAULT_MARKERS
+  );
   const [jsonInput, setJsonInput] = useState("");
   const [showJsonPaste, setShowJsonPaste] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  const quality = computeTriangleQuality(markers);
+  const quality = computeSpacingQuality(markers);
 
-  const updateMarker = useCallback((id: "A" | "B" | "C", field: keyof MarkerPoint, value: string | number) => {
-    setMarkers((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        [field]: typeof value === "string" && field !== "label" ? parseFloat(value) || 0 : value,
-      },
-    }));
+  const updateMarker = useCallback((idx: number, field: keyof MarkerPoint, value: string | number) => {
+    setMarkers((prev) =>
+      prev.map((m) =>
+        m.index === idx
+          ? {
+              ...m,
+              [field]: typeof value === "string" && field !== "label" ? parseFloat(value) || 0 : value,
+            }
+          : m
+      )
+    );
+    setDirty(true);
+  }, []);
+
+  const addMarker = useCallback(() => {
+    setMarkers((prev) => {
+      if (prev.length >= MAX_MARKERS) return prev;
+      const maxIndex = Math.max(...prev.map((m) => m.index));
+      return [...prev, { index: maxIndex + 1, x: 0, y: 0, z: 0, label: `Marker ${maxIndex + 1}` }];
+    });
+    setDirty(true);
+  }, []);
+
+  const removeMarker = useCallback((idx: number) => {
+    setMarkers((prev) => {
+      if (prev.length <= MIN_MARKERS) return prev;
+      return prev.filter((m) => m.index !== idx);
+    });
     setDirty(true);
   }, []);
 
   const handleJsonPaste = () => {
     try {
       const parsed = JSON.parse(jsonInput);
-      // Support format: { "A": {"x": 0, "y": 0, "z": 0}, ... }
-      if (!parsed.A || !parsed.B || !parsed.C) {
-        throw new Error("Missing A, B, or C");
+
+      // Try array format first: [{ "index": 1, "x": 0, "y": 0, "z": 0 }, ...]
+      if (Array.isArray(parsed)) {
+        const normalized = normalizeMarkerData(parsed);
+        if (!normalized || normalized.length < 3) throw new Error("Need at least 3 markers");
+        setMarkers(normalized);
+        setDirty(true);
+        setShowJsonPaste(false);
+        setJsonInput("");
+        toast({ title: `${normalized.length} markers imported` });
+        return;
       }
-      const newMarkers: MarkerData = {
-        A: { x: Number(parsed.A.x) || 0, y: Number(parsed.A.y) || 0, z: Number(parsed.A.z) || 0, label: parsed.A.label || markers.A.label },
-        B: { x: Number(parsed.B.x) || 0, y: Number(parsed.B.y) || 0, z: Number(parsed.B.z) || 0, label: parsed.B.label || markers.B.label },
-        C: { x: Number(parsed.C.x) || 0, y: Number(parsed.C.y) || 0, z: Number(parsed.C.z) || 0, label: parsed.C.label || markers.C.label },
-      };
-      setMarkers(newMarkers);
-      setDirty(true);
-      setShowJsonPaste(false);
-      setJsonInput("");
-      toast({ title: "Coordinates imported" });
-    } catch {
-      toast({ title: "Invalid JSON format", description: 'Expected: { "A": {"x":0,"y":0,"z":0}, "B": {...}, "C": {...} }', variant: "destructive" });
+
+      // Try legacy format: { "A": {"x": 0, "y": 0, "z": 0}, ... }
+      const legacy = convertLegacyMarkerData(parsed);
+      if (legacy) {
+        setMarkers(legacy);
+        setDirty(true);
+        setShowJsonPaste(false);
+        setJsonInput("");
+        toast({ title: "3 markers imported (legacy format)" });
+        return;
+      }
+
+      throw new Error("Unrecognized format");
+    } catch (e: any) {
+      toast({
+        title: "Invalid JSON format",
+        description: 'Expected: [{ "index": 1, "x": 0, "y": 0, "z": 0 }, ...] or legacy { "A": {...}, "B": {...}, "C": {...} }',
+        variant: "destructive",
+      });
     }
   };
 
@@ -157,15 +205,11 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="font-display flex items-center gap-2">
-            <MapPin className="h-5 w-5 text-marker-red" />
+            <MapPin className="h-5 w-5 text-destructive" />
             Marker Configuration
           </CardTitle>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowJsonPaste(!showJsonPaste)}
-            >
+            <Button variant="outline" size="sm" onClick={() => setShowJsonPaste(!showJsonPaste)}>
               <ClipboardPaste className="mr-1 h-3 w-3" />
               Paste JSON
             </Button>
@@ -185,9 +229,12 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
             <div className="flex items-start gap-2">
               <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
               <p className="text-xs text-muted-foreground">
-                Paste coordinate JSON from Rhino/Grasshopper. Expected format:
+                Paste coordinate JSON from Rhino/Grasshopper. Formats accepted:
                 <code className="block mt-1 bg-background p-2 rounded text-[11px] font-mono">
-                  {'{ "A": {"x": 0, "y": 0, "z": 0}, "B": {"x": 2000, "y": 0, "z": 0}, "C": {"x": 0, "y": 0, "z": 1500} }'}
+                  {'[{ "index": 1, "x": 0, "y": 0, "z": 0 }, { "index": 2, "x": 2000, ... }, ...]'}
+                </code>
+                <code className="block mt-1 bg-background p-2 rounded text-[11px] font-mono">
+                  {'Legacy: { "A": {"x":0,"y":0,"z":0}, "B": {...}, "C": {...} }'}
                 </code>
               </p>
             </div>
@@ -209,25 +256,40 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
           </div>
         )}
 
-        {/* Coordinate Inputs */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          {MARKER_CONFIG.map((cfg) => {
-            const point = markers[cfg.id];
+        {/* Marker rows */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {markers.map((marker) => {
+            const color = getMarkerColor(marker.index);
             return (
-              <div key={cfg.id} className="border rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className={`h-3 w-3 rounded-full ${cfg.color}`} />
-                  <span className="font-display font-semibold">{cfg.name}</span>
+              <div key={marker.index} className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-3 w-3 rounded-full"
+                      style={{ backgroundColor: color.bg }}
+                    />
+                    <span className="font-display font-semibold">Point {marker.index}</span>
+                  </div>
+                  {markers.length > MIN_MARKERS && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeMarker(marker.index)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  )}
                 </div>
                 <Input
-                  value={point.label}
-                  onChange={(e) => updateMarker(cfg.id, "label", e.target.value)}
-                  placeholder={cfg.defaultLabel}
+                  value={marker.label || ""}
+                  onChange={(e) => updateMarker(marker.index, "label", e.target.value)}
+                  placeholder={`Marker ${marker.index}`}
                   className="text-xs h-8"
                 />
                 <div className="space-y-2">
                   {(["x", "y", "z"] as const).map((axis) => {
-                    const val = point[axis];
+                    const val = marker[axis];
                     const isNeg = typeof val === "number" ? val < 0 : String(val).startsWith("-");
                     const absVal = typeof val === "number" ? Math.abs(val) : String(val).replace(/^-/, "");
                     return (
@@ -241,7 +303,7 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
                             className="h-8 w-8 shrink-0 px-0 font-mono text-xs"
                             onClick={() => {
                               const num = typeof val === "number" ? val : parseFloat(String(val)) || 0;
-                              updateMarker(cfg.id, axis, -num);
+                              updateMarker(marker.index, axis, -num);
                             }}
                           >
                             {isNeg ? "−" : "+"}
@@ -254,12 +316,12 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
                               const v = e.target.value;
                               if (v === "" || /^\d*\.?\d*$/.test(v)) {
                                 const numVal = parseFloat(v) || 0;
-                                updateMarker(cfg.id, axis, isNeg ? -numVal : numVal);
+                                updateMarker(marker.index, axis, isNeg ? -numVal : numVal);
                               }
                             }}
                             onBlur={(e) => {
                               const num = parseFloat(e.target.value) || 0;
-                              updateMarker(cfg.id, axis, isNeg ? -num : num);
+                              updateMarker(marker.index, axis, isNeg ? -num : num);
                             }}
                             className="font-mono text-sm h-8"
                           />
@@ -273,13 +335,19 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
           })}
         </div>
 
-        {/* Triangle Quality */}
+        {/* Add marker button */}
+        {markers.length < MAX_MARKERS && (
+          <Button variant="outline" size="sm" className="w-full" onClick={addMarker}>
+            <Plus className="mr-1 h-3 w-3" />
+            Add Marker ({markers.length}/{MAX_MARKERS})
+          </Button>
+        )}
+
+        {/* Quality indicator */}
         <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-4 py-3">
           <div className="flex items-center gap-2">
-            {quality.score === 0 ? (
-              <AlertTriangle className="h-4 w-4 text-destructive" />
-            ) : null}
-            <span className="text-sm font-medium">Triangle Quality:</span>
+            {quality.score === 0 && <AlertTriangle className="h-4 w-4 text-destructive" />}
+            <span className="text-sm font-medium">Spacing Quality:</span>
             <span className={`text-sm font-semibold ${quality.color}`}>
               {"⭐".repeat(quality.score)} {quality.label}
             </span>

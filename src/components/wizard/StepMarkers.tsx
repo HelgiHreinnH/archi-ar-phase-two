@@ -1,4 +1,5 @@
-import MarkerCoordinateEditor, { type MarkerData } from "@/components/MarkerCoordinateEditor";
+import MarkerCoordinateEditor from "@/components/MarkerCoordinateEditor";
+import { type MarkerPoint } from "@/lib/markerTypes";
 import { Grid3X3, CheckCircle2 } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 
@@ -7,7 +8,7 @@ type Project = Tables<"projects">;
 interface StepMarkersProps {
   project: Project;
   mode: "tabletop" | "multipoint";
-  markerData: MarkerData | null;
+  markerData: MarkerPoint[] | null;
   onUpdate: () => void;
 }
 
@@ -51,6 +52,26 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
       <p className="text-sm text-muted-foreground">
         Set the XYZ coordinates for each marker point. These define where the AR model anchors in real space.
       </p>
+      {markerData && markerData.length > 0 && (
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">
+            <strong>{markerData.length} marker points</strong> configured.
+            Min inter-marker spacing:{" "}
+            <span className="font-mono">
+              {Math.round(
+                Math.min(
+                  ...markerData.flatMap((a, i) =>
+                    markerData.slice(i + 1).map((b) =>
+                      Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2 + (b.z - a.z) ** 2)
+                    )
+                  )
+                )
+              )}{" "}
+              mm
+            </span>
+          </p>
+        </div>
+      )}
       <MarkerCoordinateEditor
         projectId={project.id}
         markerData={markerData}

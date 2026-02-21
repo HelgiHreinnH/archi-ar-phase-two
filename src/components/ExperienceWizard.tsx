@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
-import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import { type MarkerPoint, normalizeMarkerData } from "@/lib/markerTypes";
 import { supabase } from "@/integrations/supabase/client";
 import StepProgress from "@/components/wizard/StepProgress";
 import StepDetails from "@/components/wizard/StepDetails";
@@ -22,16 +22,13 @@ const STEP_LABELS = ["Details", "3D Model", "Markers", "Generate"];
 
 const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) => {
   const mode = (project.mode === "tabletop" ? "tabletop" : "multipoint") as "tabletop" | "multipoint";
-  const markerData = project.marker_data as unknown as MarkerData | null;
+  const markerData = normalizeMarkerData(project.marker_data);
   const hasModel = !!project.model_url;
   const hasValidMarkers = mode === "tabletop" || (
-    !!markerData?.A && !!markerData?.B && !!markerData?.C &&
-    (markerData.A.x !== 0 || markerData.A.y !== 0 || markerData.A.z !== 0 ||
-     markerData.B.x !== 0 || markerData.B.y !== 0 || markerData.B.z !== 0 ||
-     markerData.C.x !== 0 || markerData.C.y !== 0 || markerData.C.z !== 0)
+    !!markerData && markerData.length >= 3 &&
+    markerData.some((m) => m.x !== 0 || m.y !== 0 || m.z !== 0)
   );
 
-  // Determine first incomplete step
   const initialStep = useMemo(() => {
     const hasDetails = !!(project.client_name || project.location || project.description);
     if (!hasDetails) return 0;
@@ -55,7 +52,6 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
 
   const handleContinue = useCallback(() => {
     if (currentStep === 0) {
-      // Trigger save in StepDetails
       window.dispatchEvent(new Event("wizard-save-details"));
       return;
     }
@@ -69,8 +65,7 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     setCurrentStep(1);
   }, [onProjectUpdate]);
 
-  const handleMarkersDetected = useCallback(async (markers: MarkerData) => {
-    // Save auto-detected markers to DB
+  const handleMarkersDetected = useCallback(async (markers: MarkerPoint[]) => {
     await supabase
       .from("projects")
       .update({ marker_data: markers as any })
@@ -129,7 +124,6 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
         </CardContent>
       </Card>
 
-      {/* Navigation */}
       {!isLastStep && (
         <div className="flex justify-between">
           <Button

@@ -5,7 +5,7 @@ import { Upload, RefreshCw, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
-import type { MarkerData } from "@/components/MarkerCoordinateEditor";
+import type { MarkerPoint } from "@/lib/markerTypes";
 
 const MAX_FILE_SIZE_MB = 250;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -15,7 +15,7 @@ const ACCEPTED_MIME_TYPES = ["model/gltf-binary", "model/vnd.usdz+zip", "applica
 interface ModelUploaderProps {
   projectId: string;
   onUploadComplete: (modelUrl: string) => void;
-  onMarkersDetected?: (markers: MarkerData) => void;
+  onMarkersDetected?: (markers: MarkerPoint[]) => void;
 }
 
 function validateFile(file: File): string | null {
@@ -113,7 +113,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
           const markers = await parseGlbMarkers(file);
           if (markers) {
             onMarkersDetected(markers);
-            toast({ title: "Marker positions detected", description: "Found marker_A, marker_B, and marker_C in your model." });
+            toast({ title: "Marker positions detected", description: `Found ${markers.length} marker points in your model.` });
           }
         } catch {
           // Silently ignore — user can enter markers manually
