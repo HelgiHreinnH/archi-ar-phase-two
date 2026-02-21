@@ -1,157 +1,95 @@
 
-# Update MindARScene.tsx: Apply the Three Deep-Research Fixes
+# Implement DeviceOrientation-Based World Anchoring (Tabletop + Multi-Point)
 
-## What the Current File Has
+## Summary
 
-The last approved plan successfully switched from the render-loop race condition to `onTargetUpdate`. That was the right architectural move. However, three specific issues remain in the current implementation that the deep research pinpointed:
+The current world-anchoring code freezes a camera-relative matrix when tracking is lost, causing the model to appear "glued to the screen." The fix uses the device's gyroscope to compensate for phone rotation after lock, making the model appear stationary in physical space. Two separate code paths handle the two modes.
 
----
+## What Changes
 
-## The Three Remaining Issues
+### 1. `src/pages/ARViewer.tsx` -- iOS Motion Permission (3 lines)
 
-### Issue 1: Missing `model.updateMatrix()` in `onTargetFound`
+Add `DeviceOrientationEvent.requestPermission()` call inside `launchDetecting` before `setViewState('detecting')`. This must happen during the user's tap gesture (iOS 13+ requirement). If denied, AR still loads -- gyro compensation just won't work (graceful degradation).
 
-**Current code (line 217–219):**
-```ts
-model.position.set(localPos.x, localPos.y, localPos.z);
-model.quaternion.copy(localQuat);
-model.scale.set(localScale.x, localScale.y, localScale.z);
-isWorldPlaced = false;
-// ← onTargetUpdate fires IMMEDIATELY after this in the same MindAR frame
+Also pass `markerData` prop to `ARDetection` for multi-point mode.
+
+### 2. `src/components/ar/ARDetection.tsx` -- Prop Pass-through
+
+Add optional `markerData` prop to the interface. Pass it straight to `MindARScene`. No logic changes.
+
+### 3. `src/components/ar/MindARScene.tsx` -- Major Rewrite
+
+**New prop:** `markerData` (optional, for multi-point triangulation)
+
+**DeviceOrientation listener:** A `useEffect` inside `startAR` that reads `alpha/beta/gamma` from `deviceorientation` events and converts to a Three.js Quaternion stored in `deviceQuaternionRef`.
+
+**3-state machine** replaces boolean `isWorldPlaced`:
+- `'tracking'` -- model in anchor.group, follows marker live
+- `'locked'` -- model in scene root, gyro-compensated each frame
+- `'reanchoring'` -- marker re-detected while locked, returns to tracking
+
+**Tabletop lock (anchor 0 only):**
+- `onTargetUpdate` increments `stableFrameCount`
+- At 10 frames: capture `lockedMatrix` (anchor.group.matrix x model.matrix) and `lockedDeviceQuat`, move model to scene root, set state to `'locked'`
+
+**Multi-point lock (all 3 anchors):**
+- Anchors 1 and 2 get `onTargetUpdate` callbacks that store their poses in `anchorPoses[i]` and increment `anchorStableCounts[i]`
+- When all 3 anchors have 10+ stable frames AND `markerData` exists: call `computeWorldTransform()` to get the triangulated placement matrix, use that as `lockedMatrix`
+- If `markerData` is missing: fall back to anchor-A-only placement with console warning
+
+**Gyro-compensated render loop:**
+```text
+deltaQuat = inverse(lockedDeviceQuat) * currentDeviceQuat
+deltaMatrix = Matrix4.fromQuaternion(deltaQuat).invert()
+model.matrix = deltaMatrix * lockedMatrix
 ```
+This runs every frame while state is `'locked'`, cancelling device rotation so the model appears world-stable.
 
-**The problem:** Three.js does not immediately recompute `model.matrix` when you set `position`/`quaternion`/`scale`. It defers that recomputation until the next `renderer.render()` traversal. But `onTargetUpdate` fires in the same MindAR frame, right after `onTargetFound` — before `renderer.render()` has run. So when `onTargetUpdate` calls `model.updateWorldMatrix(true, false)`, `model.matrix` still holds the **old frozen matrix** from when the model was in scene space.
+**Re-anchor on `onTargetFound`:** If state is `'locked'`, return model to anchor.group, restore local transforms, reset stable counts, set state to `'tracking'`. Will re-lock after 10 new stable frames.
 
-**Fix:** Call `model.updateMatrix()` after restoring transforms. This forces Three.js to recompute `model.matrix` from the current `position`/`quaternion`/`scale` immediately, so `onTargetUpdate` samples the correct local transform.
+**Cleanup:** Remove `deviceorientation` listener on unmount alongside existing MindAR cleanup.
 
----
+### 4. `src/lib/computeWorldTransform.ts` -- New File
 
-### Issue 2: `onTargetUpdate` Uses `updateWorldMatrix` + `matrixWorld` (Timing-Dependent)
+Pure function implementing 3-point Procrustes alignment:
 
-**Current code (line 202–207):**
-```ts
-anchor.onTargetUpdate = () => {
-  if (model) {
-    model.updateWorldMatrix(true, false);
-    lastKnownMatrix.copy(model.matrixWorld);
-  }
-};
-```
+1. Extract positions from 3 MindAR anchor matrices
+2. Convert Rhino mm coordinates to MindAR units (divide by MARKER_SIZE_MM = 150)
+3. Compute centroids of both point sets
+4. Compute scale from ratio of inter-marker distances
+5. Compute rotation by aligning basis vectors (cross-product method)
+6. Compute translation from centroids
+7. Assemble final Matrix4: Translation x Rotation x Scale
 
-**The problem:** `updateWorldMatrix(true, false)` walks UP the parent chain to compose `matrixWorld`. This depends on Three.js's internal matrix propagation state being current for all ancestors. Given the interplay between MindAR's tracking loop and Three.js's update cycle, this can sample a stale or partially-updated matrix.
+Returns the transform that places the Rhino model correctly in MindAR camera space. Includes degenerate triangle detection (near-zero cross product) with fallback.
 
-**Fix:** Compute `lastKnownMatrix` by directly multiplying `anchor.group.matrix` (which MindAR has just written with a valid pose — no timing dependency) by `model.matrix` (the model's local transform within the group). This is mathematically identical to `matrixWorld` but bypasses Three.js propagation entirely:
+## Edge Cases Handled
 
-```ts
-anchor.onTargetUpdate = () => {
-  if (model && !isWorldPlaced) {
-    // Force local matrix current from position/quat/scale
-    model.updateMatrix();
-    // Build world matrix directly: group pose × model local offset
-    // anchor.group.matrix is set by MindAR just before this fires — always valid
-    lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
-  }
-};
-```
+| Scenario | Handling |
+|---|---|
+| Gyro permission denied (iOS) | Graceful degradation -- static freeze, no rotation compensation |
+| No gyroscope hardware | Same as above |
+| Marker detected < 10 frames then lost | Lock never triggers, model disappears (acceptable) |
+| Marker flickering | Stable count resets on each loss, preventing premature lock |
+| User walks across room | Gyro handles rotation only; translation causes drift. Re-scan corrects instantly |
+| `markerData` missing in multi-point | Falls back to anchor-A-only with console warning |
+| Degenerate triangle (collinear markers) | Detected via cross product magnitude, falls back to anchor-A |
+| Only 2/3 markers stable | Lock deferred until all 3 reach threshold |
+| Re-scan after lock | All stable counts reset, full re-lock required |
 
-The `!isWorldPlaced` guard is also added — we should only update `lastKnownMatrix` while the model is inside the anchor group being tracked. If the model is frozen in scene space (`isWorldPlaced = true`), sampling makes no sense.
+## Files Summary
 
----
+| File | Change |
+|---|---|
+| `src/pages/ARViewer.tsx` | Add iOS motion permission + pass `markerData` prop |
+| `src/components/ar/ARDetection.tsx` | Add `markerData` prop pass-through |
+| `src/components/ar/MindARScene.tsx` | Major rewrite: gyro hook, 3-state machine, mode-specific lock, gyro render loop |
+| `src/lib/computeWorldTransform.ts` | New file: 3-point Procrustes alignment |
 
-### Issue 3: Redundant `model.matrix.decompose(...)` in `onTargetLost`
+## Important Limitation
 
-**Current code (line 233–235):**
-```ts
-model.matrix.copy(lastKnownMatrix);
-model.matrix.decompose(model.position, model.quaternion, model.scale);
-model.matrixAutoUpdate = false;
-```
+This approach compensates for **rotation only**, not translation (walking). For the interior design use case where users primarily rotate to view from different angles, this is acceptable. Walking several metres causes drift -- re-scanning the marker corrects this instantly.
 
-**The problem:** After setting `model.matrixAutoUpdate = false`, Three.js uses `model.matrix` directly for rendering — it ignores `model.position`, `model.quaternion`, `model.scale`. The `decompose` call writes into those properties unnecessarily and introduces floating point precision loss (decompose → recompose is lossy). It also reads from `model.matrix` which was just set — a no-op that adds overhead.
+## No User Flow Changes
 
-**Fix:** Remove the `decompose` line. `model.matrix.copy(lastKnownMatrix)` is all that is needed. With `matrixAutoUpdate = false`, the renderer uses the matrix directly.
-
----
-
-## The Complete Change Set (One File Only)
-
-**File:** `src/components/ar/MindARScene.tsx`
-
-### Change A — `onTargetFound` (around line 217): Add `model.updateMatrix()`
-
-```ts
-anchor.onTargetFound = () => {
-  if (model && isWorldPlaced) {
-    scene.remove(model);
-    model.matrixAutoUpdate = true;
-    anchor.group.add(model);
-    model.position.set(localPos.x, localPos.y, localPos.z);
-    model.quaternion.copy(localQuat);
-    model.scale.set(localScale.x, localScale.y, localScale.z);
-    model.updateMatrix(); // ← NEW: force local matrix current before onTargetUpdate samples
-    isWorldPlaced = false;
-  }
-  onTargetFoundRef.current?.(i);
-};
-```
-
-### Change B — `onTargetUpdate` (around line 202): Replace with direct matrix multiplication
-
-```ts
-anchor.onTargetUpdate = () => {
-  if (model && !isWorldPlaced) {
-    // Force local matrix current from current position/quat/scale
-    model.updateMatrix();
-    // Compute world matrix directly: MindAR group pose × model local offset.
-    // anchor.group.matrix is written by MindAR immediately before this callback fires
-    // — no Three.js propagation timing dependency.
-    lastKnownMatrix.copy(anchor.group.matrix).multiply(model.matrix);
-  }
-};
-```
-
-### Change C — `onTargetLost` (around line 233): Remove the `decompose` call
-
-```ts
-anchor.onTargetLost = () => {
-  if (model && !isWorldPlaced) {
-    anchor.group.remove(model);
-    scene.add(model);
-    model.matrix.copy(lastKnownMatrix);
-    // matrixAutoUpdate = false tells Three.js to use model.matrix directly.
-    // No need to decompose — decompose adds floating point error with no benefit.
-    model.matrixAutoUpdate = false;
-    isWorldPlaced = true;
-  }
-  onTargetLostRef.current?.(i);
-};
-```
-
----
-
-## Why This Is Now Correct
-
-MindAR's camera sits fixed at `(0,0,0)`. The scene root is identity. `anchor.group.matrix` holds the marker's current camera-relative pose, written directly by MindAR's CV pipeline.
-
-`lastKnownMatrix = anchor.group.matrix × model.matrix` is the model's position in camera-relative scene space. This value is computed using only data MindAR has just written (no propagation timing dependency).
-
-When the model moves to scene root with `model.matrix = lastKnownMatrix` and `matrixAutoUpdate = false`:
-- Camera never moves (always at origin)
-- Model matrix is a fixed camera-relative transform
-- Model appears stationary in the physical room
-
-When the marker is re-detected:
-- `model.updateMatrix()` ensures `model.matrix` reflects the restored `localPos/localQuat/localScale`
-- MindAR resumes updating `anchor.group.matrix` with live tracking
-- `onTargetUpdate` computes correct `lastKnownMatrix` immediately
-
----
-
-## Summary Table
-
-| Change | Location | Lines | Reason |
-|---|---|---|---|
-| Add `model.updateMatrix()` | `onTargetFound`, after scale/pos/quat restore | ~219 | Ensures local matrix is current before `onTargetUpdate` samples it in the same frame |
-| Replace `onTargetUpdate` body | `anchor.onTargetUpdate` callback | ~202–207 | Direct matrix multiplication bypasses Three.js propagation timing; add `!isWorldPlaced` guard |
-| Remove `model.matrix.decompose(...)` | `onTargetLost` | ~234 | Unnecessary with `matrixAutoUpdate = false`; adds floating point loss |
-| No other files | — | — | `ARViewer.tsx`, `ARDetection.tsx`, all other files untouched |
+The detection phase, UI overlays, marker status indicators, active phase controls, and all transitions remain exactly as they are. The only visible difference is that the model now stays anchored in physical space instead of sticking to the screen.
