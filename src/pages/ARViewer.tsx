@@ -39,7 +39,19 @@ const ARViewer = () => {
   // Go straight to detecting – let MindAR request the camera in a single
   // getUserMedia call.  A double request (pre-check then MindAR) breaks on
   // mobile Safari because the second call loses the user-gesture context.
-  const launchDetecting = useCallback(() => {
+  //
+  // Also request DeviceOrientation permission (iOS 13+). This MUST happen
+  // during a user gesture — the "Start AR" button tap provides that context.
+  // If denied or unavailable, AR still works but without gyro compensation.
+  const launchDetecting = useCallback(async () => {
+    try {
+      const DOE = DeviceOrientationEvent as any;
+      if (typeof DOE.requestPermission === "function") {
+        await DOE.requestPermission();
+      }
+    } catch {
+      // Silently ignore — gyro compensation will gracefully degrade
+    }
     setViewState("detecting");
   }, []);
 
@@ -186,6 +198,7 @@ const ARViewer = () => {
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
           project={project}
+          markerData={project.marker_data as any}
         />
       );
   }

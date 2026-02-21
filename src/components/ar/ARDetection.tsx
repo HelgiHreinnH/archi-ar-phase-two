@@ -27,6 +27,8 @@ interface ARDetectionProps {
   initialRotation?: number;
   /** Project info for the active overlay */
   project?: { name: string; description?: string | null };
+  /** Rhino marker coordinates for multi-point triangulation */
+  markerData?: { A: { x: number; y: number; z: number }; B: { x: number; y: number; z: number }; C: { x: number; y: number; z: number } } | null;
 }
 
 const MARKER_CONFIG = {
@@ -50,6 +52,7 @@ const ARDetection = ({
   modelScale = 1,
   initialRotation = 0,
   project,
+  markerData,
 }: ARDetectionProps) => {
   const [guideExpanded, setGuideExpanded] = useState(true);
   const [arReady, setArReady] = useState(false);
@@ -130,6 +133,7 @@ const ARDetection = ({
         maxTrack={isMultipoint ? 3 : 1}
         modelScale={modelScale}
         initialRotation={initialRotation}
+        markerData={markerData}
         onTargetFound={(index) => onTargetFound?.(index)}
         onTargetLost={(index) => onTargetLost?.(index)}
         onReady={() => setArReady(true)}
