@@ -71,6 +71,7 @@ function deviceOrientationToQuaternion(
   alpha: number,
   beta: number,
   gamma: number,
+  orient: number,
   ThreeLib: any
 ): any {
   const degToRad = Math.PI / 180;
@@ -80,7 +81,23 @@ function deviceOrientationToQuaternion(
     -gamma * degToRad,
     "YXZ"
   );
-  return new ThreeLib.Quaternion().setFromEuler(euler);
+  const q = new ThreeLib.Quaternion().setFromEuler(euler);
+
+  // Correction: device flat -> device upright (-90deg around X)
+  const q1 = new ThreeLib.Quaternion(
+    -Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)
+  );
+  q.multiply(q1);
+
+  // Screen orientation compensation
+  const q2 = new ThreeLib.Quaternion();
+  q2.setFromAxisAngle(
+    new ThreeLib.Vector3(0, 0, 1),
+    -orient * degToRad
+  );
+  q.multiply(q2);
+
+  return q;
 }
 
 const MindARScene = ({
@@ -142,6 +159,12 @@ const MindARScene = ({
       // Captures the phone's rotation for gyro-compensated world anchoring.
       const deviceQuaternionRef = { current: null as any };
       let hasGyro = false;
+      let screenOrientation = window.screen?.orientation?.angle || 0;
+
+      const onOrientationChange = () => {
+        screenOrientation = window.screen?.orientation?.angle || 0;
+      };
+      window.addEventListener("orientationchange", onOrientationChange);
 
       const onDeviceOrientation = (event: DeviceOrientationEvent) => {
         if (event.alpha != null && event.beta != null && event.gamma != null) {
@@ -150,6 +173,7 @@ const MindARScene = ({
             event.alpha,
             event.beta,
             event.gamma,
+            screenOrientation,
             ThreeLib
           );
         }
@@ -431,20 +455,24 @@ const MindARScene = ({
           lockedDeviceQuat &&
           deviceQuaternionRef.current
         ) {
-          // deltaQuat = inverse(lockedDeviceQuat) * currentDeviceQuat
+          // delta = how much phone rotated since lock
           const deltaQuat = lockedDeviceQuat
             .clone()
             .invert()
             .multiply(deviceQuaternionRef.current.clone());
 
-          // Build a rotation matrix from deltaQuat, then invert it
-          // (we want to cancel the device rotation, not apply it)
-          const deltaMatrix = new ThreeLib.Matrix4().makeRotationFromQuaternion(deltaQuat);
-          deltaMatrix.invert();
+          // Apply inverse rotation to keep model stationary in world
+          const invDelta = deltaQuat.clone().invert();
 
-          // Apply: model.matrix = deltaMatrix * lockedMatrix
+          // Decompose locked matrix, apply rotation around model's world position
+          const lockedPos = new ThreeLib.Vector3();
+          const lockedQuat = new ThreeLib.Quaternion();
+          const lockedScl = new ThreeLib.Vector3();
+          lockedMatrix.decompose(lockedPos, lockedQuat, lockedScl);
+
+          const compensatedQuat = invDelta.clone().multiply(lockedQuat);
           const compensated = new ThreeLib.Matrix4();
-          compensated.multiplyMatrices(deltaMatrix, lockedMatrix);
+          compensated.compose(lockedPos, compensatedQuat, lockedScl);
           modelRef.matrix.copy(compensated);
         }
 
@@ -454,6 +482,7 @@ const MindARScene = ({
       // Store cleanup for the deviceorientation listener
       mindarRef.current._cleanupGyro = () => {
         window.removeEventListener("deviceorientation", onDeviceOrientation, true);
+        window.removeEventListener("orientationchange", onOrientationChange);
       };
 
     } catch (err) {
