@@ -226,6 +226,10 @@ const MindARScene = ({
             const model = gltf.scene;
             modelRef = model;
 
+            // ── Rhino Z-up → Three.js Y-up axis correction ─────────────
+            model.rotation.x = -Math.PI / 2;
+            model.updateMatrixWorld(true);
+
             // ── Scale calculation ────────────────────────────────────────
             const box = new ThreeLib.Box3().setFromObject(model);
             const size = box.getSize(new ThreeLib.Vector3());
