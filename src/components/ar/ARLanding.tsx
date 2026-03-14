@@ -57,7 +57,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
             <p className="text-sm text-muted-foreground leading-relaxed">
               {isMultipoint
                 ? "Point your camera at the colored markers placed in the space to see the 3D design appear at full scale."
-                : "Point your camera at the QR marker on the table to see the design appear as a scaled model."}
+                : "View the 3D model with orbit controls, then tap 'View in AR' to place it on any surface using your device's built-in AR."}
             </p>
           </div>
           <Button size="lg" className="w-full gap-2" onClick={onLaunchAR}>
