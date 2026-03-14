@@ -112,18 +112,16 @@ const GenerateExperience = ({
       const shareUrl = `${window.location.origin}/view/${shareId}`;
       const projectPath = `${project.id}`;
 
-      // ── Step 1: Generate marker images ──
-      setStep("markers");
       let markerImageUrls: Record<string, string> = {};
       let mindFileUrl: string | null = null;
 
-      if (mode === "multipoint" && markerData && markerData.length >= 3) {
+      // ── Multipoint: generate markers → compile .mind → upload ──
+      if (!isTabletop && markerData && markerData.length >= 3) {
+        setStep("markers");
         const generatedMarkers = await generateAllMarkerImages(markerData, project.name);
 
-        // ── Step 2: Compile .mind file ──
         setStep("compiling");
         setCompileProgress(0);
-
         const markerImages = await Promise.all(
           generatedMarkers.map((m) => canvasToImage(m.canvas))
         );
@@ -131,13 +129,7 @@ const GenerateExperience = ({
           setCompileProgress(p)
         );
 
-        // ── Step 3: Generate QR code ──
-        setStep("qr");
-
-        // ── Step 4: Upload everything ──
         setStep("uploading");
-
-        // Upload marker images
         for (const marker of generatedMarkers) {
           const filePath = `${projectPath}/markers/marker_${marker.index}.png`;
           const { error: uploadErr } = await supabase.storage
@@ -154,7 +146,6 @@ const GenerateExperience = ({
           markerImageUrls[String(marker.index)] = urlData.publicUrl;
         }
 
-        // Upload .mind file
         const mindPath = `${projectPath}/targets.mind`;
         const { error: mindUploadErr } = await supabase.storage
           .from("project-assets")
@@ -170,7 +161,8 @@ const GenerateExperience = ({
         mindFileUrl = mindUrlData.publicUrl;
       }
 
-      // Generate and upload QR code
+      // ── QR code (both modes) ──
+      setStep("qr");
       const qrCanvas = document.createElement("canvas");
       await QRCode.toCanvas(qrCanvas, shareUrl, {
         width: 600,
@@ -193,46 +185,7 @@ const GenerateExperience = ({
         .from("project-assets")
         .getPublicUrl(qrPath);
 
-      // ── Tabletop: generate AR reference image → compile into .mind target ──
-      if (mode === "tabletop" && !mindFileUrl) {
-        setStep("markers");
-        const { canvas: arCanvas, blob: arBlob } = await generateTabletopMarkerImage(project.name);
-
-        const arRefPath = `${projectPath}/ar_reference.png`;
-        const { error: arUploadErr } = await supabase.storage
-          .from("project-assets")
-          .upload(arRefPath, arBlob, { contentType: "image/png", upsert: true });
-        if (arUploadErr) throw arUploadErr;
-
-        const { data: arRefUrlData } = supabase.storage
-          .from("project-assets")
-          .getPublicUrl(arRefPath);
-        markerImageUrls = { tabletop: arRefUrlData.publicUrl };
-
-        setStep("compiling");
-        setCompileProgress(0);
-
-        const arImg = await markerCanvasToImage(arCanvas);
-        const { blob: mindBlob } = await compileMindFile([arImg], (p) =>
-          setCompileProgress(p)
-        );
-
-        const mindPath = `${projectPath}/targets.mind`;
-        const { error: mindUploadErr } = await supabase.storage
-          .from("project-assets")
-          .upload(mindPath, mindBlob, {
-            contentType: "application/octet-stream",
-            upsert: true,
-          });
-        if (mindUploadErr) throw mindUploadErr;
-
-        const { data: mindUrlData } = supabase.storage
-          .from("project-assets")
-          .getPublicUrl(mindPath);
-        mindFileUrl = mindUrlData.publicUrl;
-      }
-
-      // ── Step 5: Activate experience ──
+      // ── Activate ──
       setStep("activating");
 
       const updatePayload: Record<string, any> = {
@@ -256,7 +209,9 @@ const GenerateExperience = ({
       setStep("done");
       toast({
         title: "AR Experience Generated! 🚀",
-        description: `${mode === "multipoint" && markerData ? `${markerData.length} markers compiled` : "Assets uploaded"} and experience is live.`,
+        description: isTabletop
+          ? "QR code created — experience is live with native AR placement."
+          : `${markerData?.length ?? 0} markers compiled and experience is live.`,
       });
       onGenerated();
     } catch (err: any) {
