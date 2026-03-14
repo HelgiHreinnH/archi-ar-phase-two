@@ -43,6 +43,10 @@ function loadCompilerScript(): Promise<void> {
     const script = document.createElement("script");
     script.type = "module";
     script.src = CDN_BASE;
+    // SRI readiness: add crossorigin for Subresource Integrity hash verification.
+    // TODO: Pin integrity hash when deploying to production:
+    //   script.integrity = "sha384-<computed-hash>";
+    script.crossOrigin = "anonymous";
 
     script.onload = () => {
       // Module scripts resolve all static imports before onload fires,
