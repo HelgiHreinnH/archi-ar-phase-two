@@ -280,15 +280,24 @@ const GenerateExperience = ({
               <span>{STEP_LABELS[step]}</span>
             </div>
             <Progress value={overallProgress} className="h-2" />
-            <div className="grid grid-cols-5 gap-1 text-[10px] text-muted-foreground">
-              {[
-                { key: "markers", icon: Image, label: "Markers" },
-                { key: "compiling", icon: Cpu, label: "Compile" },
-                { key: "qr", icon: QrCode, label: "QR Code" },
-                { key: "uploading", icon: Upload, label: "Upload" },
-                { key: "activating", icon: Zap, label: "Activate" },
-              ].map(({ key, icon: Icon, label }) => {
-                const stepKeys: GenerationStep[] = ["markers", "compiling", "qr", "uploading", "activating", "done"];
+            <div className={`grid gap-1 text-[10px] text-muted-foreground ${isTabletop ? "grid-cols-3" : "grid-cols-5"}`}>
+              {(isTabletop
+                ? [
+                    { key: "qr", icon: QrCode, label: "QR Code" },
+                    { key: "uploading", icon: Upload, label: "Upload" },
+                    { key: "activating", icon: Zap, label: "Activate" },
+                  ]
+                : [
+                    { key: "markers", icon: Image, label: "Markers" },
+                    { key: "compiling", icon: Cpu, label: "Compile" },
+                    { key: "qr", icon: QrCode, label: "QR Code" },
+                    { key: "uploading", icon: Upload, label: "Upload" },
+                    { key: "activating", icon: Zap, label: "Activate" },
+                  ]
+              ).map(({ key, icon: Icon, label }) => {
+                const stepKeys: GenerationStep[] = isTabletop
+                  ? ["qr", "uploading", "activating", "done"]
+                  : ["markers", "compiling", "qr", "uploading", "activating", "done"];
                 const currentIdx = stepKeys.indexOf(step);
                 const thisIdx = stepKeys.indexOf(key as GenerationStep);
                 const isDone = currentIdx > thisIdx || step === "done";
@@ -305,7 +314,6 @@ const GenerateExperience = ({
                   </div>
                 );
               })}
-            </div>
           </div>
         )}
 
