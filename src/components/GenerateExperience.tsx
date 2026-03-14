@@ -15,7 +15,6 @@ import QRCode from "qrcode";
 import { generateAllMarkerImages, canvasToImage } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
-import { generateTabletopMarkerImage, markerCanvasToImage } from "@/lib/generateTabletopMarker";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 
 type Project = Tables<"projects">;
