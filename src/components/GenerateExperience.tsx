@@ -79,8 +79,10 @@ const GenerateExperience = ({
   const [step, setStep] = useState<GenerationStep>("idle");
   const [compileProgress, setCompileProgress] = useState(0);
 
+  const isTabletop = mode === "tabletop";
+
   const checks: CheckItem[] =
-    mode === "tabletop"
+    isTabletop
       ? [
           { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
           { label: "Scale configured", passed: !!project.scale, hint: "Set the model scale" },
