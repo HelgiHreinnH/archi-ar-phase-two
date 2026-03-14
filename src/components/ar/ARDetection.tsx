@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown, MapPin, Target, Check, Loader2, Info, Camera, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -51,6 +51,28 @@ const ARDetection = ({
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
 
+  // ── Fix 8: Prefetch GLB during scanning phase ─────────────────
+  const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
+  const prefetchStarted = useRef(false);
+
+  useEffect(() => {
+    if (!modelUrl || prefetchStarted.current) return;
+    prefetchStarted.current = true;
+
+    fetch(modelUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error(`GLB fetch failed: ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((buffer) => {
+        setPrefetchedModel(buffer);
+        console.log(`[ARDetection] GLB prefetched (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+      })
+      .catch((err) => {
+        console.warn("[ARDetection] GLB prefetch failed, will fall back to URL loading:", err);
+      });
+  }, [modelUrl]);
+
   const isMultipoint = mode !== "tabletop";
   const markerKeys = Object.keys(markers);
   const detectedCount = Object.values(markers).filter((s) => s !== "searching").length;
@@ -63,7 +85,6 @@ const ARDetection = ({
       const t = setTimeout(() => {
         setIsActive(true);
         onAllDetected?.();
-        // Show gesture hint for tabletop
         if (!isMultipoint) {
           setGestureHint(true);
           setTimeout(() => setGestureHint(false), 3000);
@@ -111,8 +132,8 @@ const ARDetection = ({
     guideDescription = `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
-    guideTitle = "Loading model…";
-    guideDescription = "All markers locked. Preparing your AR experience.";
+    guideTitle = "Model locked";
+    guideDescription = "All markers detected. Your AR experience is active.";
   }
 
   // Build sorted marker entries for display
@@ -133,6 +154,7 @@ const ARDetection = ({
         modelScale={modelScale}
         initialRotation={initialRotation}
         markerData={markerData}
+        prefetchedModel={prefetchedModel}
         onTargetFound={(index) => onTargetFound?.(index)}
         onTargetLost={(index) => onTargetLost?.(index)}
         onReady={() => setArReady(true)}
@@ -187,7 +209,6 @@ const ARDetection = ({
 
               {isMultipoint ? (
                 totalMarkers <= 6 ? (
-                  // Individual badges for <= 6 markers
                   <div className="flex gap-3 justify-center flex-wrap">
                     {markerEntries.map(([key, status]) => {
                       const idx = parseInt(key) || 1;
@@ -212,7 +233,6 @@ const ARDetection = ({
                     })}
                   </div>
                 ) : (
-                  // Progress bar for > 6 markers
                   <div className="space-y-2">
                     <Progress value={(detectedCount / totalMarkers) * 100} className="h-2" />
                     <p className="text-xs text-center text-muted-foreground">
@@ -244,7 +264,6 @@ const ARDetection = ({
       {/* ── ACTIVE PHASE UI ── */}
       {isActive && (
         <>
-          {/* Gesture hint overlay for tabletop */}
           {gestureHint && (
             <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
               <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-6 py-4 text-center animate-fade-in">
