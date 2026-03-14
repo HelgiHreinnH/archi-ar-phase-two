@@ -2,32 +2,6 @@ import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import "@google/model-viewer";
 
-// Extend JSX for model-viewer web component
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      "model-viewer": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & {
-          src?: string;
-          "ios-src"?: string;
-          alt?: string;
-          "auto-rotate"?: boolean | string;
-          "camera-controls"?: boolean | string;
-          "shadow-intensity"?: string;
-          "environment-image"?: string;
-          exposure?: string;
-          "camera-orbit"?: string;
-          "field-of-view"?: string;
-          "interaction-prompt"?: string;
-          loading?: string;
-          poster?: string;
-        },
-        HTMLElement
-      >;
-    }
-  }
-}
-
 interface ModelViewer3DProps {
   modelUrl: string; // storage path e.g. "userId/file.glb"
   className?: string;
