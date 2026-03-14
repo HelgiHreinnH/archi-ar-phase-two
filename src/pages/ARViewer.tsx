@@ -8,18 +8,31 @@ import { normalizeMarkerData } from "@/lib/markerTypes";
 import ARLanding from "@/components/ar/ARLanding";
 import ARPermission from "@/components/ar/ARPermission";
 import ARDetection from "@/components/ar/ARDetection";
+import ModelViewerScene from "@/components/ar/ModelViewerScene";
 
 type Project = Tables<"projects">;
-type ViewerState = "landing" | "permission-denied" | "detecting";
+type ViewerState = "landing" | "permission-denied" | "detecting" | "model-viewer";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const ARViewer = () => {
   const { shareId } = useParams<{ shareId: string }>();
   const [viewState, setViewState] = useState<ViewerState>("landing");
 
+  // Fetch project via rate-limited edge function, with direct query fallback
   const { data: project, isLoading, error } = useQuery({
     queryKey: ["public-project", shareId],
     queryFn: async () => {
+      // Try edge function first (rate-limited, cached)
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke("get-public-project", {
+          body: { shareId },
+        });
+        if (!fnError && data) return data;
+      } catch {
+        // Edge function unavailable — fall back to direct query
+      }
+
+      // Fallback: direct PostgREST query
       const { data, error } = await supabase
         .from("projects")
         .select("name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url")
@@ -53,7 +66,15 @@ const ARViewer = () => {
     return m;
   }, [isMultipoint, markerData]);
 
-  const launchDetecting = useCallback(async () => {
+  // Launch AR — different paths for tabletop (Model Viewer) vs multipoint (MindAR)
+  const launchAR = useCallback(async () => {
+    if (!isMultipoint) {
+      // Tabletop: use native AR via <model-viewer> — no marker needed
+      setViewState("model-viewer");
+      return;
+    }
+
+    // Multi-point: request gyro permission, then launch MindAR detection
     try {
       const DOE = DeviceOrientationEvent as any;
       if (typeof DOE.requestPermission === "function") {
@@ -64,7 +85,7 @@ const ARViewer = () => {
     }
     setMarkers(getInitialMarkers());
     setViewState("detecting");
-  }, [getInitialMarkers]);
+  }, [isMultipoint, getInitialMarkers]);
 
   const handleTargetFound = useCallback((index: number) => {
     if (isMultipoint) {
@@ -98,6 +119,7 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
+  // Signed URL for the 3D model (used by both Model Viewer and MindAR)
   const { data: signedModelUrl, isLoading: isSignedUrlLoading } = useQuery({
     queryKey: ["signed-model-url", project?.model_url],
     queryFn: async () => {
@@ -105,7 +127,7 @@ const ARViewer = () => {
       if (project.model_url.startsWith("http")) return project.model_url;
       const { data, error } = await supabase.storage
         .from("project-models")
-        .createSignedUrl(project.model_url, 3600);
+        .createSignedUrl(project.model_url, 3600); // 1hr TTL
       if (error) throw error;
       return data.signedUrl;
     },
@@ -143,18 +165,39 @@ const ARViewer = () => {
 
   switch (viewState) {
     case "landing":
-      return <ARLanding project={project} onLaunchAR={launchDetecting} />;
+      return <ARLanding project={project} onLaunchAR={launchAR} />;
 
     case "permission-denied":
       return (
         <ARPermission
           onCancel={() => setViewState("landing")}
-          onRetry={launchDetecting}
+          onRetry={launchAR}
           errorMessage={arErrorMessage}
         />
       );
 
+    case "model-viewer":
+      // Tabletop: native AR via <model-viewer> — walk-around SLAM, no marker
+      if (project.model_url && isSignedUrlLoading) {
+        return (
+          <div className="fixed inset-0 bg-background flex items-center justify-center">
+            <div className="text-center space-y-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+              <p className="text-muted-foreground text-sm">Preparing 3D model…</p>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <ModelViewerScene
+          modelUrl={signedModelUrl || ""}
+          project={project}
+          onBack={() => setViewState("landing")}
+        />
+      );
+
     case "detecting":
+      // Multi-point: MindAR marker-based detection
       if (project.model_url && isSignedUrlLoading) {
         return (
           <div className="fixed inset-0 bg-black flex items-center justify-center">

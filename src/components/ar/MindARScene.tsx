@@ -1,5 +1,10 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { computeWorldTransform } from "@/lib/computeWorldTransform";
+import {
+  deviceOrientationToQuaternion,
+  applyGyroCompensation,
+  createGyroListener,
+} from "@/lib/arGyro";
 
 interface MindARSceneProps {
   /** URL of the .mind compiled image target file */
@@ -63,43 +68,6 @@ async function loadMindAR(): Promise<void> {
   }
 }
 
-/**
- * Convert deviceorientation alpha/beta/gamma to a quaternion.
- * Uses the standard ZXY Euler convention for device orientation.
- */
-function deviceOrientationToQuaternion(
-  alpha: number,
-  beta: number,
-  gamma: number,
-  orient: number,
-  ThreeLib: any
-): any {
-  const degToRad = Math.PI / 180;
-  const euler = new ThreeLib.Euler(
-    beta * degToRad,
-    alpha * degToRad,
-    -gamma * degToRad,
-    "YXZ"
-  );
-  const q = new ThreeLib.Quaternion().setFromEuler(euler);
-
-  // Correction: device flat -> device upright (-90deg around X)
-  const q1 = new ThreeLib.Quaternion(
-    -Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)
-  );
-  q.multiply(q1);
-
-  // Screen orientation compensation
-  const q2 = new ThreeLib.Quaternion();
-  q2.setFromAxisAngle(
-    new ThreeLib.Vector3(0, 0, 1),
-    -orient * degToRad
-  );
-  q.multiply(q2);
-
-  return q;
-}
-
 const MindARScene = ({
   imageTargetSrc,
   modelUrl,
@@ -155,31 +123,10 @@ const MindARScene = ({
         throw new Error("MindAR not available after loading");
       }
 
-      // ── DeviceOrientation gyroscope listener ──────────────────────────
-      // Captures the phone's rotation for gyro-compensated world anchoring.
+      // ── DeviceOrientation gyroscope listener (extracted to shared utility) ──
       const deviceQuaternionRef = { current: null as any };
-      let hasGyro = false;
-      let screenOrientation = window.screen?.orientation?.angle || 0;
-
-      const onOrientationChange = () => {
-        screenOrientation = window.screen?.orientation?.angle || 0;
-      };
-      window.addEventListener("orientationchange", onOrientationChange);
-
-      const onDeviceOrientation = (event: DeviceOrientationEvent) => {
-        if (event.alpha != null && event.beta != null && event.gamma != null) {
-          hasGyro = true;
-          deviceQuaternionRef.current = deviceOrientationToQuaternion(
-            event.alpha,
-            event.beta,
-            event.gamma,
-            screenOrientation,
-            ThreeLib
-          );
-        }
-      };
-
-      window.addEventListener("deviceorientation", onDeviceOrientation, true);
+      const hasGyroRef = { current: false };
+      const cleanupGyro = createGyroListener(deviceQuaternionRef, hasGyroRef, ThreeLib);
 
       // Assign a stable ID so our injected CSS can target it
       const containerId = "mindar-ar-container";
@@ -296,13 +243,11 @@ const MindARScene = ({
                 // ── Check if we should lock ──────────────────────────────
                 if (stableFrameCounts[0] >= STABLE_FRAME_THRESHOLD) {
                   if (isTabletop || !markerData) {
-                    // Tabletop mode OR multi-point without markerData: lock on anchor 0 only
                     if (!isTabletop && !markerData) {
                       console.warn("[MindARScene] Multi-point mode but no markerData — falling back to anchor-A-only placement");
                     }
                     lockModel(model, worldMatrix, anchor, scene, ThreeLib);
                   } else {
-                    // Multi-point with markerData: wait for all 3 anchors
                     tryMultiPointLock(model, anchor, scene, ThreeLib);
                   }
                 }
@@ -312,7 +257,6 @@ const MindARScene = ({
             // ── onTargetFound: re-anchor if locked ──────────────────────
             anchor.onTargetFound = () => {
               if (model && anchorState === "locked") {
-                // Return model to anchor group for live tracking
                 scene.remove(model);
                 model.matrixAutoUpdate = true;
                 anchor.group.add(model);
@@ -334,10 +278,6 @@ const MindARScene = ({
 
             // ── onTargetLost ────────────────────────────────────────────
             anchor.onTargetLost = () => {
-              // In the new system, we don't freeze on loss — the model
-              // is already locked via gyro if it was stable enough.
-              // If it wasn't stable enough (anchorState === 'tracking'),
-              // the model disappears with the anchor group (acceptable).
               stableFrameCounts[0] = 0;
               onTargetLostRef.current?.(i);
             };
@@ -375,13 +315,11 @@ const MindARScene = ({
         targetScene: any,
         T: any
       ) {
-        // Capture the current gyro quaternion at lock time
         lockedDeviceQuat = deviceQuaternionRef.current
           ? deviceQuaternionRef.current.clone()
           : null;
         lockedMatrix = worldMatrix.clone();
 
-        // Move model from anchor group to scene root
         _anchor.group.remove(model);
         targetScene.add(model);
 
@@ -391,7 +329,7 @@ const MindARScene = ({
 
         console.log(
           "[MindARScene] Model locked.",
-          hasGyro ? "Gyro compensation active." : "No gyro — static freeze."
+          hasGyroRef.current ? "Gyro compensation active." : "No gyro — static freeze."
         );
       }
 
@@ -407,14 +345,13 @@ const MindARScene = ({
           stableFrameCounts[1] < STABLE_FRAME_THRESHOLD ||
           stableFrameCounts[2] < STABLE_FRAME_THRESHOLD
         ) {
-          return; // Not all anchors stable yet
+          return;
         }
 
         if (!anchorPoseMatrices[0] || !anchorPoseMatrices[1] || !anchorPoseMatrices[2]) {
           return;
         }
 
-        // Extract VisibleAnchor objects for computeWorldTransform
         const visibleAnchors = [0, 1, 2]
           .filter((idx) => anchorPoseMatrices[idx])
           .map((idx) => ({
@@ -426,7 +363,6 @@ const MindARScene = ({
 
         if (!result) {
           console.warn("[MindARScene] computeWorldTransform returned null — falling back to anchor-A-only");
-          // Fall back to anchor-A-only
           model.updateMatrix();
           const fallbackMatrix = new T.Matrix4();
           fallbackMatrix.copy(anchorA.group.matrix).multiply(model.matrix);
@@ -434,7 +370,6 @@ const MindARScene = ({
           return;
         }
 
-        // Use the computed world transform as the locked matrix
         const worldMat = new T.Matrix4();
         worldMat.fromArray(result);
         lockModel(model, worldMat, anchorA, targetScene, T);
@@ -445,9 +380,8 @@ const MindARScene = ({
       setIsStarting(false);
       onReadyRef.current?.();
 
-      // ── Render loop with gyro compensation ────────────────────────────
+      // ── Render loop with gyro compensation (using shared utility) ──────
       renderer.setAnimationLoop(() => {
-        // When locked and gyro is available, compensate for device rotation
         if (
           anchorState === "locked" &&
           modelRef &&
@@ -455,35 +389,20 @@ const MindARScene = ({
           lockedDeviceQuat &&
           deviceQuaternionRef.current
         ) {
-          // delta = how much phone rotated since lock
-          const deltaQuat = lockedDeviceQuat
-            .clone()
-            .invert()
-            .multiply(deviceQuaternionRef.current.clone());
-
-          // Apply inverse rotation to keep model stationary in world
-          const invDelta = deltaQuat.clone().invert();
-
-          // Decompose locked matrix, apply rotation around model's world position
-          const lockedPos = new ThreeLib.Vector3();
-          const lockedQuat = new ThreeLib.Quaternion();
-          const lockedScl = new ThreeLib.Vector3();
-          lockedMatrix.decompose(lockedPos, lockedQuat, lockedScl);
-
-          const compensatedQuat = invDelta.clone().multiply(lockedQuat);
-          const compensated = new ThreeLib.Matrix4();
-          compensated.compose(lockedPos, compensatedQuat, lockedScl);
-          modelRef.matrix.copy(compensated);
+          applyGyroCompensation(
+            lockedMatrix,
+            lockedDeviceQuat,
+            deviceQuaternionRef.current,
+            modelRef,
+            ThreeLib
+          );
         }
 
         renderer.render(scene, camera);
       });
 
-      // Store cleanup for the deviceorientation listener
-      mindarRef.current._cleanupGyro = () => {
-        window.removeEventListener("deviceorientation", onDeviceOrientation, true);
-        window.removeEventListener("orientationchange", onOrientationChange);
-      };
+      // Store cleanup
+      mindarRef.current._cleanupGyro = cleanupGyro;
 
     } catch (err) {
       console.error("MindAR initialization error:", err);
@@ -496,7 +415,6 @@ const MindARScene = ({
     startAR();
 
     return () => {
-      // Clean up injected style tag
       document.getElementById("mindar-fill-style")?.remove();
 
       if (mindarRef.current) {
