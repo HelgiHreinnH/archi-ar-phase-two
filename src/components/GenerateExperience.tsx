@@ -1,21 +1,26 @@
-import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   Rocket, CheckCircle2, AlertCircle, Loader2,
-  Download, Link2, Copy, FileDown, Image, Cpu, QrCode, Upload, Zap, FileText,
+  Download, Link2, Copy, FileDown, FileText, QrCode, Upload, Zap, Image, Cpu,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
-import QRCode from "qrcode";
-import { generateAllMarkerImages, canvasToImage } from "@/lib/generateMarkers";
-import { compileMindFile } from "@/lib/compileMindFile";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
-import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
+import QRCode from "qrcode";
+import {
+  useTabletopGeneration,
+  TABLETOP_PIPELINE,
+  type TabletopStep,
+} from "@/hooks/useTabletopGeneration";
+import {
+  useMultipointGeneration,
+  MULTIPOINT_PIPELINE,
+  type MultipointStep,
+} from "@/hooks/useMultipointGeneration";
 
 type Project = Tables<"projects">;
 
@@ -34,17 +39,7 @@ interface CheckItem {
   hint?: string;
 }
 
-type GenerationStep =
-  | "idle"
-  | "markers"
-  | "compiling"
-  | "qr"
-  | "uploading"
-  | "activating"
-  | "done"
-  | "error";
-
-const STEP_LABELS: Record<GenerationStep, string> = {
+const STEP_LABELS: Record<string, string> = {
   idle: "",
   markers: "Generating marker images…",
   compiling: "Compiling MindAR targets…",
@@ -55,15 +50,12 @@ const STEP_LABELS: Record<GenerationStep, string> = {
   error: "Generation failed",
 };
 
-const STEP_PROGRESS: Record<GenerationStep, number> = {
-  idle: 0,
-  markers: 15,
-  compiling: 45,
-  qr: 60,
-  uploading: 80,
-  activating: 95,
-  done: 100,
-  error: 0,
+const ICON_MAP: Record<string, typeof QrCode> = {
+  qr: QrCode,
+  uploading: Upload,
+  activating: Zap,
+  markers: Image,
+  compiling: Cpu,
 };
 
 const GenerateExperience = ({
@@ -74,157 +66,34 @@ const GenerateExperience = ({
   markerData,
   onGenerated,
 }: GenerateExperienceProps) => {
-  const [generating, setGenerating] = useState(false);
-  const [step, setStep] = useState<GenerationStep>("idle");
-  const [compileProgress, setCompileProgress] = useState(0);
-
   const isTabletop = mode === "tabletop";
 
-  const checks: CheckItem[] =
-    isTabletop
-      ? [
-          { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
-          { label: "Scale configured", passed: !!project.scale, hint: "Set the model scale" },
-        ]
-      : [
-          { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
-          { label: `Marker coordinates set (${markerData?.length ?? 0} points)`, passed: hasValidMarkers, hint: "Enter coordinates for at least 3 points" },
-          { label: "Spacing quality sufficient", passed: hasValidMarkers, hint: "Ensure points form a valid configuration" },
-        ];
+  const tabletop = useTabletopGeneration(project, onGenerated);
+  const multipoint = useMultipointGeneration(project, markerData, onGenerated);
+
+  // Unified interface
+  const generating = isTabletop ? tabletop.generating : multipoint.generating;
+  const step = isTabletop ? tabletop.step : multipoint.step;
+  const progress = isTabletop ? tabletop.progress : multipoint.progress;
+  const generate = isTabletop ? tabletop.generate : multipoint.generate;
+
+  const pipeline = isTabletop ? TABLETOP_PIPELINE : MULTIPOINT_PIPELINE;
+  const stepKeys = [...pipeline.map((s) => s.key), "done"] as string[];
+
+  // ── Checklist ──
+  const checks: CheckItem[] = isTabletop
+    ? [
+        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
+        { label: "Scale configured", passed: !!project.scale, hint: "Set the model scale" },
+      ]
+    : [
+        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
+        { label: `Marker coordinates set (${markerData?.length ?? 0} points)`, passed: hasValidMarkers, hint: "Enter coordinates for at least 3 points" },
+        { label: "Spacing quality sufficient", passed: hasValidMarkers, hint: "Ensure points form a valid configuration" },
+      ];
 
   const allPassed = checks.every((c) => c.passed);
   const isActive = project.status === "active";
-
-  const overallProgress =
-    step === "compiling"
-      ? STEP_PROGRESS.markers + (compileProgress / 100) * (STEP_PROGRESS.compiling - STEP_PROGRESS.markers)
-      : STEP_PROGRESS[step];
-
-  const handleGenerate = useCallback(async () => {
-    if (!allPassed) return;
-
-    setGenerating(true);
-    setStep("idle");
-
-    try {
-      const shareId = project.share_link || crypto.randomUUID();
-      const shareUrl = `${window.location.origin}/view/${shareId}`;
-      const projectPath = `${project.id}`;
-
-      let markerImageUrls: Record<string, string> = {};
-      let mindFileUrl: string | null = null;
-
-      // ── Multipoint: generate markers → compile .mind → upload ──
-      if (!isTabletop && markerData && markerData.length >= 3) {
-        setStep("markers");
-        const generatedMarkers = await generateAllMarkerImages(markerData, project.name);
-
-        setStep("compiling");
-        setCompileProgress(0);
-        const markerImages = await Promise.all(
-          generatedMarkers.map((m) => canvasToImage(m.canvas))
-        );
-        const { blob: mindBlob } = await compileMindFile(markerImages, (p) =>
-          setCompileProgress(p)
-        );
-
-        setStep("uploading");
-        for (const marker of generatedMarkers) {
-          const filePath = `${projectPath}/markers/marker_${marker.index}.png`;
-          const { error: uploadErr } = await supabase.storage
-            .from("project-assets")
-            .upload(filePath, marker.blob, {
-              contentType: "image/png",
-              upsert: true,
-            });
-          if (uploadErr) throw uploadErr;
-
-          const { data: urlData } = supabase.storage
-            .from("project-assets")
-            .getPublicUrl(filePath);
-          markerImageUrls[String(marker.index)] = urlData.publicUrl;
-        }
-
-        const mindPath = `${projectPath}/targets.mind`;
-        const { error: mindUploadErr } = await supabase.storage
-          .from("project-assets")
-          .upload(mindPath, mindBlob, {
-            contentType: "application/octet-stream",
-            upsert: true,
-          });
-        if (mindUploadErr) throw mindUploadErr;
-
-        const { data: mindUrlData } = supabase.storage
-          .from("project-assets")
-          .getPublicUrl(mindPath);
-        mindFileUrl = mindUrlData.publicUrl;
-      }
-
-      // ── QR code (both modes) ──
-      setStep("qr");
-      const qrCanvas = document.createElement("canvas");
-      await QRCode.toCanvas(qrCanvas, shareUrl, {
-        width: 600,
-        margin: 2,
-        color: { dark: "#212121", light: "#FFFFFF" },
-      });
-      const qrBlob = await new Promise<Blob>((resolve) => {
-        qrCanvas.toBlob((b) => resolve(b!), "image/png");
-      });
-      const qrPath = `${projectPath}/qr_code.png`;
-      const { error: qrUploadErr } = await supabase.storage
-        .from("project-assets")
-        .upload(qrPath, qrBlob, {
-          contentType: "image/png",
-          upsert: true,
-        });
-      if (qrUploadErr) throw qrUploadErr;
-
-      const { data: qrUrlData } = supabase.storage
-        .from("project-assets")
-        .getPublicUrl(qrPath);
-
-      // ── Activate ──
-      setStep("activating");
-
-      const updatePayload: Record<string, any> = {
-        share_link: shareId,
-        status: "active",
-        qr_code_url: qrUrlData.publicUrl,
-        mind_file_url: mindFileUrl,
-      };
-
-      if (Object.keys(markerImageUrls).length > 0) {
-        updatePayload.marker_image_urls = markerImageUrls;
-      }
-
-      const { error } = await supabase
-        .from("projects")
-        .update(updatePayload)
-        .eq("id", project.id);
-
-      if (error) throw error;
-
-      setStep("done");
-      toast({
-        title: "AR Experience Generated! 🚀",
-        description: isTabletop
-          ? "QR code created — experience is live with native AR placement."
-          : `${markerData?.length ?? 0} markers compiled and experience is live.`,
-      });
-      onGenerated();
-    } catch (err: any) {
-      setStep("error");
-      console.error("Generation error:", err);
-      toast({
-        title: "Generation failed",
-        description: err.message || "An unexpected error occurred",
-        variant: "destructive",
-      });
-    } finally {
-      setGenerating(false);
-    }
-  }, [allPassed, project, mode, markerData, onGenerated]);
 
   const shareUrl = project.share_link
     ? `${window.location.origin}/view/${project.share_link}`
@@ -236,6 +105,8 @@ const GenerateExperience = ({
       toast({ title: "Link copied to clipboard" });
     }
   };
+
+  const currentIdx = stepKeys.indexOf(step);
 
   return (
     <Card>
@@ -276,31 +147,15 @@ const GenerateExperience = ({
               ) : (
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
               )}
-              <span>{STEP_LABELS[step]}</span>
+              <span>{STEP_LABELS[step] || step}</span>
             </div>
-            <Progress value={overallProgress} className="h-2" />
-            <div className={`grid gap-1 text-[10px] text-muted-foreground ${isTabletop ? "grid-cols-3" : "grid-cols-5"}`}>
-              {(isTabletop
-                ? [
-                    { key: "qr", icon: QrCode, label: "QR Code" },
-                    { key: "uploading", icon: Upload, label: "Upload" },
-                    { key: "activating", icon: Zap, label: "Activate" },
-                  ]
-                : [
-                    { key: "markers", icon: Image, label: "Markers" },
-                    { key: "compiling", icon: Cpu, label: "Compile" },
-                    { key: "qr", icon: QrCode, label: "QR Code" },
-                    { key: "uploading", icon: Upload, label: "Upload" },
-                    { key: "activating", icon: Zap, label: "Activate" },
-                  ]
-              ).map(({ key, icon: Icon, label }) => {
-                const stepKeys: GenerationStep[] = isTabletop
-                  ? ["qr", "uploading", "activating", "done"]
-                  : ["markers", "compiling", "qr", "uploading", "activating", "done"];
-                const currentIdx = stepKeys.indexOf(step);
-                const thisIdx = stepKeys.indexOf(key as GenerationStep);
+            <Progress value={progress} className="h-2" />
+            <div className={`grid gap-1 text-[10px] text-muted-foreground`} style={{ gridTemplateColumns: `repeat(${pipeline.length}, 1fr)` }}>
+              {pipeline.map(({ key, label }) => {
+                const thisIdx = stepKeys.indexOf(key);
                 const isDone = currentIdx > thisIdx || step === "done";
                 const isCurrent = key === step;
+                const Icon = ICON_MAP[key] || Zap;
                 return (
                   <div
                     key={key}
@@ -317,9 +172,9 @@ const GenerateExperience = ({
           </div>
         )}
 
-        {/* Generate Button */}
+        {/* Generate / Regenerate Button */}
         {!isActive ? (
-          <Button className="w-full" size="lg" disabled={!allPassed || generating} onClick={handleGenerate}>
+          <Button className="w-full" size="lg" disabled={!allPassed || generating} onClick={generate}>
             {generating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -358,7 +213,7 @@ const GenerateExperience = ({
               </div>
             )}
 
-            <Button variant="outline" className="w-full" onClick={handleGenerate} disabled={generating}>
+            <Button variant="outline" className="w-full" onClick={generate} disabled={generating}>
               {generating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -374,7 +229,7 @@ const GenerateExperience = ({
           </div>
         )}
 
-        {/* Downloads Section */}
+        {/* ── Downloads Section ── */}
         {isActive && shareUrl && (
           <div className="space-y-3 border-t pt-4">
             <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -382,7 +237,7 @@ const GenerateExperience = ({
               Downloads
             </h3>
 
-            {/* QR Code Download */}
+            {/* QR Code Download — both modes */}
             <Button
               variant="outline"
               size="sm"
@@ -390,7 +245,10 @@ const GenerateExperience = ({
               onClick={async () => {
                 try {
                   const qrCanvas = document.createElement("canvas");
-                  await QRCode.toCanvas(qrCanvas, shareUrl, { width: 600, margin: 2, color: { dark: "#212121", light: "#FFFFFF" } });
+                  await QRCode.toCanvas(qrCanvas, shareUrl, {
+                    width: 600, margin: 2,
+                    color: { dark: "#212121", light: "#FFFFFF" },
+                  });
                   const a = document.createElement("a");
                   a.href = qrCanvas.toDataURL("image/png");
                   a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
@@ -404,46 +262,15 @@ const GenerateExperience = ({
               Download QR Code
             </Button>
 
-            {/* Tabletop downloads */}
-            {mode === "tabletop" && (() => {
-              const markerImageUrlsData = project.marker_image_urls as Record<string, string> | null;
-              const arRefUrl = markerImageUrlsData?.tabletop;
-              return (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    Print both files — scan the QR to launch, point camera at the AR Marker to activate.
-                  </p>
-                  {arRefUrl && (
-                    <Button variant="outline" size="sm" className="w-full justify-start gap-2" asChild>
-                      <a href={arRefUrl} download={`ar_marker_${project.name.replace(/\s+/g, "_")}.png`} target="_blank" rel="noopener noreferrer">
-                        <Download className="h-3 w-3" />
-                        Download AR Reference Image
-                      </a>
-                    </Button>
-                  )}
-                  {arRefUrl && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start gap-2"
-                      onClick={async () => {
-                        try {
-                          await downloadTabletopPrintSheet(project.name, shareUrl!, arRefUrl);
-                        } catch {
-                          toast({ title: "PDF generation failed", variant: "destructive" });
-                        }
-                      }}
-                    >
-                      <FileText className="h-3 w-3" />
-                      Download Print Sheet (PDF)
-                    </Button>
-                  )}
-                </div>
-              );
-            })()}
+            {/* Tabletop: QR code only — no markers needed */}
+            {isTabletop && (
+              <p className="text-xs text-muted-foreground">
+                Print and display the QR code — users scan it to launch the 3D experience with native AR placement.
+              </p>
+            )}
 
-            {/* Marker PDFs — multipoint only */}
-            {mode === "multipoint" && markerData && markerData.length > 0 && (
+            {/* Multipoint: Marker PDFs + .mind file */}
+            {!isTabletop && markerData && markerData.length > 0 && (
               <>
                 <p className="text-xs text-muted-foreground">
                   Download print-ready A4 PDFs with marker image, QR code, and placement instructions.
@@ -457,7 +284,7 @@ const GenerateExperience = ({
                         variant="outline"
                         size="sm"
                         className="justify-start gap-2"
-                        onClick={() => downloadMarkerPDF(marker, project.name, shareUrl!)}
+                        onClick={() => downloadMarkerPDF(marker, project.name, shareUrl)}
                       >
                         <div
                           className="h-3 w-3 rounded-full shrink-0"
@@ -473,7 +300,7 @@ const GenerateExperience = ({
                   variant="outline"
                   size="sm"
                   className="w-full justify-start gap-2"
-                  onClick={() => downloadAllMarkerPDFs(markerData, project.name, shareUrl!)}
+                  onClick={() => downloadAllMarkerPDFs(markerData, project.name, shareUrl)}
                 >
                   <Download className="h-3 w-3" />
                   Download All Marker PDFs
@@ -481,11 +308,11 @@ const GenerateExperience = ({
               </>
             )}
 
-            {/* .mind file download */}
-            {(project as any).mind_file_url && (
+            {/* .mind file — multipoint only */}
+            {!isTabletop && project.mind_file_url && (
               <Button variant="outline" size="sm" className="w-full justify-start gap-2" asChild>
                 <a
-                  href={(project as any).mind_file_url}
+                  href={project.mind_file_url}
                   download={`targets_${project.name.replace(/\s+/g, "_")}.mind`}
                   target="_blank"
                   rel="noopener noreferrer"
