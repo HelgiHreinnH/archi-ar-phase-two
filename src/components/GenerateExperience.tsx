@@ -313,7 +313,7 @@ const GenerateExperience = ({
                     <span>{label}</span>
                   </div>
                 );
-              })}
+            </div>
           </div>
         )}
 
