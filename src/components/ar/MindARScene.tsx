@@ -641,6 +641,10 @@ const MindARScene = ({
               if (t) clearTimeout(t);
             }
           }
+          // Clear stall timer
+          if (mindarRef.current._stallTimer) {
+            clearTimeout(mindarRef.current._stallTimer);
+          }
           mindarRef.current.stop();
         } catch {
           // Ignore cleanup errors
