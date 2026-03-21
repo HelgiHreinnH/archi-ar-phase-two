@@ -76,6 +76,12 @@ const OCCLUSION_GRACE_MS = 500;
  */
 const SOFT_CORRECTION_ALPHA = 0.05;
 
+/** Bug 4 fix: Detection stall timeout in ms — auto-degrade after this. */
+const DETECTION_STALL_TIMEOUT_MS = 30_000;
+
+/** GLB magic number: ASCII "glTF" = 0x676C5446 (little-endian: 0x46546C67) */
+const GLB_MAGIC = 0x46546C67;
+
 async function loadMindAR(): Promise<void> {
   if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
   await import(/* @vite-ignore */ MINDAR_THREE_URL);
@@ -255,10 +261,24 @@ const MindARScene = ({
 
             let gltf: any;
             if (prefetchedModel) {
-              // Fix 8: Use prefetched ArrayBuffer
-              gltf = await new Promise<any>((resolve, reject) => {
-                loader.parse(prefetchedModel, "", resolve, reject);
-              });
+              // Bug 3 fix: Validate GLB magic number before parsing
+              const isValidGlb = prefetchedModel.byteLength >= 4 &&
+                new DataView(prefetchedModel).getUint32(0, true) === GLB_MAGIC;
+
+              if (isValidGlb) {
+                gltf = await new Promise<any>((resolve, reject) => {
+                  loader.parse(prefetchedModel, "", resolve, reject);
+                });
+              } else {
+                console.warn("[MindARScene] Prefetched buffer is not a valid GLB (bad magic bytes), falling back to URL loading");
+                if (modelUrl) {
+                  gltf = await new Promise<any>((resolve, reject) => {
+                    loader.load(modelUrl!, resolve, undefined, reject);
+                  });
+                } else {
+                  throw new Error("Prefetched model is invalid and no URL fallback available");
+                }
+              }
             } else {
               gltf = await new Promise<any>((resolve, reject) => {
                 loader.load(modelUrl!, resolve, undefined, reject);
@@ -516,6 +536,55 @@ const MindARScene = ({
       setIsStarting(false);
       onReadyRef.current?.();
 
+      // ── Bug 4 fix: Detection stall timeout — auto-degrade after 30s ──
+      let stallTimer: ReturnType<typeof setTimeout> | null = null;
+      if (!isTabletop && markerData && maxTrack > 1) {
+        stallTimer = setTimeout(() => {
+          if (anchorState !== "tracking" || !modelRef) return;
+
+          // Count anchors with any stable frames
+          const stableAnchors = Array.from({ length: maxTrack }, (_, idx) => idx)
+            .filter((idx) => stableFrameCounts[idx] > 0 && anchorPoseMatrices[idx]);
+
+          console.warn(
+            `[MindARScene] Detection stall timeout — ${stableAnchors.length}/${maxTrack} anchors have data`
+          );
+
+          if (stableAnchors.length >= 2) {
+            // Attempt partial lock with available anchors
+            const visibleAnchors = stableAnchors.map((idx) => ({
+              index: markerData![idx]?.index ?? (idx + 1),
+              matrix: new Float32Array(anchorPoseMatrices[idx].elements),
+            }));
+            const result = computeWorldTransform(visibleAnchors, markerData!, MARKER_SIZE_MM);
+            if (result) {
+              const worldMat = new ThreeLib.Matrix4();
+              worldMat.fromArray(result);
+              const anchorA = mindarThree.anchorEntities?.[0] ?? { group: { matrix: new ThreeLib.Matrix4(), remove: () => {} } };
+              lockModel(modelRef, worldMat, anchorA, scene, ThreeLib);
+              console.log(`[MindARScene] Stall fallback: locked with ${stableAnchors.length} anchors`);
+              return;
+            }
+          }
+
+          if (stableAnchors.length >= 1) {
+            // Single anchor fallback — translation only
+            const idx = stableAnchors[0];
+            const anchorA = mindarThree.anchorEntities?.[0] ?? { group: { matrix: anchorPoseMatrices[idx], remove: () => {} } };
+            modelRef.updateMatrix();
+            const fallbackMatrix = new ThreeLib.Matrix4();
+            fallbackMatrix.copy(anchorPoseMatrices[idx]).multiply(modelRef.matrix);
+            lockModel(modelRef, fallbackMatrix, anchorA, scene, ThreeLib);
+            console.warn("[MindARScene] Stall fallback: 1-anchor lock (translation only)");
+            return;
+          }
+
+          // No anchors detected at all — surface error
+          console.error("[MindARScene] Stall timeout: no anchors detected");
+          onErrorRef.current?.(new Error("Could not detect any markers. Please check lighting and marker visibility."));
+        }, DETECTION_STALL_TIMEOUT_MS);
+      }
+
       // ── Render loop with gyro compensation ────────────────────────
       renderer.setAnimationLoop(() => {
         if (
@@ -525,13 +594,20 @@ const MindARScene = ({
           lockedDeviceQuat &&
           deviceQuaternionRef.current
         ) {
+          // Bug 2 fix: Snapshot lockedMatrix to prevent mid-frame mutation
+          // from onTargetUpdate soft correction callback
+          const framePose = lockedMatrix.clone();
+
           applyGyroCompensation(
-            lockedMatrix,
+            framePose,
             lockedDeviceQuat,
             deviceQuaternionRef.current,
             modelRef,
             ThreeLib
           );
+
+          // Flush the gyro-compensated pose back
+          lockedMatrix.copy(framePose);
         }
 
         renderer.render(scene, camera);
@@ -540,6 +616,7 @@ const MindARScene = ({
       // Store cleanup
       mindarRef.current._cleanupGyro = cleanupGyro;
       mindarRef.current._occlusionTimers = occlusionTimers;
+      mindarRef.current._stallTimer = stallTimer;
 
     } catch (err) {
       console.error("MindAR initialization error:", err);
@@ -563,6 +640,10 @@ const MindARScene = ({
             for (const t of timers) {
               if (t) clearTimeout(t);
             }
+          }
+          // Clear stall timer
+          if (mindarRef.current._stallTimer) {
+            clearTimeout(mindarRef.current._stallTimer);
           }
           mindarRef.current.stop();
         } catch {

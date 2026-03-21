@@ -119,20 +119,15 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Signed URL for the 3D model (used by both Model Viewer and MindAR)
-  const { data: signedModelUrl, isLoading: isSignedUrlLoading } = useQuery({
-    queryKey: ["signed-model-url", project?.model_url],
-    queryFn: async () => {
-      if (!project?.model_url) return null;
-      if (project.model_url.startsWith("http")) return project.model_url;
-      const { data, error } = await supabase.storage
-        .from("project-models")
-        .createSignedUrl(project.model_url, 3600); // 1hr TTL
-      if (error) throw error;
-      return data.signedUrl;
-    },
-    enabled: !!project?.model_url,
-  });
+  // Public URL for the 3D model (bucket is public — no auth needed)
+  const publicModelUrl = (() => {
+    if (!project?.model_url) return null;
+    if (project.model_url.startsWith("http")) return project.model_url;
+    const { data } = supabase.storage
+      .from("project-models")
+      .getPublicUrl(project.model_url);
+    return data.publicUrl;
+  })();
 
   if (isLoading) {
     return (
@@ -144,6 +139,8 @@ const ARViewer = () => {
       </div>
     );
   }
+
+  const isModelReady = !!publicModelUrl;
 
   if (error || !project) {
     return (
@@ -177,8 +174,7 @@ const ARViewer = () => {
       );
 
     case "model-viewer":
-      // Tabletop: native AR via <model-viewer> — walk-around SLAM, no marker
-      if (project.model_url && isSignedUrlLoading) {
+      if (!isModelReady) {
         return (
           <div className="fixed inset-0 bg-background flex items-center justify-center">
             <div className="text-center space-y-3">
@@ -190,15 +186,14 @@ const ARViewer = () => {
       }
       return (
         <ModelViewerScene
-          modelUrl={signedModelUrl || ""}
+          modelUrl={publicModelUrl || ""}
           project={project}
           onBack={() => setViewState("landing")}
         />
       );
 
     case "detecting":
-      // Multi-point: MindAR marker-based detection
-      if (project.model_url && isSignedUrlLoading) {
+      if (!isModelReady) {
         return (
           <div className="fixed inset-0 bg-black flex items-center justify-center">
             <div className="text-center space-y-3">
@@ -221,7 +216,7 @@ const ARViewer = () => {
           onReset={handleReset}
           onError={(err) => handleARError(err)}
           imageTargetSrc={project.mind_file_url || undefined}
-          modelUrl={signedModelUrl}
+          modelUrl={publicModelUrl}
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
           project={project}
