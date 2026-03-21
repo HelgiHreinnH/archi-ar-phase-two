@@ -119,20 +119,15 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Signed URL for the 3D model (used by both Model Viewer and MindAR)
-  const { data: signedModelUrl, isLoading: isSignedUrlLoading } = useQuery({
-    queryKey: ["signed-model-url", project?.model_url],
-    queryFn: async () => {
-      if (!project?.model_url) return null;
-      if (project.model_url.startsWith("http")) return project.model_url;
-      const { data, error } = await supabase.storage
-        .from("project-models")
-        .createSignedUrl(project.model_url, 3600); // 1hr TTL
-      if (error) throw error;
-      return data.signedUrl;
-    },
-    enabled: !!project?.model_url,
-  });
+  // Public URL for the 3D model (bucket is public — no auth needed)
+  const publicModelUrl = (() => {
+    if (!project?.model_url) return null;
+    if (project.model_url.startsWith("http")) return project.model_url;
+    const { data } = supabase.storage
+      .from("project-models")
+      .getPublicUrl(project.model_url);
+    return data.publicUrl;
+  })();
 
   if (isLoading) {
     return (
