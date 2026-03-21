@@ -174,8 +174,7 @@ const ARViewer = () => {
       );
 
     case "model-viewer":
-      // Tabletop: native AR via <model-viewer> — walk-around SLAM, no marker
-      if (project.model_url && isSignedUrlLoading) {
+      if (!isModelReady) {
         return (
           <div className="fixed inset-0 bg-background flex items-center justify-center">
             <div className="text-center space-y-3">
@@ -187,15 +186,14 @@ const ARViewer = () => {
       }
       return (
         <ModelViewerScene
-          modelUrl={signedModelUrl || ""}
+          modelUrl={publicModelUrl || ""}
           project={project}
           onBack={() => setViewState("landing")}
         />
       );
 
     case "detecting":
-      // Multi-point: MindAR marker-based detection
-      if (project.model_url && isSignedUrlLoading) {
+      if (!isModelReady) {
         return (
           <div className="fixed inset-0 bg-black flex items-center justify-center">
             <div className="text-center space-y-3">
@@ -218,7 +216,7 @@ const ARViewer = () => {
           onReset={handleReset}
           onError={(err) => handleARError(err)}
           imageTargetSrc={project.mind_file_url || undefined}
-          modelUrl={signedModelUrl}
+          modelUrl={publicModelUrl}
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
           project={project}
