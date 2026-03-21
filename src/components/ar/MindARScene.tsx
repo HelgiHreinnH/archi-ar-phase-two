@@ -536,6 +536,55 @@ const MindARScene = ({
       setIsStarting(false);
       onReadyRef.current?.();
 
+      // ── Bug 4 fix: Detection stall timeout — auto-degrade after 30s ──
+      let stallTimer: ReturnType<typeof setTimeout> | null = null;
+      if (!isTabletop && markerData && maxTrack > 1) {
+        stallTimer = setTimeout(() => {
+          if (anchorState !== "tracking" || !modelRef) return;
+
+          // Count anchors with any stable frames
+          const stableAnchors = Array.from({ length: maxTrack }, (_, idx) => idx)
+            .filter((idx) => stableFrameCounts[idx] > 0 && anchorPoseMatrices[idx]);
+
+          console.warn(
+            `[MindARScene] Detection stall timeout — ${stableAnchors.length}/${maxTrack} anchors have data`
+          );
+
+          if (stableAnchors.length >= 2) {
+            // Attempt partial lock with available anchors
+            const visibleAnchors = stableAnchors.map((idx) => ({
+              index: markerData![idx]?.index ?? (idx + 1),
+              matrix: new Float32Array(anchorPoseMatrices[idx].elements),
+            }));
+            const result = computeWorldTransform(visibleAnchors, markerData!, MARKER_SIZE_MM);
+            if (result) {
+              const worldMat = new ThreeLib.Matrix4();
+              worldMat.fromArray(result);
+              const anchorA = mindarThree.anchorEntities?.[0] ?? { group: { matrix: new ThreeLib.Matrix4(), remove: () => {} } };
+              lockModel(modelRef, worldMat, anchorA, scene, ThreeLib);
+              console.log(`[MindARScene] Stall fallback: locked with ${stableAnchors.length} anchors`);
+              return;
+            }
+          }
+
+          if (stableAnchors.length >= 1) {
+            // Single anchor fallback — translation only
+            const idx = stableAnchors[0];
+            const anchorA = mindarThree.anchorEntities?.[0] ?? { group: { matrix: anchorPoseMatrices[idx], remove: () => {} } };
+            modelRef.updateMatrix();
+            const fallbackMatrix = new ThreeLib.Matrix4();
+            fallbackMatrix.copy(anchorPoseMatrices[idx]).multiply(modelRef.matrix);
+            lockModel(modelRef, fallbackMatrix, anchorA, scene, ThreeLib);
+            console.warn("[MindARScene] Stall fallback: 1-anchor lock (translation only)");
+            return;
+          }
+
+          // No anchors detected at all — surface error
+          console.error("[MindARScene] Stall timeout: no anchors detected");
+          onErrorRef.current?.(new Error("Could not detect any markers. Please check lighting and marker visibility."));
+        }, DETECTION_STALL_TIMEOUT_MS);
+      }
+
       // ── Render loop with gyro compensation ────────────────────────
       renderer.setAnimationLoop(() => {
         if (
@@ -567,6 +616,7 @@ const MindARScene = ({
       // Store cleanup
       mindarRef.current._cleanupGyro = cleanupGyro;
       mindarRef.current._occlusionTimers = occlusionTimers;
+      mindarRef.current._stallTimer = stallTimer;
 
     } catch (err) {
       console.error("MindAR initialization error:", err);
