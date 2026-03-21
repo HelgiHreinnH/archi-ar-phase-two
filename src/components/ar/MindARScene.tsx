@@ -525,13 +525,20 @@ const MindARScene = ({
           lockedDeviceQuat &&
           deviceQuaternionRef.current
         ) {
+          // Bug 2 fix: Snapshot lockedMatrix to prevent mid-frame mutation
+          // from onTargetUpdate soft correction callback
+          const framePose = lockedMatrix.clone();
+
           applyGyroCompensation(
-            lockedMatrix,
+            framePose,
             lockedDeviceQuat,
             deviceQuaternionRef.current,
             modelRef,
             ThreeLib
           );
+
+          // Flush the gyro-compensated pose back
+          lockedMatrix.copy(framePose);
         }
 
         renderer.render(scene, camera);
