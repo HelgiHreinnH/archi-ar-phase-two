@@ -261,10 +261,24 @@ const MindARScene = ({
 
             let gltf: any;
             if (prefetchedModel) {
-              // Fix 8: Use prefetched ArrayBuffer
-              gltf = await new Promise<any>((resolve, reject) => {
-                loader.parse(prefetchedModel, "", resolve, reject);
-              });
+              // Bug 3 fix: Validate GLB magic number before parsing
+              const isValidGlb = prefetchedModel.byteLength >= 4 &&
+                new DataView(prefetchedModel).getUint32(0, true) === GLB_MAGIC;
+
+              if (isValidGlb) {
+                gltf = await new Promise<any>((resolve, reject) => {
+                  loader.parse(prefetchedModel, "", resolve, reject);
+                });
+              } else {
+                console.warn("[MindARScene] Prefetched buffer is not a valid GLB (bad magic bytes), falling back to URL loading");
+                if (modelUrl) {
+                  gltf = await new Promise<any>((resolve, reject) => {
+                    loader.load(modelUrl!, resolve, undefined, reject);
+                  });
+                } else {
+                  throw new Error("Prefetched model is invalid and no URL fallback available");
+                }
+              }
             } else {
               gltf = await new Promise<any>((resolve, reject) => {
                 loader.load(modelUrl!, resolve, undefined, reject);
