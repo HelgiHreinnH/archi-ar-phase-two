@@ -76,6 +76,12 @@ const OCCLUSION_GRACE_MS = 500;
  */
 const SOFT_CORRECTION_ALPHA = 0.05;
 
+/** Bug 4 fix: Detection stall timeout in ms — auto-degrade after this. */
+const DETECTION_STALL_TIMEOUT_MS = 30_000;
+
+/** GLB magic number: ASCII "glTF" = 0x676C5446 (little-endian: 0x46546C67) */
+const GLB_MAGIC = 0x46546C67;
+
 async function loadMindAR(): Promise<void> {
   if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
   await import(/* @vite-ignore */ MINDAR_THREE_URL);
