@@ -140,6 +140,8 @@ const ARViewer = () => {
     );
   }
 
+  const isModelReady = !!publicModelUrl;
+
   if (error || !project) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6">
