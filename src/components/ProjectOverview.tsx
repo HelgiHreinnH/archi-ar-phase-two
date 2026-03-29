@@ -13,6 +13,7 @@ import QRCode from "qrcode";
 import ModelViewer3D from "@/components/ModelViewer3D";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
+import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 
 type Project = Tables<"projects">;
 
@@ -26,7 +27,7 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
   const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
   const markerData = normalizeMarkerData(project.marker_data);
   const shareUrl = project.share_link
-    ? `${window.location.origin}/view/${project.share_link}`
+    ? buildPublicExperienceUrl(project.share_link)
     : null;
 
   const copyLink = () => {
@@ -41,10 +42,19 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
     try {
       const qrCanvas = document.createElement("canvas");
       await QRCode.toCanvas(qrCanvas, shareUrl, { width: 600, margin: 2, color: { dark: "#212121", light: "#FFFFFF" } });
+      const qrBlob = await new Promise<Blob>((resolve, reject) => {
+        qrCanvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("QR blob generation failed"));
+        }, "image/png");
+      });
       const a = document.createElement("a");
-      a.href = qrCanvas.toDataURL("image/png");
+      a.href = URL.createObjectURL(qrBlob);
       a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
     } catch {
       toast({ title: "QR generation failed", variant: "destructive" });
     }
