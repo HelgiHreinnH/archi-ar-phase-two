@@ -238,29 +238,24 @@ const GenerateExperience = ({
             </h3>
 
             {/* QR Code Download — both modes */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full justify-start gap-2"
-              onClick={async () => {
-                try {
-                  const qrCanvas = document.createElement("canvas");
-                  await QRCode.toCanvas(qrCanvas, shareUrl, {
-                    width: 600, margin: 2,
-                    color: { dark: "#212121", light: "#FFFFFF" },
-                  });
-                  const a = document.createElement("a");
-                  a.href = qrCanvas.toDataURL("image/png");
-                  a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
-                  a.click();
-                } catch {
-                  toast({ title: "QR generation failed", variant: "destructive" });
-                }
-              }}
-            >
-              <Download className="h-3 w-3" />
-              Download QR Code
-            </Button>
+            {project.qr_code_url && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <a
+                  href={project.qr_code_url}
+                  download={`qr_${project.name.replace(/\s+/g, "_")}.png`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Download className="h-3 w-3" />
+                  Download QR Code
+                </a>
+              </Button>
+            )}
 
             {/* Tabletop: QR code only — no markers needed */}
             {isTabletop && (
