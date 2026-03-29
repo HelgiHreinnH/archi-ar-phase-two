@@ -112,20 +112,36 @@ const GenerateExperience = ({
     if (!shareUrl) return;
 
     try {
+      // Try fetching the stored QR image as a blob for reliable download
+      if (project.qr_code_url) {
+        const resp = await fetch(project.qr_code_url);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = objectUrl;
+          link.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+      }
+
+      // Fallback: regenerate QR client-side
       const qrCanvas = document.createElement("canvas");
       await QRCode.toCanvas(qrCanvas, shareUrl, {
         width: 600,
         margin: 2,
         color: { dark: "#212121", light: "#FFFFFF" },
       });
-
       const qrBlob = await new Promise<Blob>((resolve, reject) => {
         qrCanvas.toBlob((blob) => {
           if (blob) resolve(blob);
           else reject(new Error("QR blob generation failed"));
         }, "image/png");
       });
-
       const objectUrl = URL.createObjectURL(qrBlob);
       const link = document.createElement("a");
       link.href = objectUrl;
@@ -135,12 +151,7 @@ const GenerateExperience = ({
       link.remove();
       URL.revokeObjectURL(objectUrl);
     } catch {
-      if (project.qr_code_url) {
-        window.open(project.qr_code_url, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      toast({ title: "QR generation failed", variant: "destructive" });
+      toast({ title: "QR download failed", variant: "destructive" });
     }
   };
 
