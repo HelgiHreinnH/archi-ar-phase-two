@@ -10,7 +10,7 @@ import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
-import QRCode from "qrcode";
+
 import {
   useTabletopGeneration,
   TABLETOP_PIPELINE,
