@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import QRCode from "qrcode";
+import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 
 type Project = Tables<"projects">;
 
@@ -35,7 +36,7 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
 
     try {
       const shareId = project.share_link || crypto.randomUUID();
-      const shareUrl = `${window.location.origin}/view/${shareId}`;
+      const shareUrl = buildPublicExperienceUrl(shareId);
       const projectPath = project.id;
 
       // ── QR code ──

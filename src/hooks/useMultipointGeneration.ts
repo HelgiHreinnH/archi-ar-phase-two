@@ -6,6 +6,7 @@ import type { MarkerPoint } from "@/lib/markerTypes";
 import QRCode from "qrcode";
 import { generateAllMarkerImages, canvasToImage } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
+import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 
 type Project = Tables<"projects">;
 
@@ -55,7 +56,7 @@ export function useMultipointGeneration(
 
     try {
       const shareId = project.share_link || crypto.randomUUID();
-      const shareUrl = `${window.location.origin}/view/${shareId}`;
+      const shareUrl = buildPublicExperienceUrl(shareId);
       const projectPath = project.id;
 
       // ── Generate marker images ──

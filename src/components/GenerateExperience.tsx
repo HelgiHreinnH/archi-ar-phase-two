@@ -10,6 +10,8 @@ import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
+import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
+import QRCode from "qrcode";
 
 import {
   useTabletopGeneration,
@@ -96,13 +98,49 @@ const GenerateExperience = ({
   const isActive = project.status === "active";
 
   const shareUrl = project.share_link
-    ? `${window.location.origin}/view/${project.share_link}`
+    ? buildPublicExperienceUrl(project.share_link)
     : null;
 
   const copyShareLink = () => {
     if (shareUrl) {
       navigator.clipboard.writeText(shareUrl);
       toast({ title: "Link copied to clipboard" });
+    }
+  };
+
+  const downloadQrCode = async () => {
+    if (!shareUrl) return;
+
+    try {
+      const qrCanvas = document.createElement("canvas");
+      await QRCode.toCanvas(qrCanvas, shareUrl, {
+        width: 600,
+        margin: 2,
+        color: { dark: "#212121", light: "#FFFFFF" },
+      });
+
+      const qrBlob = await new Promise<Blob>((resolve, reject) => {
+        qrCanvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("QR blob generation failed"));
+        }, "image/png");
+      });
+
+      const objectUrl = URL.createObjectURL(qrBlob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      if (project.qr_code_url) {
+        window.open(project.qr_code_url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      toast({ title: "QR generation failed", variant: "destructive" });
     }
   };
 
@@ -238,22 +276,15 @@ const GenerateExperience = ({
             </h3>
 
             {/* QR Code Download — both modes */}
-            {project.qr_code_url && (
+            {shareUrl && (
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full justify-start gap-2"
-                asChild
+                onClick={downloadQrCode}
               >
-                <a
-                  href={project.qr_code_url}
-                  download={`qr_${project.name.replace(/\s+/g, "_")}.png`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Download className="h-3 w-3" />
-                  Download QR Code
-                </a>
+                <Download className="h-3 w-3" />
+                Download QR Code
               </Button>
             )}
 
