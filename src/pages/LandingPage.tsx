@@ -137,16 +137,14 @@ const LandingPage = () => {
                 ))}
               </div>
             </div>
-            <div className="relative">
-              <div className="overflow-hidden rounded-2xl border shadow-2xl shadow-primary/10">
-                <img
-                  src={heroImg}
-                  alt="Interior designer using Archi AR to present 3D model in augmented reality"
-                  width={1280}
-                  height={720}
-                  className="w-full"
-                />
-              </div>
+            <div className="relative flex items-center justify-center">
+              <img
+                src={heroImg}
+                alt="Interior designer using Archi AR to present 3D model in augmented reality"
+                width={640}
+                height={640}
+                className="w-full max-w-md"
+              />
             </div>
           </div>
         </div>
