@@ -48,13 +48,16 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
           else reject(new Error("QR blob generation failed"));
         }, "image/png");
       });
+      const objectUrl = URL.createObjectURL(qrBlob);
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(qrBlob);
+      a.href = objectUrl;
       a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
       document.body.appendChild(a);
       a.click();
-      a.remove();
-      URL.revokeObjectURL(a.href);
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+      }, 1000);
     } catch {
       toast({ title: "QR generation failed", variant: "destructive" });
     }
