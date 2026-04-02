@@ -1,4 +1,4 @@
-const PUBLISHED_APP_URL = "https://archi-sparkle-ar.lovable.app";
+const PUBLISHED_APP_URL = "https://designingforusers.com";
 
 function isPreviewOrigin(origin: string) {
   return origin.includes(".lovableproject.com") || origin.includes("id-preview--");
