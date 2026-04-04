@@ -83,10 +83,8 @@ export function useMultipointGeneration(
           .upload(filePath, marker.blob, { contentType: "image/png", upsert: true });
         if (uploadErr) throw uploadErr;
 
-        const { data: urlData } = supabase.storage
-          .from("project-assets")
-          .getPublicUrl(filePath);
-        markerImageUrls[String(marker.index)] = urlData.publicUrl;
+        // Store bare path — signed URLs are generated on retrieval
+        markerImageUrls[String(marker.index)] = filePath;
       }
 
       const mindPath = `${projectPath}/targets.mind`;
@@ -94,10 +92,6 @@ export function useMultipointGeneration(
         .from("project-assets")
         .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true });
       if (mindUploadErr) throw mindUploadErr;
-
-      const { data: mindUrlData } = supabase.storage
-        .from("project-assets")
-        .getPublicUrl(mindPath);
 
       // ── QR code ──
       setStep("qr");
