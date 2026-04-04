@@ -1,113 +1,72 @@
 
 
-# Fix Gyro-Compensated World Anchoring
+## Security Analysis & Resolution Plan
 
-## Problem
-When the model locks after tracking, it moves with the phone instead of staying fixed in physical space. The gyro compensation code has two bugs:
+### Summary of Findings
 
-1. **Wrong quaternion conversion**: The `deviceOrientationToQuaternion` function is missing a critical -90 degree X-axis correction. The W3C device orientation spec assumes the device is lying flat (screen up), but during AR the phone is held upright (portrait). Without this correction, the rotation axes don't map to MindAR's camera coordinate system.
+After cross-referencing the scanner results with the **live database policies**, here is the true status:
 
-2. **Missing screen orientation compensation**: Phone rotation (portrait/landscape) changes which physical axis maps to which screen axis. The current code ignores `window.screen.orientation.angle`, causing wrong axis mapping on rotated devices.
+---
 
-## What Changes
+### Finding 1: "Any Authenticated User Can Modify Other Users' Assets" (ERROR)
 
-**`src/components/ar/MindARScene.tsx`**
+**Status: Already fixed — scanner result is stale**
 
-### 1. Rewrite `deviceOrientationToQuaternion` (lines 66-84)
+The live `storage.objects` policies for `project-assets` are correctly owner-scoped:
+- INSERT, UPDATE, DELETE all check `(storage.foldername(name))[1] IN (SELECT id::text FROM projects WHERE user_id = auth.uid())`
+- The old broad `auth.role() = 'authenticated'` policies were dropped in a previous migration
 
-Replace with the standard algorithm from Three.js's DeviceOrientationControls:
+**Action**: Mark this finding as resolved (no code change needed)
 
-```
-function deviceOrientationToQuaternion(
-  alpha, beta, gamma, orient, ThreeLib
-) {
-  const degToRad = Math.PI / 180;
-  const euler = new ThreeLib.Euler(
-    beta * degToRad,
-    alpha * degToRad,
-    -gamma * degToRad,
-    "YXZ"
-  );
-  const q = new ThreeLib.Quaternion().setFromEuler(euler);
+---
 
-  // Correction: device flat -> device upright (-90deg around X)
-  const q1 = new ThreeLib.Quaternion(
-    -Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)
-  );
-  q.multiply(q1);
+### Finding 2: "All Project Models Publicly Accessible Without Share Check" (WARN)
 
-  // Screen orientation compensation
-  const q2 = new ThreeLib.Quaternion();
-  q2.setFromAxisAngle(
-    new ThreeLib.Vector3(0, 0, 1),
-    -orient * degToRad
-  );
-  q.multiply(q2);
+**Status: Already fixed — scanner result is stale**
 
-  return q;
-}
-```
+The live policies restrict anonymous read access:
+- `Public can view active project models` — anon SELECT only where `share_link IS NOT NULL AND status = 'active'`
+- `Public can view active project assets` — same restriction
+- Authenticated owners have their own separate SELECT policy
 
-The `-90 degree X correction` (q1) rotates from "device flat on table" reference frame to "device held upright" -- matching how users hold phones during AR. The screen orientation quaternion (q2) compensates for portrait/landscape rotation.
+**Action**: Mark this finding as resolved (no code change needed)
 
-### 2. Track screen orientation in the listener (around line 146)
+---
 
-Add screen orientation tracking alongside the deviceorientation listener:
+### Finding 3: "Leaked Password Protection Disabled" (WARN)
 
-```
-let screenOrientation = window.screen?.orientation?.angle || 0;
-const onOrientationChange = () => {
-  screenOrientation = window.screen?.orientation?.angle || 0;
-};
-window.addEventListener("orientationchange", onOrientationChange);
-```
+**Status: Requires manual action in Cloud UI**
 
-Pass `screenOrientation` into `deviceOrientationToQuaternion` in the `onDeviceOrientation` handler.
+This cannot be fixed via code or migration. You need to:
+1. Open Cloud settings (Users tab)
+2. Click the Auth Settings gear icon
+3. Under Email settings, enable **Password HIBP Check**
 
-### 3. Simplify render loop compensation (lines 424-452)
+**Action**: No code change — manual toggle only
 
-The delta quaternion math has a double-inversion (computes delta then inverts). Simplify to the correct single operation:
+---
 
-```
-// delta = how much phone rotated since lock
-const deltaQuat = lockedDeviceQuat.clone().invert()
-  .multiply(deviceQuaternionRef.current.clone());
+### Finding 4: "High severity vulnerabilities in mind-ar" (WARN)
 
-// Apply inverse rotation to keep model stationary in world
-const invDelta = deltaQuat.clone().invert();
-const deltaMatrix = new ThreeLib.Matrix4()
-  .makeRotationFromQuaternion(invDelta);
+**Status: No upstream fix available**
 
-// Decompose locked matrix, apply rotation around model's world position
-const lockedPos = new ThreeLib.Vector3();
-const lockedQuat = new ThreeLib.Quaternion();
-const lockedScl = new ThreeLib.Vector3();
-lockedMatrix.decompose(lockedPos, lockedQuat, lockedScl);
+The `mind-ar` package has known vulnerabilities inherited from its dependencies. There is no patched version available and no viable alternative library for image-target AR in the browser.
 
-const compensatedQuat = invDelta.clone().multiply(lockedQuat);
-const compensated = new ThreeLib.Matrix4()
-  .compose(lockedPos, compensatedQuat, lockedScl);
-modelRef.matrix.copy(compensated);
-```
+**Action**: No code change possible — acknowledge as accepted risk
 
-Key difference: only the rotation is compensated (via quaternion), while position and scale are preserved from the locked snapshot. This prevents the model from drifting in translation when the phone rotates.
+---
 
-### 4. Clean up orientation listener on unmount
+### Implementation Steps
 
-Add `window.removeEventListener("orientationchange", ...)` to the cleanup function.
+1. **Update stale security findings** — Mark findings #1 and #2 as resolved/deleted since the live policies already enforce the correct restrictions
+2. **No migrations needed** — The database is already properly secured
+3. **No code changes needed** — ARViewer, ModelUploader, and storage access patterns are all compatible with the existing owner-scoped policies
 
-## Why the current code fails
+### Functionality Impact
 
-| Issue | Current | Fixed |
-|-------|---------|-------|
-| Device-to-camera frame | Raw Euler, no upright correction | Standard q1 correction (-90 deg X) |
-| Screen rotation | Ignored | Compensated via screen.orientation.angle |
-| Compensation math | Double inversion (delta inverted twice) | Single inverse delta applied to rotation only |
-| Translation during gyro | Full matrix multiply shifts position | Decompose/recompose preserves position |
+**Zero** — no changes to application code or database policies. The fixes were already applied in previous sessions; only the scanner metadata needs updating.
 
-## Files Changed
+### Remaining Manual Step
 
-| File | Change |
-|------|--------|
-| `src/components/ar/MindARScene.tsx` | Fix quaternion conversion, add screen orientation, simplify compensation loop |
+Enable the Password HIBP Check in Cloud > Users > Auth Settings > Email settings.
 
