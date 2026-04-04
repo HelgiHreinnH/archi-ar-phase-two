@@ -15,6 +15,7 @@ import HowItWorksPage from "./pages/HowItWorksPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 import ARViewer from "./pages/ARViewer";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 const queryClient = new QueryClient();
 
