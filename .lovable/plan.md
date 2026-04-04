@@ -1,81 +1,114 @@
 
-Problem I isolated
 
-- Do I know what the issue is? Yes.
-- The “same security error” is most likely reappearing because the security view is still showing stale findings that were already deleted, not because the backend security fix failed.
-- In the current security payload, the two old storage findings still exist with a `deleted_at` value. That means they are soft-deleted findings still being rendered.
-- A fresh live scan now shows only:
-  - Leaked Password Protection Disabled
-  - the accepted `mind-ar` dependency risk
-- The live backend state is already aligned with the secure architecture:
-  - `project-models` and `project-assets` are private
-  - storage write policies are owner-scoped
-  - anonymous reads are limited to active shared projects
-  - the `projects` table is no longer publicly readable
-  - public AR access goes through `get-public-project` with signed URLs
+## Security & GDPR Analysis
 
-Why this error reappears
+### Current Security State — Already Correct
 
-1. The security panel is mixing current findings with deleted historical findings.
-2. The deleted findings are being displayed as if they are still active.
-3. Because of that mismatch, it looks like the fix “did not work” even though the live scan and live schema show that it did.
-4. If we keep changing RLS/storage again, we risk breaking public sharing and QR/public AR flows without fixing the real source of the confusion.
+The live storage policies are **owner-scoped** and working correctly:
 
-Deep analysis of functionality vs security
+| Operation | Bucket | Who | Condition |
+|-----------|--------|-----|-----------|
+| INSERT | project-assets | authenticated | File path matches a project owned by `auth.uid()` |
+| UPDATE | project-assets | authenticated | Same ownership check |
+| DELETE | project-assets | authenticated | Same ownership check |
+| SELECT | project-assets | authenticated | Owner's projects only |
+| SELECT | project-assets | anon | Only projects with `share_link IS NOT NULL AND status = 'active'` |
+| INSERT/UPDATE/DELETE | project-models | authenticated | Same ownership pattern |
+| SELECT | project-models | anon | Same active+shared restriction |
 
-- Public sharing:
-  - `src/lib/publicExperienceUrl.ts` builds links to `https://designingforusers.com/view/:shareId`
-  - `src/App.tsx` has a public route for `/view/:shareId`
-  - `src/pages/ARViewer.tsx` uses the secure edge-function path instead of direct anonymous table reads
-- Asset security:
-  - model/assets buckets are private
-  - `get-public-project` signs model, QR, marker, and `.mind` asset URLs
-  - this preserves public AR access without exposing draft/private assets
-- Remaining real issue:
-  - leaked password protection is still a real warning and must be enabled in Cloud auth settings
-- Separate functional bug to keep distinct from security:
-  - `src/components/GenerateExperience.tsx` still tries `fetch(project.qr_code_url)`, but `qr_code_url` is now a storage path, not a ready public URL. That is a download-flow issue, not the same as the security scan issue.
+Both buckets are **private** — no public URL bypass. The old broad `auth.role() = 'authenticated'` policies were already dropped. The finding in the security panel has a `deleted_at` timestamp, meaning it is a ghost entry still being displayed.
 
-Implementation plan
+### The Access Model You Described
 
-1. Treat the recurring issue as a source-of-truth mismatch first
-   - Compare the rendered security list with the latest live scan output
-   - Filter out any finding with `deleted_at`
-   - Only display active findings from the newest scan result
+```text
+┌─────────────────────────────────────────────┐
+│  Project Owner (authenticated, email login)  │
+│  ─ Full read/write on own projects           │
+│  ─ Upload/update/delete models & assets      │
+│  ─ Generate QR codes, activate sharing       │
+│  ─ Cannot touch other users' projects        │
+└──────────────────────┬──────────────────────┘
+                       │ activates share_link
+                       ▼
+┌─────────────────────────────────────────────┐
+│  Guest (anonymous, via QR code link)         │
+│  ─ Read-only access to ONE active project    │
+│  ─ Assets served via 15-min signed URLs      │
+│  ─ No login required                         │
+│  ─ Cannot list, modify, or discover projects │
+└─────────────────────────────────────────────┘
+```
 
-2. Avoid further storage/RLS changes unless a fresh live scan proves a real gap
-   - Do not add more migrations for buckets or policies right now
-   - The current storage model already matches the secure/public-sharing design
+**This is exactly what the live database already enforces.** No new migrations are needed for the core security model.
 
-3. Preserve the current public-sharing architecture
-   - Keep private buckets
-   - Keep signed URLs from `supabase/functions/get-public-project/index.ts`
-   - Keep AR viewer access through the public `/view/:shareId` route
-   - Keep direct anonymous access to `projects` disabled
+### What IS Missing: GDPR Compliance
 
-4. Resolve the remaining genuine items separately
-   - Enable Password HIBP Check in Cloud auth settings
-   - Keep `mind-ar` as an accepted supply-chain risk until an upstream fix exists
+The app collects user data (email, name, company, designs) but lacks GDPR-required mechanisms:
 
-5. Run a regression pass focused on both security and product behavior
-   - shared experience opens on the custom domain without login
-   - QR codes point to `/view/:shareId`
-   - public users can open active shared experiences only
-   - draft/private assets are not anonymously readable
-   - owners can still preview/download models via signed URLs
-   - security view no longer shows deleted findings as active
+1. **No account/data deletion flow** — users cannot delete their account and all associated data
+2. **No data export** — users cannot download their personal data
+3. **No privacy policy page** — required for EU compliance
+4. **No cookie/consent banner** — if analytics or third-party scripts are used
 
-Files/areas to review in the implementation pass
+### Implementation Plan
 
-- `supabase/functions/get-public-project/index.ts`
-- `src/pages/ARViewer.tsx`
-- `src/lib/publicExperienceUrl.ts`
-- `src/components/GenerateExperience.tsx`
-- the security findings rendering/source layer that is surfacing deleted findings
+#### Step 1: Account Deletion Cascade (migration)
 
-Expected result
+Add a database function that deletes all user data when triggered:
+- Delete all projects owned by the user
+- Delete all storage files in both buckets for those projects
+- Delete the user's profile
+- Call `auth.admin.deleteUser()` via an edge function
 
-- The app stays secure without breaking public AR sharing
-- Users, data, and design files remain protected
-- Public domain sharing continues to work
-- The recurring “same error” stops appearing because stale deleted findings are no longer treated as active issues
+This ensures "right to erasure" (GDPR Article 17).
+
+#### Step 2: Data Export Edge Function
+
+Create a `export-user-data` edge function that:
+- Queries all projects, profile data for the authenticated user
+- Packages it as a JSON download
+- Returns it to the client
+
+This ensures "right to data portability" (GDPR Article 20).
+
+#### Step 3: Delete Account UI in Settings
+
+Add a "Delete My Account" section to `/settings` with:
+- Clear warning about permanent deletion
+- Confirmation dialog requiring email re-entry
+- Calls the deletion edge function
+
+#### Step 4: Export Data Button in Settings
+
+Add a "Download My Data" button to `/settings` that:
+- Calls the export edge function
+- Downloads the JSON file
+
+#### Step 5: Privacy Policy Page
+
+Add a `/privacy` route with a standard privacy policy covering:
+- What data is collected (email, name, company, 3D models)
+- How it is used (AR experience generation)
+- Data retention and deletion rights
+- Contact information
+
+#### Step 6: Dismiss the Stale Finding
+
+Use the security management tool to permanently clear the ghost finding so it stops reappearing.
+
+### Files to Create/Modify
+
+- `supabase/functions/delete-user-data/index.ts` — new edge function
+- `supabase/functions/export-user-data/index.ts` — new edge function  
+- `src/pages/SettingsPage.tsx` — add delete account + export data sections
+- `src/pages/PrivacyPolicy.tsx` — new page
+- `src/App.tsx` — add `/privacy` route
+- 1 migration for the cascade deletion function
+
+### No Changes To
+
+- Storage bucket configuration (already private)
+- Storage RLS policies (already owner-scoped)
+- Edge function `get-public-project` (already correct)
+- AR viewer flow (already uses signed URLs)
+
