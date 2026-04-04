@@ -110,10 +110,6 @@ export function useMultipointGeneration(
         .upload(qrPath, qrBlob, { contentType: "image/png", upsert: true });
       if (qrUploadErr) throw qrUploadErr;
 
-      const { data: qrUrlData } = supabase.storage
-        .from("project-assets")
-        .getPublicUrl(qrPath);
-
       // ── Activate ──
       setStep("activating");
       const { error } = await supabase
@@ -121,8 +117,8 @@ export function useMultipointGeneration(
         .update({
           share_link: shareId,
           status: "active",
-          qr_code_url: qrUrlData.publicUrl,
-          mind_file_url: mindUrlData.publicUrl,
+          qr_code_url: qrPath,
+          mind_file_url: mindPath,
           marker_image_urls: markerImageUrls,
         })
         .eq("id", project.id);
