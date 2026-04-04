@@ -105,15 +105,8 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Public URL for the 3D model (bucket is public — no auth needed)
-  const publicModelUrl = (() => {
-    if (!project?.model_url) return null;
-    if (project.model_url.startsWith("http")) return project.model_url;
-    const { data } = supabase.storage
-      .from("project-models")
-      .getPublicUrl(project.model_url);
-    return data.publicUrl;
-  })();
+  // Model URL comes pre-signed from the edge function (buckets are private)
+  const publicModelUrl = project?.model_url || null;
 
   if (isLoading) {
     return (
