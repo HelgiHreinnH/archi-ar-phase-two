@@ -15,6 +15,7 @@ import HowItWorksPage from "./pages/HowItWorksPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 import ARViewer from "./pages/ARViewer";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/view/:shareId" element={<ARViewer />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/auth" element={<Auth />} />
           <Route
             path="/dashboard"
