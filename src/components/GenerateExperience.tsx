@@ -112,20 +112,26 @@ const GenerateExperience = ({
     if (!shareUrl) return;
 
     try {
-      // Try fetching the stored QR image as a blob for reliable download
+      // Try fetching the stored QR image via signed URL (buckets are private)
       if (project.qr_code_url) {
-        const resp = await fetch(project.qr_code_url);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const objectUrl = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = objectUrl;
-          link.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          URL.revokeObjectURL(objectUrl);
-          return;
+        const { data: signedData, error: signErr } = await supabase.storage
+          .from("project-assets")
+          .createSignedUrl(project.qr_code_url, 60);
+
+        if (!signErr && signedData?.signedUrl) {
+          const resp = await fetch(signedData.signedUrl);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = objectUrl;
+            link.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+            return;
+          }
         }
       }
 
@@ -149,7 +155,7 @@ const GenerateExperience = ({
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(objectUrl);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     } catch {
       toast({ title: "QR download failed", variant: "destructive" });
     }
