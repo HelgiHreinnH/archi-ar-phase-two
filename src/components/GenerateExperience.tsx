@@ -7,6 +7,7 @@ import {
   Download, Link2, Copy, FileDown, FileText, QrCode, Upload, Zap, Image, Cpu,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
