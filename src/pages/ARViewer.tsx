@@ -22,24 +22,10 @@ const ARViewer = () => {
   const { data: project, isLoading, error } = useQuery({
     queryKey: ["public-project", shareId],
     queryFn: async () => {
-      // Try edge function first (rate-limited, cached)
-      try {
-        const { data, error: fnError } = await supabase.functions.invoke("get-public-project", {
-          body: { shareId },
-        });
-        if (!fnError && data) return data;
-      } catch {
-        // Edge function unavailable — fall back to direct query
-      }
-
-      // Fallback: direct PostgREST query
-      const { data, error } = await supabase
-        .from("projects")
-        .select("name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url")
-        .eq("share_link", shareId!)
-        .eq("status", "active")
-        .single();
-      if (error) throw error;
+      const { data, error: fnError } = await supabase.functions.invoke("get-public-project", {
+        body: { shareId },
+      });
+      if (fnError || !data) throw new Error("Experience not found or unavailable");
       return data;
     },
     enabled: !!shareId,
