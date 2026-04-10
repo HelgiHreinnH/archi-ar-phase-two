@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Share2, Copy, Download, Mail, Link2, QrCode, Check } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
@@ -14,7 +14,7 @@ interface SharePopoverProps {
 }
 
 const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
-  const [tab, setTab] = useState("email");
+  const [tab, setTab] = useState("share");
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -60,28 +60,25 @@ const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
   };
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Dialog>
+      <DialogTrigger asChild>
         <Button variant="default" size="sm" className="w-full gap-2">
           <Share2 className="h-3.5 w-3.5" />
           Share Experience
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-4" align="center" side="top">
-        <div className="space-y-3">
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogTitle className="text-base font-semibold">Share Experience</DialogTitle>
+        <div className="space-y-4">
           <ToggleGroup
             type="single"
             value={tab}
             onValueChange={(v) => v && setTab(v)}
             className="w-full"
           >
-            <ToggleGroupItem value="email" className="flex-1 gap-1.5 text-xs">
-              <Mail className="h-3.5 w-3.5" />
-              Email
-            </ToggleGroupItem>
-            <ToggleGroupItem value="link" className="flex-1 gap-1.5 text-xs">
+            <ToggleGroupItem value="share" className="flex-1 gap-1.5 text-xs">
               <Link2 className="h-3.5 w-3.5" />
-              Copy Link
+              Share Link
             </ToggleGroupItem>
             <ToggleGroupItem value="qr" className="flex-1 gap-1.5 text-xs">
               <QrCode className="h-3.5 w-3.5" />
@@ -89,36 +86,9 @@ const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
             </ToggleGroupItem>
           </ToggleGroup>
 
-          {tab === "email" && (
-            <div className="space-y-2">
-              <div>
-                <Label className="text-xs">Recipient email</Label>
-                <Input
-                  type="email"
-                  placeholder="client@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="h-8 text-sm mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Message (optional)</Label>
-                <Input
-                  placeholder="Take a look at this experience…"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  className="h-8 text-sm mt-1"
-                />
-              </div>
-              <Button size="sm" className="w-full gap-2" onClick={sendEmail}>
-                <Mail className="h-3.5 w-3.5" />
-                Send via Email
-              </Button>
-            </div>
-          )}
-
-          {tab === "link" && (
-            <div className="space-y-2">
+          {tab === "share" && (
+            <div className="space-y-3">
+              {/* Copy link */}
               <div className="flex items-center gap-2">
                 <Input
                   readOnly
@@ -129,15 +99,43 @@ const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </Button>
               </div>
+
+              {/* Email form */}
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">Or send via email</p>
+                <div>
+                  <Label className="text-xs">Recipient email</Label>
+                  <Input
+                    type="email"
+                    placeholder="client@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-8 text-sm mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Message (optional)</Label>
+                  <Input
+                    placeholder="Take a look at this experience…"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    className="h-8 text-sm mt-1"
+                  />
+                </div>
+                <Button size="sm" className="w-full gap-2" onClick={sendEmail}>
+                  <Mail className="h-3.5 w-3.5" />
+                  Send via Email
+                </Button>
+              </div>
             </div>
           )}
 
           {tab === "qr" && (
-            <div className="space-y-2 flex flex-col items-center">
+            <div className="space-y-3 flex flex-col items-center">
               {qrDataUrl ? (
-                <img src={qrDataUrl} alt="QR Code" className="w-40 h-40 rounded-md border" />
+                <img src={qrDataUrl} alt="QR Code" className="w-48 h-48 rounded-md border" />
               ) : (
-                <div className="w-40 h-40 rounded-md border bg-muted animate-pulse" />
+                <div className="w-48 h-48 rounded-md border bg-muted animate-pulse" />
               )}
               <Button size="sm" variant="outline" className="gap-2" onClick={downloadQR}>
                 <Download className="h-3.5 w-3.5" />
@@ -146,8 +144,8 @@ const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
             </div>
           )}
         </div>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 };
 
