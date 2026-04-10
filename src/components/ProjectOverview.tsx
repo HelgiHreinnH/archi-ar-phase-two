@@ -15,8 +15,8 @@ import {
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor, normalizeMarkerData } from "@/lib/markerTypes";
-import QRCode from "qrcode";
 import ModelViewer3D from "@/components/ModelViewer3D";
+import SharePopover from "@/components/SharePopover";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
