@@ -1,7 +1,12 @@
-const PUBLISHED_APP_URL = "https://designingforusers.com";
+const PUBLISHED_APP_URL = "https://archi-ar.lovable.app";
 
 function isPreviewOrigin(origin: string) {
-  return origin.includes(".lovableproject.com") || origin.includes("id-preview--");
+  return (
+    origin.includes(".lovableproject.com") ||
+    origin.includes("id-preview--") ||
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1")
+  );
 }
 
 export function getPublicAppUrl() {
