@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Copy, Link2, Download, MapPin, FileText, ExternalLink, Image,
-  MoreVertical, Pencil, Trash2, Share2,
+  Download, MapPin, FileText, Image,
+  MoreVertical, Pencil, Trash2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -36,43 +36,6 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
     ? buildPublicExperienceUrl(project.share_link)
     : null;
 
-  const copyLink = () => {
-    if (shareUrl) {
-      navigator.clipboard.writeText(shareUrl);
-      toast({ title: "Link copied" });
-    }
-  };
-
-  const downloadQR = async () => {
-    if (!shareUrl) return;
-    try {
-      const dataUrl = await QRCode.toDataURL(shareUrl, {
-        width: 600,
-        margin: 2,
-        color: { dark: "#212121", light: "#FFFFFF" },
-        type: "image/png" as const,
-      });
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
-      a.click();
-    } catch {
-      toast({ title: "QR generation failed", variant: "destructive" });
-    }
-  };
-
-  const handleShare = async () => {
-    if (!shareUrl) return;
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: project.name, url: shareUrl });
-      } catch {
-        // user cancelled
-      }
-    } else {
-      copyLink();
-    }
-  };
 
   const fileName = project.model_url?.split("/").pop() || "—";
   const fileFormat = project.model_url?.toLowerCase().endsWith(".usdz") ? "USDZ" : "GLB";
@@ -219,6 +182,13 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
                 )}
               </div>
             )}
+
+            {/* Share button */}
+            {shareUrl && (
+              <div className="pt-1 border-t">
+                <SharePopover shareUrl={shareUrl} projectName={project.name} />
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -259,23 +229,6 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
         </Card>
       )}
 
-      {/* Bottom action bar */}
-      {shareUrl && (
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={handleShare}>
-            <Share2 className="h-3.5 w-3.5" />
-            Share Experience
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={copyLink}>
-            <Copy className="h-3.5 w-3.5" />
-            Copy Link
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={downloadQR}>
-            <Download className="h-3.5 w-3.5" />
-            Download QR Code
-          </Button>
-        </div>
-      )}
     </div>
   );
 };
