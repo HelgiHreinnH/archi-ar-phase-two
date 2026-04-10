@@ -119,6 +119,7 @@ const ProjectDetail = () => {
         <ProjectOverview
           project={project}
           onEdit={() => setEditing(true)}
+          onDelete={handleDelete}
         />
       ) : (
         <ExperienceWizard
