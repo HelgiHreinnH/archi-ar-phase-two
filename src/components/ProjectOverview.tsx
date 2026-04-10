@@ -40,24 +40,16 @@ const ProjectOverview = ({ project, onEdit }: ProjectOverviewProps) => {
   const downloadQR = async () => {
     if (!shareUrl) return;
     try {
-      const qrCanvas = document.createElement("canvas");
-      await QRCode.toCanvas(qrCanvas, shareUrl, { width: 600, margin: 2, color: { dark: "#212121", light: "#FFFFFF" } });
-      const qrBlob = await new Promise<Blob>((resolve, reject) => {
-        qrCanvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error("QR blob generation failed"));
-        }, "image/png");
+      const dataUrl = await QRCode.toDataURL(shareUrl, {
+        width: 600,
+        margin: 2,
+        color: { dark: "#212121", light: "#FFFFFF" },
+        type: "image/png" as const,
       });
-      const objectUrl = URL.createObjectURL(qrBlob);
       const a = document.createElement("a");
-      a.href = objectUrl;
+      a.href = dataUrl;
       a.download = `qr_${project.name.replace(/\s+/g, "_")}.png`;
-      document.body.appendChild(a);
       a.click();
-      setTimeout(() => {
-        a.remove();
-        URL.revokeObjectURL(objectUrl);
-      }, 1000);
     } catch {
       toast({ title: "QR generation failed", variant: "destructive" });
     }
