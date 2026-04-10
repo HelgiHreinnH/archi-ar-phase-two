@@ -75,6 +75,18 @@ const ProjectDetail = () => {
     queryClient.invalidateQueries({ queryKey: ["project", id] });
   };
 
+  const handleDelete = async () => {
+    if (!confirm("Are you sure you want to delete this experience? This cannot be undone.")) return;
+    try {
+      const { error } = await supabase.from("projects").delete().eq("id", id!);
+      if (error) throw error;
+      toast({ title: "Experience deleted" });
+      navigate("/dashboard/experiences");
+    } catch {
+      toast({ title: "Failed to delete experience", variant: "destructive" });
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-3 animate-fade-in">
       {/* Header */}
