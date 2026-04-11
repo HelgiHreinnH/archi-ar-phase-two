@@ -20,6 +20,12 @@ const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
 
+  // Reset QR when shareUrl changes (different project)
+  useEffect(() => {
+    setQrDataUrl(null);
+  }, [shareUrl]);
+
+  // Generate QR from the project-specific shareUrl
   useEffect(() => {
     if (tab === "qr" && !qrDataUrl) {
       QRCode.toDataURL(shareUrl, {
