@@ -63,6 +63,8 @@ export type Database = {
           scale: string | null
           share_link: string | null
           status: string
+          tracking_file_url: string | null
+          tracking_format: string
           updated_at: string
           user_id: string
         }
@@ -84,6 +86,8 @@ export type Database = {
           scale?: string | null
           share_link?: string | null
           status?: string
+          tracking_file_url?: string | null
+          tracking_format?: string
           updated_at?: string
           user_id: string
         }
@@ -105,6 +109,8 @@ export type Database = {
           scale?: string | null
           share_link?: string | null
           status?: string
+          tracking_file_url?: string | null
+          tracking_format?: string
           updated_at?: string
           user_id?: string
         }
