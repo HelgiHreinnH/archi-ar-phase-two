@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import MindARScene from "./MindARScene";
+import XR8Scene from "./XR8Scene";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 
 type MarkerStatus = "searching" | "detected" | "locked";
@@ -25,6 +26,8 @@ interface ARDetectionProps {
   initialRotation?: number;
   project?: { name: string; description?: string | null };
   markerData?: MarkerPoint[] | null;
+  /** Tracking format — determines which AR engine to use */
+  trackingFormat?: string;
 }
 
 const ARDetection = ({
@@ -44,7 +47,9 @@ const ARDetection = ({
   initialRotation = 0,
   project,
   markerData,
+  trackingFormat = "mindar-mind",
 }: ARDetectionProps) => {
+  const useXR8 = trackingFormat === "8thwall-wtc";
   const [guideExpanded, setGuideExpanded] = useState(true);
   const [arReady, setArReady] = useState(false);
   const [isActive, setIsActive] = useState(false);
@@ -145,24 +150,44 @@ const ARDetection = ({
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
-      {/* MindAR scene — stays mounted in BOTH phases */}
-      <MindARScene
-        imageTargetSrc={imageTargetSrc}
-        modelUrl={modelUrl}
-        mode={mode}
-        maxTrack={isMultipoint ? totalMarkers : 1}
-        modelScale={modelScale}
-        initialRotation={initialRotation}
-        markerData={markerData}
-        prefetchedModel={prefetchedModel}
-        onTargetFound={(index) => onTargetFound?.(index)}
-        onTargetLost={(index) => onTargetLost?.(index)}
-        onReady={() => setArReady(true)}
-        onError={(err) => {
-          console.error("AR Error:", err);
-          onError?.(err);
-        }}
-      />
+      {/* AR scene — routes to XR8 or MindAR based on tracking format */}
+      {useXR8 ? (
+        <XR8Scene
+          imageTargetSrc={imageTargetSrc}
+          modelUrl={modelUrl}
+          mode={mode}
+          maxTrack={isMultipoint ? totalMarkers : 1}
+          modelScale={modelScale}
+          initialRotation={initialRotation}
+          markerData={markerData}
+          prefetchedModel={prefetchedModel}
+          onTargetFound={(index) => onTargetFound?.(index)}
+          onTargetLost={(index) => onTargetLost?.(index)}
+          onReady={() => setArReady(true)}
+          onError={(err) => {
+            console.error("XR8 Error:", err);
+            onError?.(err);
+          }}
+        />
+      ) : (
+        <MindARScene
+          imageTargetSrc={imageTargetSrc}
+          modelUrl={modelUrl}
+          mode={mode}
+          maxTrack={isMultipoint ? totalMarkers : 1}
+          modelScale={modelScale}
+          initialRotation={initialRotation}
+          markerData={markerData}
+          prefetchedModel={prefetchedModel}
+          onTargetFound={(index) => onTargetFound?.(index)}
+          onTargetLost={(index) => onTargetLost?.(index)}
+          onReady={() => setArReady(true)}
+          onError={(err) => {
+            console.error("MindAR Error:", err);
+            onError?.(err);
+          }}
+        />
+      )}
 
       {/* ── DETECTION PHASE UI ── */}
       {!isActive && (

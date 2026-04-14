@@ -41,7 +41,7 @@ interface MindARSceneProps {
 
 const THREE_ESM_URL =
   "https://unpkg.com/three@0.160.0/build/three.module.js";
-const GLTF_LOADER_URL = "three/addons/loaders/GLTFLoader.js";
+const GLTF_LOADER_URL = "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 const MINDAR_THREE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 
