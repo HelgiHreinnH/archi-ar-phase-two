@@ -1,114 +1,95 @@
 
 
-## Security & GDPR Analysis
+# 8th Wall Migration Plan
 
-### Current Security State — Already Correct
+## Summary
 
-The live storage policies are **owner-scoped** and working correctly:
+Migrate the AR engine from MindAR to 8th Wall XR8 to gain SLAM-based world tracking. The model will hold position when markers leave the camera frame, eliminating the gyro-drift problem after 3-5 minutes.
 
-| Operation | Bucket | Who | Condition |
-|-----------|--------|-----|-----------|
-| INSERT | project-assets | authenticated | File path matches a project owned by `auth.uid()` |
-| UPDATE | project-assets | authenticated | Same ownership check |
-| DELETE | project-assets | authenticated | Same ownership check |
-| SELECT | project-assets | authenticated | Owner's projects only |
-| SELECT | project-assets | anon | Only projects with `share_link IS NOT NULL AND status = 'active'` |
-| INSERT/UPDATE/DELETE | project-models | authenticated | Same ownership pattern |
-| SELECT | project-models | anon | Same active+shared restriction |
+## Pre-Requisite Gate
 
-Both buckets are **private** — no public URL bypass. The old broad `auth.role() = 'authenticated'` policies were already dropped. The finding in the security panel has a `deleted_at` timestamp, meaning it is a ghost entry still being displayed.
+**iOS SLAM validation must pass before any code is written.** You need to test an 8th Wall SLAM example on a real iPhone in a real room. If the model drifts during a 10-minute walkthrough, the migration rationale changes. This is your go/no-go decision.
 
-### The Access Model You Described
+## Architecture Decision: .wtc Compilation
 
-```text
-┌─────────────────────────────────────────────┐
-│  Project Owner (authenticated, email login)  │
-│  ─ Full read/write on own projects           │
-│  ─ Upload/update/delete models & assets      │
-│  ─ Generate QR codes, activate sharing       │
-│  ─ Cannot touch other users' projects        │
-└──────────────────────┬──────────────────────┘
-                       │ activates share_link
-                       ▼
-┌─────────────────────────────────────────────┐
-│  Guest (anonymous, via QR code link)         │
-│  ─ Read-only access to ONE active project    │
-│  ─ Assets served via 15-min signed URLs      │
-│  ─ No login required                         │
-│  ─ Cannot list, modify, or discover projects │
-└─────────────────────────────────────────────┘
-```
+The 8th Wall Image Target CLI (`@8thwall/image-target-cli`) is a Node.js tool. It cannot run in the browser or in Supabase Edge Functions (Deno). Two viable approaches:
 
-**This is exactly what the live database already enforces.** No new migrations are needed for the core security model.
+- **V1 (ship first):** Manual workflow. The wizard generates marker images, the architect downloads them, runs `npx @8thwall/image-target-cli compile` locally, then uploads the `.wtc` file back through a file upload field in the wizard.
+- **V2 (production):** A Vercel serverless function that accepts marker images and returns the compiled `.wtc` file. Requires deploying to Vercel.
 
-### What IS Missing: GDPR Compliance
+**Recommendation:** Start with V1 to unblock development and testing. Add V2 later for a seamless UX.
 
-The app collects user data (email, name, company, designs) but lacks GDPR-required mechanisms:
+## Implementation Steps
 
-1. **No account/data deletion flow** — users cannot delete their account and all associated data
-2. **No data export** — users cannot download their personal data
-3. **No privacy policy page** — required for EU compliance
-4. **No cookie/consent banner** — if analytics or third-party scripts are used
+### Step 1 — Database Migration
+Add two columns to the `projects` table:
+- `tracking_file_url TEXT` — stores the `.wtc` file URL
+- `tracking_format TEXT DEFAULT 'mindar-mind'` — routes AR viewer to the correct engine
 
-### Implementation Plan
+Update `get-public-project` edge function to select and sign `tracking_file_url`.
 
-#### Step 1: Account Deletion Cascade (migration)
+### Step 2 — Self-Host 8th Wall Engine
+Download XR8 engine binary from `github.com/8thwall/engine` and `xrextras` from `github.com/8thwall/web`. Place in `public/assets/` as static files (not Vite-bundled). These load dynamically only in the AR viewer.
 
-Add a database function that deletes all user data when triggered:
-- Delete all projects owned by the user
-- Delete all storage files in both buckets for those projects
-- Delete the user's profile
-- Call `auth.admin.deleteUser()` via an edge function
+### Step 3 — Create XR8Scene Component
+New file: `src/components/ar/XR8Scene.tsx`
+- Initialize XR8 pipeline with `XR8.XrController` (SLAM, `scale: 'absolute'`), `XR8.GlTextureRenderer`, `XR8.Threejs`
+- Build a custom pipeline module that listens for `reality.imagefound`, `reality.imageupdated`, `reality.imagelost`
+- Construct `THREE.Matrix4` from event payloads, feed into existing `computeWorldTransform.ts` (unchanged)
+- Retain `arGyro.ts` as secondary smoothing
 
-This ensures "right to erasure" (GDPR Article 17).
+### Step 4 — Update ARDetection to Route by Engine
+Modify `src/components/ar/ARDetection.tsx`:
+- Accept `trackingFormat` prop
+- If `'8thwall-wtc'` → render `XR8Scene`
+- If `'mindar-mind'` (default) → render `MindARScene` (existing, kept as fallback)
 
-#### Step 2: Data Export Edge Function
+### Step 5 — Update ARViewer
+Modify `src/pages/ARViewer.tsx`:
+- Read `tracking_format` from the project data returned by edge function
+- Pass it to `ARDetection`
+- **Fix Bug 3:** Remove the tabletop early return that sends to `ModelViewerScene` — route through the AR pipeline instead
+- **Fix Bug 1:** Change GLTFLoader bare import to full unpkg URL: `https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js`
 
-Create a `export-user-data` edge function that:
-- Queries all projects, profile data for the authenticated user
-- Packages it as a JSON download
-- Returns it to the client
+### Step 6 — Add .wtc Upload to ExperienceWizard
+Modify `src/components/ExperienceWizard.tsx` and create a new wizard sub-step:
+- After marker images are generated, show a "Download Marker Images" button
+- Add a `.wtc` file upload field
+- Upload the file to `project-models/${projectId}/markers.wtc`
+- Save URL to `projects.tracking_file_url`, set `tracking_format = '8thwall-wtc'`
 
-This ensures "right to data portability" (GDPR Article 20).
+### Step 7 — Add Briefing Screen
+New loading state in `ARViewer.tsx` between QR scan and camera launch:
+- Shows project name, architect name, visual loading indicator
+- Replaces the current silent loading gap
 
-#### Step 3: Delete Account UI in Settings
+### Step 8 — Fix Bug 4 (Model URL Verification)
+End-to-end test that `get-public-project` returns a working signed URL for unauthenticated clients. The current implementation uses `createSignedUrl` with service role key, which should work — but needs verification on a real device.
 
-Add a "Delete My Account" section to `/settings` with:
-- Clear warning about permanent deletion
-- Confirmation dialog requiring email re-entry
-- Calls the deletion edge function
+## Files Changed
 
-#### Step 4: Export Data Button in Settings
+| File | Action |
+|------|--------|
+| `src/components/ar/XR8Scene.tsx` | NEW |
+| `src/components/ar/ARDetection.tsx` | Add engine routing |
+| `src/components/ar/MindARScene.tsx` | Fix GLTFLoader URL (Bug 1), keep as fallback |
+| `src/pages/ARViewer.tsx` | Fix tabletop routing (Bug 3), add tracking_format, briefing screen |
+| `src/components/ExperienceWizard.tsx` | Add .wtc upload step |
+| `supabase/functions/get-public-project/index.ts` | Select + sign tracking_file_url |
+| `public/assets/` | 8th Wall engine + xrextras static files |
+| 1 DB migration | Add tracking_file_url + tracking_format |
 
-Add a "Download My Data" button to `/settings` that:
-- Calls the export edge function
-- Downloads the JSON file
+## Files NOT Changed
+- `computeWorldTransform.ts` — framework-agnostic math
+- `arGyro.ts` — retained as secondary layer
+- All dashboard components
+- Auth, storage buckets, RLS policies
 
-#### Step 5: Privacy Policy Page
+## What You Need to Provide
+1. **iOS SLAM test result** — go/no-go
+2. **8th Wall engine files** — download from `github.com/8thwall/engine` and `github.com/8thwall/web`, then upload to the project
+3. **Compilation approach choice** — V1 (manual CLI) or V2 (Vercel serverless)
 
-Add a `/privacy` route with a standard privacy policy covering:
-- What data is collected (email, name, company, 3D models)
-- How it is used (AR experience generation)
-- Data retention and deletion rights
-- Contact information
-
-#### Step 6: Dismiss the Stale Finding
-
-Use the security management tool to permanently clear the ghost finding so it stops reappearing.
-
-### Files to Create/Modify
-
-- `supabase/functions/delete-user-data/index.ts` — new edge function
-- `supabase/functions/export-user-data/index.ts` — new edge function  
-- `src/pages/SettingsPage.tsx` — add delete account + export data sections
-- `src/pages/PrivacyPolicy.tsx` — new page
-- `src/App.tsx` — add `/privacy` route
-- 1 migration for the cascade deletion function
-
-### No Changes To
-
-- Storage bucket configuration (already private)
-- Storage RLS policies (already owner-scoped)
-- Edge function `get-public-project` (already correct)
-- AR viewer flow (already uses signed URLs)
+## Estimated Effort
+1.5-2.5 days of implementation once prerequisites are resolved.
 
