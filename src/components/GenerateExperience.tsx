@@ -1,3 +1,4 @@
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +74,12 @@ const GenerateExperience = ({
 
   const tabletop = useTabletopGeneration(project, onGenerated);
   const multipoint = useMultipointGeneration(project, markerData, onGenerated);
+
+  // .wtc upload state
+  const [uploadingWtc, setUploadingWtc] = useState(false);
+  const wtcInputRef = useRef<HTMLInputElement>(null);
+  const hasWtcFile = !!(project as any).tracking_file_url;
+  const trackingFormat = (project as any).tracking_format || "mindar-mind";
 
   // Unified interface
   const generating = isTabletop ? tabletop.generating : multipoint.generating;
@@ -352,8 +359,8 @@ const GenerateExperience = ({
               </>
             )}
 
-            {/* .mind file — multipoint only */}
-            {!isTabletop && project.mind_file_url && (
+            {/* .mind file — multipoint only (MindAR format) */}
+            {!isTabletop && project.mind_file_url && trackingFormat === "mindar-mind" && (
               <Button variant="outline" size="sm" className="w-full justify-start gap-2" asChild>
                 <a
                   href={project.mind_file_url}
@@ -365,6 +372,98 @@ const GenerateExperience = ({
                   Download MindAR Targets (.mind)
                 </a>
               </Button>
+            )}
+
+            {/* 8th Wall .wtc Upload Section — multipoint only */}
+            {!isTabletop && (
+              <div className="space-y-2 border-t pt-3 mt-3">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  8th Wall Tracking (Optional Upgrade)
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  For SLAM-based stability, compile your marker images with the 8th Wall CLI
+                  (<code className="text-[10px] bg-muted px-1 rounded">npx @8thwall/image-target-cli compile</code>)
+                  and upload the resulting .wtc file.
+                </p>
+                <input
+                  ref={wtcInputRef}
+                  type="file"
+                  accept=".wtc"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setUploadingWtc(true);
+                    try {
+                      const path = `${project.id}/markers.wtc`;
+                      const { error: uploadErr } = await supabase.storage
+                        .from("project-models")
+                        .upload(path, file, { upsert: true });
+                      if (uploadErr) throw uploadErr;
+
+                      const { error: updateErr } = await supabase
+                        .from("projects")
+                        .update({
+                          tracking_file_url: path,
+                          tracking_format: "8thwall-wtc",
+                        } as any)
+                        .eq("id", project.id);
+                      if (updateErr) throw updateErr;
+
+                      toast({ title: "8th Wall tracking file uploaded" });
+                      onGenerated();
+                    } catch (err) {
+                      console.error("WTC upload error:", err);
+                      toast({ title: "Upload failed", variant: "destructive" });
+                    } finally {
+                      setUploadingWtc(false);
+                      if (wtcInputRef.current) wtcInputRef.current.value = "";
+                    }
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 justify-start gap-2"
+                    disabled={uploadingWtc}
+                    onClick={() => wtcInputRef.current?.click()}
+                  >
+                    {uploadingWtc ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Upload className="h-3 w-3" />
+                    )}
+                    {hasWtcFile ? "Replace .wtc File" : "Upload .wtc File"}
+                  </Button>
+                  {hasWtcFile && (
+                    <Badge variant="outline" className="text-green-600 border-green-600/30">
+                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                      XR8 Active
+                    </Badge>
+                  )}
+                </div>
+                {hasWtcFile && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-xs text-muted-foreground"
+                    onClick={async () => {
+                      await supabase
+                        .from("projects")
+                        .update({
+                          tracking_file_url: null,
+                          tracking_format: "mindar-mind",
+                        } as any)
+                        .eq("id", project.id);
+                      toast({ title: "Reverted to MindAR tracking" });
+                      onGenerated();
+                    }}
+                  >
+                    Revert to MindAR
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         )}
