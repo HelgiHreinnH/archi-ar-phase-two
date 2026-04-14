@@ -26,17 +26,6 @@ import {
   type MultipointStep,
 } from "@/hooks/useMultipointGeneration";
 
-import {
-  useTabletopGeneration,
-  TABLETOP_PIPELINE,
-  type TabletopStep,
-} from "@/hooks/useTabletopGeneration";
-import {
-  useMultipointGeneration,
-  MULTIPOINT_PIPELINE,
-  type MultipointStep,
-} from "@/hooks/useMultipointGeneration";
-
 type Project = Tables<"projects">;
 
 interface GenerateExperienceProps {
