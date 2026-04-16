@@ -57,8 +57,9 @@ async function loadXR8Engine(): Promise<void> {
       document.head.appendChild(script);
     });
 
-  // Load XR8 core first, then extras
+  // Load XR8 core, then SLAM module, then extras
   await loadScript("/assets/xr8/xr8.js");
+  await loadScript("/assets/xr8/xr-slam.js");
   await loadScript("/assets/xr8/xrextras.js");
 
   if (!(window as any).XR8) {
