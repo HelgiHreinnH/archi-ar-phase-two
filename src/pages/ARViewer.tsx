@@ -11,7 +11,7 @@ import ARDetection from "@/components/ar/ARDetection";
 import ModelViewerScene from "@/components/ar/ModelViewerScene";
 
 type Project = Tables<"projects">;
-type ViewerState = "landing" | "permission-denied" | "detecting" | "model-viewer";
+type ViewerState = "landing" | "briefing" | "permission-denied" | "detecting" | "model-viewer";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const ARViewer = () => {
@@ -35,6 +35,8 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
+  const trackingFormat = project?.tracking_format || "mindar-mind";
+  const trackingFileUrl = project?.tracking_file_url || null;
 
   // Dynamic marker status state
   const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({});
@@ -52,25 +54,30 @@ const ARViewer = () => {
     return m;
   }, [isMultipoint, markerData]);
 
-  // Launch AR — different paths for tabletop (Model Viewer) vs multipoint (MindAR)
+  // Launch AR — show briefing screen first, then proceed
   const launchAR = useCallback(async () => {
-    if (!isMultipoint) {
-      // Tabletop: use native AR via <model-viewer> — no marker needed
-      setViewState("model-viewer");
-      return;
-    }
+    setViewState("briefing");
 
-    // Multi-point: request gyro permission, then launch MindAR detection
-    try {
-      const DOE = DeviceOrientationEvent as any;
-      if (typeof DOE.requestPermission === "function") {
-        await DOE.requestPermission();
+    // Brief pause for the briefing screen, then start AR
+    setTimeout(async () => {
+      if (!isMultipoint) {
+        // Tabletop: use native AR via <model-viewer> — no marker needed
+        setViewState("model-viewer");
+        return;
       }
-    } catch {
-      // Silently ignore — gyro compensation will gracefully degrade
-    }
-    setMarkers(getInitialMarkers());
-    setViewState("detecting");
+
+      // Multi-point: request gyro permission, then launch detection
+      try {
+        const DOE = DeviceOrientationEvent as any;
+        if (typeof DOE.requestPermission === "function") {
+          await DOE.requestPermission();
+        }
+      } catch {
+        // Silently ignore — gyro compensation will gracefully degrade
+      }
+      setMarkers(getInitialMarkers());
+      setViewState("detecting");
+    }, 2000);
   }, [isMultipoint, getInitialMarkers]);
 
   const handleTargetFound = useCallback((index: number) => {
@@ -104,6 +111,11 @@ const ARViewer = () => {
     setArErrorMessage(err?.message || "Camera access was denied.");
     setViewState("permission-denied");
   }, []);
+
+  // Determine which image target source to use based on tracking format
+  const imageTargetSrc = trackingFormat === "8thwall-wtc"
+    ? (trackingFileUrl || undefined)
+    : (project?.mind_file_url || undefined);
 
   // Model URL comes pre-signed from the edge function (buckets are private)
   const publicModelUrl = project?.model_url || null;
@@ -142,6 +154,20 @@ const ARViewer = () => {
   switch (viewState) {
     case "landing":
       return <ARLanding project={project} onLaunchAR={launchAR} />;
+
+    case "briefing":
+      return (
+        <div className="fixed inset-0 bg-background flex items-center justify-center p-6">
+          <div className="text-center space-y-4 max-w-sm animate-fade-in">
+            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
+            <h2 className="font-display text-xl font-bold">{project.name}</h2>
+            {project.client_name && (
+              <p className="text-sm text-muted-foreground">by {project.client_name}</p>
+            )}
+            <p className="text-xs text-muted-foreground">Preparing your AR experience…</p>
+          </div>
+        </div>
+      );
 
     case "permission-denied":
       return (
@@ -188,13 +214,14 @@ const ARViewer = () => {
           mode={project.mode}
           markers={markers}
           markerCount={markerCount}
+          trackingFormat={trackingFormat}
           onTargetFound={handleTargetFound}
           onTargetLost={handleTargetLost}
           onCancel={() => setViewState("landing")}
           onExit={() => setViewState("landing")}
           onReset={handleReset}
           onError={(err) => handleARError(err)}
-          imageTargetSrc={project.mind_file_url || undefined}
+          imageTargetSrc={imageTargetSrc}
           modelUrl={publicModelUrl}
           modelScale={scaleNum}
           initialRotation={project.initial_rotation || 0}
