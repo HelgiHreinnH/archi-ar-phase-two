@@ -28,7 +28,7 @@ const ARViewer = () => {
       if (fnError || !data) throw new Error("Experience not found or unavailable");
       return data;
     },
-    enabled: !!shareId,
+    enabled: !!shareId && shareId !== ":shareId" && /^[0-9a-f-]{36}$/i.test(shareId),
   });
 
   // Parse marker data once project loads
