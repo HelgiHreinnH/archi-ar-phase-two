@@ -71,6 +71,10 @@ export function useMultipointGeneration(
       const { blob: mindBlob } = await compileMindFile(markerImages, (p) =>
         setCompileProgress(p)
       );
+      console.log(
+        `[multipoint] .mind compiled — ${(mindBlob.size / 1024).toFixed(1)} KB ` +
+        `(${markerImages.length} markers)`
+      );
 
       // ── Upload marker images + .mind ──
       setStep("uploading");

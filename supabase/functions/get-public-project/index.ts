@@ -166,6 +166,12 @@ Deno.serve(async (req) => {
         signUrl(supabase, "project-models", data.tracking_file_url),
       ]);
 
+    if (data.mind_file_url && !signedMindFileUrl) {
+      console.warn(
+        `[get-public-project] Failed to sign mind_file_url for project ${data?.id ?? "?"} (path=${data.mind_file_url})`
+      );
+    }
+
     // Sign marker image URLs (object with string values)
     let signedMarkerImageUrls: Record<string, string> | null = null;
     if (data.marker_image_urls && typeof data.marker_image_urls === "object") {

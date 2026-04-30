@@ -163,6 +163,9 @@ const MindARScene = ({
       `;
       document.head.appendChild(styleTag);
 
+      console.log(
+        `[MindARScene] init imageTargetSrc=${(imageTargetSrc || "").slice(0, 80)} maxTrack=${maxTrack}`
+      );
       const mindarThree = new MINDAR.IMAGE.MindARThree({
         container: containerRef.current,
         imageTargetSrc,
