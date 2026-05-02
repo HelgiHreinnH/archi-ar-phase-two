@@ -11,6 +11,15 @@ const A4_W = 210;
 const A4_H = 297;
 const MARGIN = 15;
 
+/** Convert a "#RRGGBB" hex string into [r, g, b] numbers for jsPDF. */
+function hexToRgb(hex: string): [number, number, number] {
+  const m = hex.replace("#", "");
+  const v = m.length === 3
+    ? m.split("").map((c) => parseInt(c + c, 16))
+    : [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
+  return [v[0] || 0, v[1] || 0, v[2] || 0];
+}
+
 export async function generateMarkerPDF(
   marker: MarkerPoint,
   projectName: string,
@@ -18,11 +27,12 @@ export async function generateMarkerPDF(
 ): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const color = getMarkerColor(marker.index);
+  const [cr, cg, cb] = hexToRgb(color.bg);
   const contentW = A4_W - MARGIN * 2;
   let y = MARGIN;
 
   // Header bar
-  doc.setFillColor(color.bg);
+  doc.setFillColor(cr, cg, cb);
   doc.rect(0, 0, A4_W, 18, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(11);
