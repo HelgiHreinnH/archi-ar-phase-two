@@ -139,6 +139,48 @@ const ARViewer = () => {
   // Model URL comes pre-signed from the edge function (buckets are private)
   const publicModelUrl = project?.model_url || null;
 
+  // --- Silent exponential-backoff retry when the signed model URL is missing ---
+  // Avoids flashing the recovery UI for transient signing failures (cold edge fn,
+  // brief storage hiccup, etc.). Sequence: 0.5s → 1s → 2s → 4s → 8s (max 5 tries).
+  const MAX_BACKOFF_ATTEMPTS = 5;
+  const [backoffAttempt, setBackoffAttempt] = useState(0);
+  const [backoffExhausted, setBackoffExhausted] = useState(false);
+  const backoffTimer = useRef<number | null>(null);
+
+  const needsBackoff = !!project && !!project.model_url && !publicModelUrl && !modelUrlError;
+
+  useEffect(() => {
+    // Reset backoff whenever the URL becomes available or the project changes
+    if (publicModelUrl) {
+      if (backoffTimer.current) window.clearTimeout(backoffTimer.current);
+      if (backoffAttempt !== 0) setBackoffAttempt(0);
+      if (backoffExhausted) setBackoffExhausted(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publicModelUrl, project?.id]);
+
+  useEffect(() => {
+    if (!needsBackoff || backoffExhausted) return;
+    if (backoffAttempt >= MAX_BACKOFF_ATTEMPTS) {
+      setBackoffExhausted(true);
+      dlog("backoff exhausted — falling back to recovery UI");
+      return;
+    }
+    const delay = 500 * Math.pow(2, backoffAttempt); // 500, 1000, 2000, 4000, 8000
+    dlog(`backoff retry #${backoffAttempt + 1} in ${delay}ms`);
+    backoffTimer.current = window.setTimeout(async () => {
+      try {
+        await refetch();
+      } catch (e) {
+        dlog("backoff refetch failed", e);
+      }
+      setBackoffAttempt((n) => n + 1);
+    }, delay);
+    return () => {
+      if (backoffTimer.current) window.clearTimeout(backoffTimer.current);
+    };
+  }, [needsBackoff, backoffAttempt, backoffExhausted, refetch]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
