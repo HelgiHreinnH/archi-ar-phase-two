@@ -122,6 +122,16 @@ const ARDetection = ({
     );
   }
 
+  // Determine the next un-detected marker (for N>6 guidance hint)
+  const nextUndetected = isMultipoint
+    ? Object.entries(markers)
+        .filter(([, s]) => s === "searching")
+        .map(([k]) => parseInt(k))
+        .filter((n) => !isNaN(n))
+        .sort((a, b) => a - b)[0]
+    : undefined;
+  const nextMarkerColor = nextUndetected != null ? getMarkerColor(nextUndetected) : null;
+
   let guideIcon = <MapPin className="h-4 w-4" />;
   let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
   let guideDescription = isMultipoint
@@ -134,7 +144,10 @@ const ARDetection = ({
   } else if (detectedCount > 0 && !allDetected) {
     guideIcon = <Target className="h-4 w-4" />;
     guideTitle = "Almost there!";
-    guideDescription = `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
+    guideDescription =
+      totalMarkers > 6 && nextUndetected != null && nextMarkerColor
+        ? `${detectedCount} of ${totalMarkers} detected. Scan marker #${nextUndetected} (${nextMarkerColor.name}) next.`
+        : `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
     guideTitle = "Model locked";
