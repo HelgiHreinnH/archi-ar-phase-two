@@ -14,12 +14,15 @@ type Project = Tables<"projects">;
 type ViewerState = "landing" | "briefing" | "permission-denied" | "detecting" | "model-viewer";
 type MarkerStatus = "searching" | "detected" | "locked";
 
+const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
+const dlog = (...args: unknown[]) => { if (DEBUG) console.log("[ar-flow]", ...args); };
+
 const ARViewer = () => {
   const { shareId } = useParams<{ shareId: string }>();
   const [viewState, setViewState] = useState<ViewerState>("landing");
 
   // Fetch project via rate-limited edge function, with direct query fallback
-  const { data: project, isLoading, error } = useQuery({
+  const { data: projectResponse, isLoading, error, refetch } = useQuery({
     queryKey: ["public-project", shareId],
     queryFn: async () => {
       const { data, error: fnError } = await supabase.functions.invoke("get-public-project", {
@@ -30,6 +33,12 @@ const ARViewer = () => {
     },
     enabled: !!shareId && shareId !== ":shareId" && /^[0-9a-f-]{36}$/i.test(shareId),
   });
+
+  // Edge function may now return { project: null, reason } for invalid links — normalize
+  const project = (projectResponse && projectResponse.project === null)
+    ? null
+    : projectResponse;
+  const modelUrlError: string | null = project?.model_url_error ?? null;
 
   // Parse marker data once project loads
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
