@@ -63,14 +63,22 @@ const ARViewer = () => {
     return m;
   }, [isMultipoint, markerData]);
 
-  // Launch AR — show briefing screen first, then proceed
+  // Launch AR — refresh signed URLs first (they're 2h-lived, but a stale tab could still bite)
   const launchAR = useCallback(async () => {
     setViewState("briefing");
+    dlog("launchAR — refetching signed URLs");
+
+    try {
+      await refetch();
+    } catch (e) {
+      dlog("refetch failed (will continue with cached URLs):", e);
+    }
 
     // Brief pause for the briefing screen, then start AR
     setTimeout(async () => {
       if (!isMultipoint) {
         // Tabletop: use native AR via <model-viewer> — no marker needed
+        dlog("launchAR → model-viewer (tabletop)");
         setViewState("model-viewer");
         return;
       }
@@ -85,9 +93,10 @@ const ARViewer = () => {
         // Silently ignore — gyro compensation will gracefully degrade
       }
       setMarkers(getInitialMarkers());
+      dlog("launchAR → detecting (multipoint)", { markerCount });
       setViewState("detecting");
     }, 2000);
-  }, [isMultipoint, getInitialMarkers]);
+  }, [isMultipoint, getInitialMarkers, refetch, markerCount]);
 
   const handleTargetFound = useCallback((index: number) => {
     if (isMultipoint) {
