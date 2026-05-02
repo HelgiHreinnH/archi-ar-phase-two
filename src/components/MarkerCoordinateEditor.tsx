@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,8 +112,27 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
   const [showJsonPaste, setShowJsonPaste] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const seededRef = useRef(false);
 
   const quality = computeSpacingQuality(markers);
+
+  // Auto-seed defaults to the database when no marker data exists,
+  // so downstream wizard validation (hasValidMarkers) reflects what the user sees.
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (markerData && markerData.length >= 3) return;
+    seededRef.current = true;
+    (async () => {
+      const { error } = await supabase
+        .from("projects")
+        .update({ marker_data: DEFAULT_MARKERS as any })
+        .eq("id", projectId);
+      if (!error) {
+        onUpdate(DEFAULT_MARKERS);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateMarker = useCallback((idx: number, field: keyof MarkerPoint, value: string | number) => {
     setMarkers((prev) =>
