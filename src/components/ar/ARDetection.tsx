@@ -292,6 +292,19 @@ const ARDetection = ({
               )}
             </div>
 
+            {/* Skip CTA — Procrustes only needs 3 markers, no point forcing the user to walk to all N */}
+            {isMultipoint && totalMarkers > 3 && detectedCount >= 3 && !allDetected && (
+              <button
+                onClick={() => {
+                  setIsActive(true);
+                  onAllDetected?.();
+                }}
+                className="w-full mt-3 rounded-xl bg-primary/90 hover:bg-primary text-white text-xs font-medium py-2.5 transition-colors backdrop-blur-sm"
+              >
+                Skip — I have {detectedCount} of {totalMarkers} (3 is enough)
+              </button>
+            )}
+
             <button onClick={onCancel} className="w-full mt-3 text-center text-xs text-white/60 hover:text-white/80 transition-colors">
               Cancel
             </button>
