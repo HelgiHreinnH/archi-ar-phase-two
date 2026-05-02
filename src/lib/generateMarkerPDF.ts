@@ -132,6 +132,7 @@ export async function generateMarkerPDF(
   shareUrl: string
 ): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
   await addMarkerPage(doc, marker, projectName, shareUrl);
   return doc;
 }
