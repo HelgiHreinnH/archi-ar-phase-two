@@ -122,6 +122,16 @@ const ARDetection = ({
     );
   }
 
+  // Determine the next un-detected marker (for N>6 guidance hint)
+  const nextUndetected = isMultipoint
+    ? Object.entries(markers)
+        .filter(([, s]) => s === "searching")
+        .map(([k]) => parseInt(k))
+        .filter((n) => !isNaN(n))
+        .sort((a, b) => a - b)[0]
+    : undefined;
+  const nextMarkerColor = nextUndetected != null ? getMarkerColor(nextUndetected) : null;
+
   let guideIcon = <MapPin className="h-4 w-4" />;
   let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
   let guideDescription = isMultipoint
@@ -134,7 +144,10 @@ const ARDetection = ({
   } else if (detectedCount > 0 && !allDetected) {
     guideIcon = <Target className="h-4 w-4" />;
     guideTitle = "Almost there!";
-    guideDescription = `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
+    guideDescription =
+      totalMarkers > 6 && nextUndetected != null && nextMarkerColor
+        ? `${detectedCount} of ${totalMarkers} detected. Scan marker #${nextUndetected} (${nextMarkerColor.name}) next.`
+        : `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
     guideTitle = "Model locked";
@@ -278,6 +291,19 @@ const ARDetection = ({
                 </div>
               )}
             </div>
+
+            {/* Skip CTA — Procrustes only needs 3 markers, no point forcing the user to walk to all N */}
+            {isMultipoint && totalMarkers > 3 && detectedCount >= 3 && !allDetected && (
+              <button
+                onClick={() => {
+                  setIsActive(true);
+                  onAllDetected?.();
+                }}
+                className="w-full mt-3 rounded-xl bg-primary/90 hover:bg-primary text-white text-xs font-medium py-2.5 transition-colors backdrop-blur-sm"
+              >
+                Skip — I have {detectedCount} of {totalMarkers} (3 is enough)
+              </button>
+            )}
 
             <button onClick={onCancel} className="w-full mt-3 text-center text-xs text-white/60 hover:text-white/80 transition-colors">
               Cancel

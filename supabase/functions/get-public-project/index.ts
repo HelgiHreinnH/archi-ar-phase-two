@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const SIGNED_URL_EXPIRY = 900; // 15 minutes
+const SIGNED_URL_EXPIRY = 7200; // 2 hours — long enough for full client walkthrough
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
@@ -124,10 +124,11 @@ Deno.serve(async (req) => {
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(shareId)) {
+      // Return 200 with null project so the client doesn't retry-loop on a malformed link
       return new Response(
-        JSON.stringify({ error: "Invalid share link format" }),
+        JSON.stringify({ project: null, reason: "invalid-share-link" }),
         {
-          status: 400,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
@@ -185,6 +186,12 @@ Deno.serve(async (req) => {
       signedMarkerImageUrls = Object.fromEntries(entries);
     }
 
+    const modelUrlError =
+      data.model_url && !signedModelUrl ? "Failed to sign model URL" : null;
+    if (modelUrlError) {
+      console.warn(`[get-public-project] ${modelUrlError} (path=${data.model_url})`);
+    }
+
     const responseData = {
       ...data,
       model_url: signedModelUrl,
@@ -192,6 +199,7 @@ Deno.serve(async (req) => {
       qr_code_url: signedQrCodeUrl,
       marker_image_urls: signedMarkerImageUrls,
       tracking_file_url: signedTrackingFileUrl,
+      model_url_error: modelUrlError,
     };
 
     return new Response(JSON.stringify(responseData), {
@@ -203,8 +211,9 @@ Deno.serve(async (req) => {
       },
     });
   } catch (err) {
+    console.error("[get-public-project] Internal error:", (err as Error)?.message, (err as Error)?.stack);
     return new Response(
-      JSON.stringify({ error: "Internal server error" }),
+      JSON.stringify({ error: "Internal server error", detail: (err as Error)?.message ?? "unknown" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -454,8 +454,20 @@ const MindARScene = ({
 
         console.log(
           "[MindARScene] Model locked.",
-          hasGyroRef.current ? "Gyro compensation active." : "No gyro — static freeze."
+          hasGyroRef.current ? `Gyro compensation active (source=${(deviceQuaternionRef as any).source ?? "unknown"}).` : "No gyro — static freeze."
         );
+
+        // Schedule a one-time check 3 s after lock — warn user if no gyro data ever arrived
+        setTimeout(() => {
+          if (!hasGyroRef.current) {
+            import("@/hooks/use-toast").then(({ toast }) => {
+              toast({
+                title: "Gyroscope unavailable",
+                description: "Model may drift if you walk around. Tap Reset to re-anchor.",
+              });
+            });
+          }
+        }, 3000);
       }
 
       // ── Multi-point lock: all anchors must be stable + low variance ─
