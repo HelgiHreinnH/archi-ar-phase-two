@@ -97,6 +97,23 @@ export function useMultipointGeneration(
         .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true });
       if (mindUploadErr) throw mindUploadErr;
 
+      // ── Verify .mind reachability before activating ──
+      const { data: signedMind, error: signErr } = await supabase.storage
+        .from("project-assets")
+        .createSignedUrl(mindPath, 60);
+      if (signErr || !signedMind?.signedUrl) {
+        throw new Error("Failed to verify .mind file: signing returned no URL");
+      }
+      const headRes = await fetch(signedMind.signedUrl, { method: "HEAD" });
+      if (!headRes.ok) {
+        throw new Error(`Failed to verify .mind file: HEAD returned ${headRes.status}`);
+      }
+      const contentLength = parseInt(headRes.headers.get("content-length") || "0", 10);
+      if (contentLength < 1024) {
+        throw new Error(`.mind file appears empty or invalid (${contentLength} bytes)`);
+      }
+      console.log(`[multipoint] .mind verified — ${(contentLength / 1024).toFixed(1)} KB reachable`);
+
       // ── QR code ──
       setStep("qr");
       const qrCanvas = document.createElement("canvas");
