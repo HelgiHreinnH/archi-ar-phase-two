@@ -209,14 +209,33 @@ const ARViewer = () => {
   }
 
   // Project loaded but the model URL could not be signed — surface a guided recovery flow
+  // Only after the silent backoff retry sequence has been exhausted, to avoid flashing
+  // the error UI for transient signing failures.
   if (modelUrlError || (project.model_url && !publicModelUrl)) {
+    if (!modelUrlError && !backoffExhausted) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+            <p className="text-muted-foreground text-sm">Preparing your AR experience…</p>
+            {DEBUG && (
+              <p className="text-[10px] text-muted-foreground/60 font-mono">
+                signing retry {backoffAttempt}/{MAX_BACKOFF_ATTEMPTS}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <ModelUnavailableRecovery
         shareId={shareId ?? ""}
         projectName={project.name}
         errorDetail={modelUrlError}
         onRetry={async () => {
-          dlog("ModelUnavailableRecovery → retry");
+          dlog("ModelUnavailableRecovery → manual retry");
+          setBackoffAttempt(0);
+          setBackoffExhausted(false);
           await refetch();
         }}
       />
