@@ -84,14 +84,25 @@ export function applyGyroCompensation(
 
 /**
  * Create a gyroscope listener setup with screen orientation tracking.
+ *
+ * Primary source: `deviceorientation` (absolute heading via compass).
+ * Fallback source: `devicemotion` rotationRate, integrated to alpha/beta/gamma,
+ * activated if no `deviceorientation` event arrives within 1500 ms. This rescues
+ * Android browsers / iframe previews where deviceorientation never fires.
+ *
+ * The active source is tagged on `deviceQuaternionRef.source` ("orientation" |
+ * "motion-fallback" | "none") so callers can warn the user about degraded tracking.
+ *
  * Returns a cleanup function.
  */
 export function createGyroListener(
-  deviceQuaternionRef: { current: any },
+  deviceQuaternionRef: { current: any; source?: "orientation" | "motion-fallback" | "none" },
   hasGyroRef: { current: boolean },
   ThreeLib: any
 ): () => void {
   let screenOrientation = window.screen?.orientation?.angle || 0;
+  let receivedOrientationEvent = false;
+  deviceQuaternionRef.source = "none";
 
   const onOrientationChange = () => {
     screenOrientation = window.screen?.orientation?.angle || 0;
@@ -100,7 +111,9 @@ export function createGyroListener(
 
   const onDeviceOrientation = (event: DeviceOrientationEvent) => {
     if (event.alpha != null && event.beta != null && event.gamma != null) {
+      receivedOrientationEvent = true;
       hasGyroRef.current = true;
+      deviceQuaternionRef.source = "orientation";
       deviceQuaternionRef.current = deviceOrientationToQuaternion(
         event.alpha,
         event.beta,
@@ -112,8 +125,41 @@ export function createGyroListener(
   };
   window.addEventListener("deviceorientation", onDeviceOrientation, true);
 
+  // ── DeviceMotion fallback ──
+  // If no deviceorientation event arrives within 1500 ms, integrate rotationRate.
+  let motionAlpha = 0, motionBeta = 0, motionGamma = 0;
+  let lastMotionTs = 0;
+  const onDeviceMotion = (event: DeviceMotionEvent) => {
+    const r = event.rotationRate;
+    if (!r || (r.alpha == null && r.beta == null && r.gamma == null)) return;
+    const now = event.timeStamp || performance.now();
+    if (lastMotionTs === 0) { lastMotionTs = now; return; }
+    const dt = (now - lastMotionTs) / 1000;
+    lastMotionTs = now;
+    if (dt <= 0 || dt > 0.5) return; // ignore stalls
+
+    motionAlpha = (motionAlpha + (r.alpha ?? 0) * dt) % 360;
+    motionBeta = Math.max(-180, Math.min(180, motionBeta + (r.beta ?? 0) * dt));
+    motionGamma = Math.max(-90, Math.min(90, motionGamma + (r.gamma ?? 0) * dt));
+
+    hasGyroRef.current = true;
+    deviceQuaternionRef.source = "motion-fallback";
+    deviceQuaternionRef.current = deviceOrientationToQuaternion(
+      motionAlpha, motionBeta, motionGamma, screenOrientation, ThreeLib
+    );
+  };
+
+  const fallbackTimer = window.setTimeout(() => {
+    if (!receivedOrientationEvent) {
+      console.warn("[arGyro] No deviceorientation events — attaching devicemotion fallback");
+      window.addEventListener("devicemotion", onDeviceMotion, true);
+    }
+  }, 1500);
+
   return () => {
+    window.clearTimeout(fallbackTimer);
     window.removeEventListener("deviceorientation", onDeviceOrientation, true);
+    window.removeEventListener("devicemotion", onDeviceMotion, true);
     window.removeEventListener("orientationchange", onOrientationChange);
   };
 }
