@@ -26,6 +26,63 @@ export const MARKER_COLORS: { bg: string; name: string }[] = [
   { bg: "#8E8E93", name: "Gray" },
 ];
 
+/** Safe fallback when a color value is missing or malformed. */
+export const FALLBACK_MARKER_COLOR = { bg: "#3B82F6", name: "Blue" } as const;
+
+/**
+ * Validate a CSS color string. Accepts:
+ *   - "#RGB" / "#RRGGBB" hex
+ *   - "rgb(r,g,b)" / "rgba(r,g,b,a)"
+ * Returns the normalized "#RRGGBB" hex, or null if invalid.
+ */
+export function validateMarkerColor(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const v = input.trim();
+
+  // Hex form
+  const hexMatch = v.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  if (hexMatch) {
+    const h = hexMatch[1];
+    if (h.length === 3) {
+      return ("#" + h.split("").map((c) => c + c).join("")).toUpperCase();
+    }
+    return ("#" + h).toUpperCase();
+  }
+
+  // rgb() / rgba() form
+  const rgbMatch = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+\s*)?\)$/i);
+  if (rgbMatch) {
+    const [r, g, b] = [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map((n) => parseInt(n, 10));
+    if ([r, g, b].every((n) => n >= 0 && n <= 255)) {
+      const toHex = (n: number) => n.toString(16).padStart(2, "0").toUpperCase();
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+  }
+
+  return null;
+}
+
+/** Convert a normalized "#RRGGBB" hex into [r, g, b] numbers. */
+export function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.slice(0, 2), 16) || 0,
+    parseInt(h.slice(2, 4), 16) || 0,
+    parseInt(h.slice(4, 6), 16) || 0,
+  ];
+}
+
+/**
+ * Get a guaranteed-safe color for a marker index (1-based).
+ * Validates the palette entry and falls back if anything is malformed.
+ */
+export function getSafeMarkerColor(index: number): { bg: string; name: string } {
+  const raw = getMarkerColor(index);
+  const valid = validateMarkerColor(raw?.bg);
+  if (!valid) return { ...FALLBACK_MARKER_COLOR };
+  return { bg: valid, name: raw?.name || FALLBACK_MARKER_COLOR.name };
+}
+
 /** Get color for a marker index (1-based). Cycles palette for index > 12. */
 export function getMarkerColor(index: number): { bg: string; name: string } {
   return MARKER_COLORS[(index - 1) % MARKER_COLORS.length];
