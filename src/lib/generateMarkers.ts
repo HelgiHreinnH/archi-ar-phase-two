@@ -3,7 +3,7 @@
  * Creates 1200x1200px PNG images with high contrast patterns.
  * Supports N markers (3-20) with extended color palette.
  */
-import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
+import { type MarkerPoint, getSafeMarkerColor } from "@/lib/markerTypes";
 
 export type { MarkerPoint } from "@/lib/markerTypes";
 
@@ -77,7 +77,7 @@ export function generateMarkerCanvas(
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
 
-  const color = getMarkerColor(markerPoint.index);
+  const color = getSafeMarkerColor(markerPoint.index);
   const displayId = String(markerPoint.index);
 
   // 1. Solid background color

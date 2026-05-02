@@ -5,20 +5,11 @@
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { generateMarkerCanvas } from "@/lib/generateMarkers";
-import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
+import { type MarkerPoint, getSafeMarkerColor, hexToRgb } from "@/lib/markerTypes";
 
 const A4_W = 210;
 const A4_H = 297;
 const MARGIN = 15;
-
-/** Convert a "#RRGGBB" hex string into [r, g, b] numbers for jsPDF. */
-function hexToRgb(hex: string): [number, number, number] {
-  const m = hex.replace("#", "");
-  const v = m.length === 3
-    ? m.split("").map((c) => parseInt(c + c, 16))
-    : [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
-  return [v[0] || 0, v[1] || 0, v[2] || 0];
-}
 
 export async function generateMarkerPDF(
   marker: MarkerPoint,
@@ -26,7 +17,7 @@ export async function generateMarkerPDF(
   shareUrl: string
 ): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const color = getMarkerColor(marker.index);
+  const color = getSafeMarkerColor(marker.index);
   const [cr, cg, cb] = hexToRgb(color.bg);
   const contentW = A4_W - MARGIN * 2;
   let y = MARGIN;
