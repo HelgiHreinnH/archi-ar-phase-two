@@ -186,6 +186,12 @@ Deno.serve(async (req) => {
       signedMarkerImageUrls = Object.fromEntries(entries);
     }
 
+    const modelUrlError =
+      data.model_url && !signedModelUrl ? "Failed to sign model URL" : null;
+    if (modelUrlError) {
+      console.warn(`[get-public-project] ${modelUrlError} (path=${data.model_url})`);
+    }
+
     const responseData = {
       ...data,
       model_url: signedModelUrl,
@@ -193,6 +199,7 @@ Deno.serve(async (req) => {
       qr_code_url: signedQrCodeUrl,
       marker_image_urls: signedMarkerImageUrls,
       tracking_file_url: signedTrackingFileUrl,
+      model_url_error: modelUrlError,
     };
 
     return new Response(JSON.stringify(responseData), {
