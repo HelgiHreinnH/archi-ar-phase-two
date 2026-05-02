@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -139,6 +139,48 @@ const ARViewer = () => {
   // Model URL comes pre-signed from the edge function (buckets are private)
   const publicModelUrl = project?.model_url || null;
 
+  // --- Silent exponential-backoff retry when the signed model URL is missing ---
+  // Avoids flashing the recovery UI for transient signing failures (cold edge fn,
+  // brief storage hiccup, etc.). Sequence: 0.5s → 1s → 2s → 4s → 8s (max 5 tries).
+  const MAX_BACKOFF_ATTEMPTS = 5;
+  const [backoffAttempt, setBackoffAttempt] = useState(0);
+  const [backoffExhausted, setBackoffExhausted] = useState(false);
+  const backoffTimer = useRef<number | null>(null);
+
+  const needsBackoff = !!project && !!project.model_url && !publicModelUrl && !modelUrlError;
+
+  useEffect(() => {
+    // Reset backoff whenever the URL becomes available or the project changes
+    if (publicModelUrl) {
+      if (backoffTimer.current) window.clearTimeout(backoffTimer.current);
+      if (backoffAttempt !== 0) setBackoffAttempt(0);
+      if (backoffExhausted) setBackoffExhausted(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publicModelUrl, project?.id]);
+
+  useEffect(() => {
+    if (!needsBackoff || backoffExhausted) return;
+    if (backoffAttempt >= MAX_BACKOFF_ATTEMPTS) {
+      setBackoffExhausted(true);
+      dlog("backoff exhausted — falling back to recovery UI");
+      return;
+    }
+    const delay = 500 * Math.pow(2, backoffAttempt); // 500, 1000, 2000, 4000, 8000
+    dlog(`backoff retry #${backoffAttempt + 1} in ${delay}ms`);
+    backoffTimer.current = window.setTimeout(async () => {
+      try {
+        await refetch();
+      } catch (e) {
+        dlog("backoff refetch failed", e);
+      }
+      setBackoffAttempt((n) => n + 1);
+    }, delay);
+    return () => {
+      if (backoffTimer.current) window.clearTimeout(backoffTimer.current);
+    };
+  }, [needsBackoff, backoffAttempt, backoffExhausted, refetch]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -167,14 +209,33 @@ const ARViewer = () => {
   }
 
   // Project loaded but the model URL could not be signed — surface a guided recovery flow
+  // Only after the silent backoff retry sequence has been exhausted, to avoid flashing
+  // the error UI for transient signing failures.
   if (modelUrlError || (project.model_url && !publicModelUrl)) {
+    if (!modelUrlError && !backoffExhausted) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+            <p className="text-muted-foreground text-sm">Preparing your AR experience…</p>
+            {DEBUG && (
+              <p className="text-[10px] text-muted-foreground/60 font-mono">
+                signing retry {backoffAttempt}/{MAX_BACKOFF_ATTEMPTS}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <ModelUnavailableRecovery
         shareId={shareId ?? ""}
         projectName={project.name}
         errorDetail={modelUrlError}
         onRetry={async () => {
-          dlog("ModelUnavailableRecovery → retry");
+          dlog("ModelUnavailableRecovery → manual retry");
+          setBackoffAttempt(0);
+          setBackoffExhausted(false);
           await refetch();
         }}
       />
