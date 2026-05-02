@@ -122,15 +122,61 @@ const ARDetection = ({
     );
   }
 
-  // Determine the next un-detected marker (for N>6 guidance hint)
-  const nextUndetected = isMultipoint
+  // Track the most recently detected markers so we can suggest the spatially
+  // nearest un-detected one (better guidance than always pointing at the lowest #).
+  const [recentDetections, setRecentDetections] = useState<number[]>([]);
+  const prevMarkersRef = useRef<Record<string, MarkerStatus>>({});
+  useEffect(() => {
+    const prev = prevMarkersRef.current;
+    const newlyFound: number[] = [];
+    for (const [k, status] of Object.entries(markers)) {
+      if (status !== "searching" && prev[k] === "searching") {
+        const n = parseInt(k);
+        if (!isNaN(n)) newlyFound.push(n);
+      }
+    }
+    if (newlyFound.length > 0) {
+      setRecentDetections((r) => [...newlyFound, ...r].slice(0, 3));
+    }
+    prevMarkersRef.current = markers;
+  }, [markers]);
+
+  // Determine the next un-detected marker — prefer spatial proximity to the
+  // last detection(s) when we have marker coordinates, else fall back to
+  // lowest-numbered remaining marker.
+  const undetectedNumbers = isMultipoint
     ? Object.entries(markers)
         .filter(([, s]) => s === "searching")
         .map(([k]) => parseInt(k))
         .filter((n) => !isNaN(n))
-        .sort((a, b) => a - b)[0]
-    : undefined;
+    : [];
+
+  const distance3D = (a: MarkerPoint, b: MarkerPoint) => {
+    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  };
+
+  let nextUndetected: number | undefined;
+  if (undetectedNumbers.length > 0) {
+    const anchorIdx = recentDetections[0];
+    const anchor = markerData?.find((m) => m.index === anchorIdx);
+    if (anchor && markerData) {
+      // Pick the spatially nearest un-detected marker to the latest detection
+      let best: { idx: number; d: number } | null = null;
+      for (const n of undetectedNumbers) {
+        const mp = markerData.find((m) => m.index === n);
+        if (!mp) continue;
+        const d = distance3D(anchor, mp);
+        if (!best || d < best.d) best = { idx: n, d };
+      }
+      nextUndetected = best?.idx ?? undetectedNumbers.sort((a, b) => a - b)[0];
+    } else {
+      nextUndetected = undetectedNumbers.sort((a, b) => a - b)[0];
+    }
+  }
   const nextMarkerColor = nextUndetected != null ? getMarkerColor(nextUndetected) : null;
+  const anchorColor = recentDetections[0] != null ? getMarkerColor(recentDetections[0]) : null;
+  const hasSpatialHint = !!(anchorColor && markerData?.find((m) => m.index === recentDetections[0]) && markerData?.find((m) => m.index === nextUndetected));
 
   let guideIcon = <MapPin className="h-4 w-4" />;
   let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
@@ -144,15 +190,19 @@ const ARDetection = ({
   } else if (detectedCount > 0 && !allDetected) {
     guideIcon = <Target className="h-4 w-4" />;
     guideTitle = "Almost there!";
-    guideDescription =
-      totalMarkers > 6 && nextUndetected != null && nextMarkerColor
-        ? `${detectedCount} of ${totalMarkers} detected. Scan marker #${nextUndetected} (${nextMarkerColor.name}) next.`
-        : `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
+    if (totalMarkers > 6 && nextUndetected != null && nextMarkerColor) {
+      guideDescription = hasSpatialHint && anchorColor
+        ? `${detectedCount} of ${totalMarkers} detected. Look near the ${anchorColor.name} marker for marker #${nextUndetected} (${nextMarkerColor.name}).`
+        : `${detectedCount} of ${totalMarkers} detected. Scan marker #${nextUndetected} (${nextMarkerColor.name}) next.`;
+    } else {
+      guideDescription = `${detectedCount} of ${totalMarkers} markers detected. Keep scanning for the remaining markers.`;
+    }
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
     guideTitle = "Model locked";
     guideDescription = "All markers detected. Your AR experience is active.";
   }
+
 
   // Build sorted marker entries for display
   const markerEntries = Object.entries(markers).sort(([a], [b]) => {
