@@ -69,6 +69,14 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
 
       {/* Model Viewer — fills remaining space */}
       <div className="flex-1 relative">
+        {!mvReady ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted">
+            <div className="text-center space-y-3">
+              <Box className="h-10 w-10 text-muted-foreground/40 mx-auto animate-pulse" />
+              <p className="text-sm text-muted-foreground">Loading 3D engine…</p>
+            </div>
+          </div>
+        ) : (
         <model-viewer
           src={modelUrl}
           ar
@@ -118,6 +126,7 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             </div>
           </div>
         </model-viewer>
+        )}
       </div>
 
       {/* Footer hint */}

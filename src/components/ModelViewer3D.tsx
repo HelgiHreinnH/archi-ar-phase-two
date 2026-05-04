@@ -44,7 +44,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     );
   }
 
-  if (!signedUrl) {
+  if (!signedUrl || !mvReady) {
     return (
       <div className={`flex items-center justify-center bg-muted rounded-lg animate-pulse ${className}`}>
         <p className="text-xs text-muted-foreground">Loading model…</p>
