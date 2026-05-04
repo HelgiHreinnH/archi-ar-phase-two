@@ -22,18 +22,16 @@ In `XR8Scene.tsx` and `MindARScene.tsx`, enforce `renderer.setPixelRatio(Math.mi
 **1.6 Lock camera resolution**
 Pass explicit `{ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } }` constraints wherever `getUserMedia`/XR8 camera config is invoked, so iOS doesn't pick 4K.
 
-## Phase 2 — Camera pre-warm + asset prefetch parallelism
+## Phase 2 — Camera pre-warm + asset prefetch parallelism ✅
 
-**2.1 Pre-warm camera during landing**
-In `ARLanding`, call `getUserMedia(...)` silently after the user grants any prior permission (or on first interaction to satisfy the gesture requirement). Park the stream in a hidden `<video>`. On Launch AR, hand the live stream to MindAR/XR8 instead of re-requesting. Removes the 1–2s camera init from perceived load.
-- Fallback: if pre-warm fails (permission prompt blocked), fall back to today's flow.
-- Cleanup: stop tracks if the user leaves the landing page.
+**2.1 Pre-warm camera during landing** ✅
+`src/lib/cameraPrewarm.ts` holds a singleton `MediaStream`. `ARLanding` calls `prewarmCamera()` on mount (silent — only acquires if Permissions API reports `granted`) and again on the Launch AR click as a user-gesture fallback. Stream is released on `pagehide`, not on internal navigation.
 
-**2.2 Prefetch `.mind`/`.wtc` in parallel with GLB**
-Today only the GLB is prefetched. Add the tracking file to the prefetch alongside it so both arrive together.
+**2.2 Prefetch `.mind`/`.wtc` in parallel with GLB** ✅
+`ARDetection.tsx` now fires a `cache: "force-cache"` fetch for `imageTargetSrc` alongside the streamed GLB prefetch, so both arrive together.
 
-**2.3 Self-host Three.js + GLTFLoader**
-Move `three.module.js` and `GLTFLoader.js` into `public/assets/three/` and update the importmap in `index.html`. Removes one external DNS+TLS hop. Same-origin cache shared with XR8.
+**2.3 Self-host Three.js + GLTFLoader** ✅
+`public/assets/three/three.module.js` + `public/assets/three/jsm/loaders/GLTFLoader.js` (rewrote the bare `from 'three'` import to a relative path). `XR8Scene` and `MindARScene` now load both from same-origin URLs.
 
 ## Phase 3 — Bundle & code-splitting
 
