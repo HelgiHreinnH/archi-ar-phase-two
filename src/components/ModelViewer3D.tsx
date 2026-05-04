@@ -10,8 +10,16 @@ interface ModelViewer3DProps {
 const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
   const isGlb = modelUrl.toLowerCase().endsWith(".glb");
   const isUsdz = modelUrl.toLowerCase().endsWith(".usdz");
+
+  useEffect(() => {
+    if (mvReady) return;
+    let cancelled = false;
+    import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
+    return () => { cancelled = true; };
+  }, [mvReady]);
 
   useEffect(() => {
     setError(false);

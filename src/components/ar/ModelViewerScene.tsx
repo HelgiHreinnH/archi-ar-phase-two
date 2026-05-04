@@ -23,6 +23,14 @@ interface ModelViewerSceneProps {
  */
 const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
+  const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
+
+  useEffect(() => {
+    if (mvReady) return;
+    let cancelled = false;
+    import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
+    return () => { cancelled = true; };
+  }, [mvReady]);
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col">
