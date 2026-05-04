@@ -51,6 +51,7 @@ const ARDetection = ({
   project,
   markerData,
   trackingFormat = "mindar-mind",
+  shareId,
 }: ARDetectionProps) => {
   const useXR8 = trackingFormat === "8thwall-wtc";
   const [guideExpanded, setGuideExpanded] = useState(true);
