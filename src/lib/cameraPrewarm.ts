@@ -27,8 +27,7 @@ const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
 
 async function hasGrantedCamera(): Promise<boolean> {
   try {
-    // @ts-expect-error: Permissions API "camera" is not in the standard TS lib yet
-    const status = await navigator.permissions?.query({ name: "camera" });
+    const status = await navigator.permissions?.query({ name: "camera" as PermissionName });
     return status?.state === "granted";
   } catch {
     return false;
