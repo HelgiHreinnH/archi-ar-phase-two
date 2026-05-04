@@ -265,7 +265,12 @@ const MindARScene = ({
         if (i === 0 && (modelUrl || prefetchedModel)) {
           try {
             const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_URL);
+            const { DRACOLoader } = await import(/* @vite-ignore */ DRACO_LOADER_URL);
             const loader = new GLTFLoader();
+            const dracoLoader = new DRACOLoader();
+            dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+            dracoLoader.setWorkerLimit(2);
+            loader.setDRACOLoader(dracoLoader);
 
             let gltf: any;
             if (prefetchedModel) {
