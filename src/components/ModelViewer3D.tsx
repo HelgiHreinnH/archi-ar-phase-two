@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import "@google/model-viewer";
+// Phase 3.3 — Lazy-load <model-viewer> below in a useEffect.
 
 interface ModelViewer3DProps {
   modelUrl: string; // storage path e.g. "userId/file.glb"
@@ -10,8 +10,16 @@ interface ModelViewer3DProps {
 const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
   const isGlb = modelUrl.toLowerCase().endsWith(".glb");
   const isUsdz = modelUrl.toLowerCase().endsWith(".usdz");
+
+  useEffect(() => {
+    if (mvReady) return;
+    let cancelled = false;
+    import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
+    return () => { cancelled = true; };
+  }, [mvReady]);
 
   useEffect(() => {
     setError(false);
@@ -36,7 +44,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     );
   }
 
-  if (!signedUrl) {
+  if (!signedUrl || !mvReady) {
     return (
       <div className={`flex items-center justify-center bg-muted rounded-lg animate-pulse ${className}`}>
         <p className="text-xs text-muted-foreground">Loading model…</p>

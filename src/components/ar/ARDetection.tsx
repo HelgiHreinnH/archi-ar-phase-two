@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import MindARScene from "./MindARScene";
 import XR8Scene from "./XR8Scene";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
+import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
 
 type MarkerStatus = "searching" | "detected" | "locked";
 
@@ -24,10 +25,12 @@ interface ARDetectionProps {
   modelUrl?: string | null;
   modelScale?: number;
   initialRotation?: number;
-  project?: { name: string; description?: string | null };
+  project?: { name: string; description?: string | null; share_link?: string | null; updated_at?: string | null };
   markerData?: MarkerPoint[] | null;
   /** Tracking format — determines which AR engine to use */
   trackingFormat?: string;
+  /** Share UUID — used as part of the persistent asset cache key */
+  shareId?: string;
 }
 
 const ARDetection = ({
@@ -48,6 +51,7 @@ const ARDetection = ({
   project,
   markerData,
   trackingFormat = "mindar-mind",
+  shareId,
 }: ARDetectionProps) => {
   const useXR8 = trackingFormat === "8thwall-wtc";
   const [guideExpanded, setGuideExpanded] = useState(true);
@@ -56,10 +60,17 @@ const ARDetection = ({
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
 
-  // ── Fix 8 + Phase 1.4 + Phase 2.2: Prefetch GLB *and* tracking file in parallel ──
+  // ── Prefetch GLB *and* tracking file in parallel, with Phase 4 IDB cache ──
   const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
   const [prefetchProgress, setPrefetchProgress] = useState<number | null>(null);
   const prefetchStarted = useRef(false);
+
+  // Phase 4.1 — Stable cache invalidation token. We prefer project.updated_at
+  // (changes on republish) and fall back to a daily bucket so the cache still
+  // self-heals if the field is missing.
+  const cacheToken = (project?.updated_at ?? new Date().toISOString().slice(0, 10)).replace(/[^0-9a-zA-Z]/g, "");
+  const modelCacheKey = shareId ? buildAssetKey(shareId, "model", cacheToken) : null;
+  const trackingCacheKey = shareId ? buildAssetKey(shareId, "tracking", cacheToken) : null;
 
   useEffect(() => {
     if (prefetchStarted.current) return;
@@ -68,16 +79,41 @@ const ARDetection = ({
 
     const ac = new AbortController();
 
-    // Tracking file (.mind/.wtc): fire-and-forget, just warms the HTTP cache so
-    // the AR engine's own loader hits it instantly. We don't need the bytes here.
+    // Tracking file (.mind/.wtc): try IDB first, then network warm.
     if (imageTargetSrc) {
-      fetch(imageTargetSrc, { signal: ac.signal, cache: "force-cache" }).catch(() => {});
+      (async () => {
+        if (trackingCacheKey) {
+          const cached = await getCachedAsset(trackingCacheKey);
+          if (cached) {
+            console.log("[ARDetection] Tracking file served from IDB cache.");
+            return;
+          }
+        }
+        try {
+          const res = await fetch(imageTargetSrc, { signal: ac.signal, cache: "force-cache" });
+          if (!res.ok) return;
+          const buf = await res.arrayBuffer();
+          if (trackingCacheKey) await setCachedAsset(trackingCacheKey, buf);
+        } catch { /* non-fatal */ }
+      })();
     }
 
-    // GLB: stream so we can show real progress.
+    // GLB: stream from network with progress, OR pull from IDB instantly.
     if (modelUrl) {
       (async () => {
         try {
+          if (modelCacheKey) {
+            const cached = await getCachedAsset(modelCacheKey);
+            if (cached) {
+              setPrefetchProgress(100);
+              setPrefetchedModel(cached);
+              console.log(
+                `[ARDetection] GLB served from IDB cache (${(cached.byteLength / 1024 / 1024).toFixed(1)} MB)`
+              );
+              return;
+            }
+          }
+
           const res = await fetch(modelUrl, { signal: ac.signal });
           if (!res.ok) throw new Error(`GLB fetch failed: ${res.status}`);
 
@@ -88,6 +124,7 @@ const ARDetection = ({
             const buffer = await res.arrayBuffer();
             setPrefetchProgress(100);
             setPrefetchedModel(buffer);
+            if (modelCacheKey) await setCachedAsset(modelCacheKey, buffer);
             return;
           }
 
@@ -120,6 +157,9 @@ const ARDetection = ({
           }
           setPrefetchProgress(100);
           setPrefetchedModel(buffer.buffer);
+          if (modelCacheKey) {
+            await setCachedAsset(modelCacheKey, buffer.buffer);
+          }
           console.log(
             `[ARDetection] GLB prefetched (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`
           );
@@ -131,7 +171,7 @@ const ARDetection = ({
     }
 
     return () => ac.abort();
-  }, [modelUrl, imageTargetSrc]);
+  }, [modelUrl, imageTargetSrc, modelCacheKey, trackingCacheKey]);
 
   const isMultipoint = mode !== "tabletop";
   const markerKeys = Object.keys(markers);
