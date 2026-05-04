@@ -1,4 +1,4 @@
-# Phase 5 — Off-thread parsing & GLB compression
+# Phase 5 — Off-thread parsing & GLB compression ✅
 
 Two independent sub-phases. Ship 5.2 first (biggest absolute win — typically 5–10× model size reduction), then 5.1 (smoothness during placement).
 
