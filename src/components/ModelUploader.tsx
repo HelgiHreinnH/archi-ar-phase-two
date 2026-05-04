@@ -32,6 +32,7 @@ function validateFile(file: File): string | null {
 const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: ModelUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
