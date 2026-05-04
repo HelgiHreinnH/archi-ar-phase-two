@@ -28,6 +28,8 @@ interface ARDetectionProps {
   markerData?: MarkerPoint[] | null;
   /** Tracking format — determines which AR engine to use */
   trackingFormat?: string;
+  /** Share UUID — used as part of the persistent asset cache key */
+  shareId?: string;
 }
 
 const ARDetection = ({
