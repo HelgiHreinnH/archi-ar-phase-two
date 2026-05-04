@@ -24,7 +24,7 @@ interface ARDetectionProps {
   modelUrl?: string | null;
   modelScale?: number;
   initialRotation?: number;
-  project?: { name: string; description?: string | null };
+  project?: { name: string; description?: string | null; share_link?: string | null; updated_at?: string | null };
   markerData?: MarkerPoint[] | null;
   /** Tracking format — determines which AR engine to use */
   trackingFormat?: string;
