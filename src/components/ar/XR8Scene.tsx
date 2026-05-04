@@ -57,10 +57,14 @@ async function loadXR8Engine(): Promise<void> {
       document.head.appendChild(script);
     });
 
-  // Load XR8 core, then SLAM module, then extras
-  await loadScript("/assets/xr8/xr8.js");
-  await loadScript("/assets/xr8/xr-slam.js");
-  await loadScript("/assets/xr8/xrextras.js");
+  // Load XR8 core, SLAM module, and extras in parallel.
+  // Browser preserves <script> execution order automatically when appended in
+  // sequence, so dispatch all three downloads at once and await completion.
+  await Promise.all([
+    loadScript("/assets/xr8/xr8.js"),
+    loadScript("/assets/xr8/xr-slam.js"),
+    loadScript("/assets/xr8/xrextras.js"),
+  ]);
 
   if (!(window as any).XR8) {
     throw new Error("XR8 engine loaded but XR8 global not found");
