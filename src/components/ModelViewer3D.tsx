@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import "@google/model-viewer";
+// Phase 3.3 — Lazy-load <model-viewer> below in a useEffect.
 
 interface ModelViewer3DProps {
   modelUrl: string; // storage path e.g. "userId/file.glb"
