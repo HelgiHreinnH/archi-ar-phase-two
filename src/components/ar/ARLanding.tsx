@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Box, Smartphone, Camera } from "lucide-react";
+import { prewarmCamera, releaseWarmCamera } from "@/lib/cameraPrewarm";
 
 interface ARLandingProps {
   project: {
