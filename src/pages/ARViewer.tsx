@@ -96,6 +96,10 @@ const ARViewer = () => {
     dlog("launchAR — refetching signed URLs");
 
     try {
+      // Bust the sessionStorage cache so we get fresh signed URLs at launch
+      if (sessionCacheKey && typeof sessionStorage !== "undefined") {
+        try { sessionStorage.removeItem(sessionCacheKey); } catch { /* ignore */ }
+      }
       await refetch();
     } catch (e) {
       dlog("refetch failed (will continue with cached URLs):", e);
