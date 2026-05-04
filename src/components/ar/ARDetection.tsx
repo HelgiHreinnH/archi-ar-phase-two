@@ -322,6 +322,15 @@ const ARDetection = ({
               {guideExpanded && (
                 <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{guideDescription}</p>
               )}
+              {/* Phase 1.4 — real GLB download progress */}
+              {prefetchProgress != null && prefetchProgress < 100 && !prefetchedModel && (
+                <div className="mt-3 space-y-1.5">
+                  <Progress value={prefetchProgress} className="h-1.5" />
+                  <p className="text-[10px] text-muted-foreground">
+                    Downloading 3D model… {prefetchProgress}%
+                  </p>
+                </div>
+              )}
             </button>
           </div>
 
