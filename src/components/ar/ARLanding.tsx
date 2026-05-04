@@ -64,7 +64,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
       // Don't remove on unmount: the browser cache should retain them for the
       // imminent navigation into the AR view.
     };
-  }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url]);
+  }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url, project.model_url]);
 
 
   return (
