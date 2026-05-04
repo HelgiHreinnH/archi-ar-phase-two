@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Upload, RefreshCw, AlertTriangle } from "lucide-react";
+import { Upload, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
