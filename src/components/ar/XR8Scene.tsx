@@ -157,7 +157,8 @@ const XR8Scene = ({
         antialias: true,
       });
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      // Cap pixel ratio at 2: halves GPU fill rate on 3× Retina iPhones with no visible quality loss.
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
       // Lighting
       const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.8);
