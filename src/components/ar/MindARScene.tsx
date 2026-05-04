@@ -327,6 +327,9 @@ const MindARScene = ({
             localScale = model.scale.clone();
 
             anchor.group.add(model);
+            // Markers-only placement: keep model hidden until Procrustes lock fires
+            // so its first visible frame is its correct, locked position.
+            model.visible = false;
 
             // ── onTargetUpdate: fires every frame with valid pose ────
             anchor.onTargetUpdate = () => {
@@ -460,6 +463,8 @@ const MindARScene = ({
 
         model.matrix.copy(lockedMatrix);
         model.matrixAutoUpdate = false;
+        // Reveal the model now — first visible frame = correct locked frame.
+        model.visible = true;
         anchorState = "locked";
 
         console.log(

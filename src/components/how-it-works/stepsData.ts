@@ -89,8 +89,8 @@ export const multipointSteps: Step[] = [
       "For 1:1 scale room overlays, your model must include named point layers that correspond to physical marker positions. The system detects marker_A, marker_B, marker_C (and more) from your GLB file automatically.",
     tips: [
       "Create point objects in Rhino on layers named exactly: marker_A, marker_B, marker_C — these names are required for automatic detection",
-      "marker_A is the primary anchor — place it at a fixed, identifiable spot (e.g. a corner or doorway). Set your model's origin (0,0,0) to this same location",
-      "marker_B and marker_C are reference points — place them to form a well-shaped triangle (avoid collinear/thin triangles). Minimum 1m edge length recommended",
+      "All markers are equal reference points — place them wherever is convenient and accessible (floor corners, wall edges, doorframes). No marker needs to sit at the model's origin",
+      "Arrange the three markers to form a well-shaped triangle (avoid collinear/thin layouts). Minimum 1m edge length recommended for solid triangulation",
       "You can add up to 20 markers (marker_A through marker_T) for larger spaces",
       "Apply all transforms in Blender (Ctrl+A → All Transforms) before exporting to avoid scale/rotation issues",
       "Use Y-up for GLB (glTF standard) or Z-up if your software converts on export",

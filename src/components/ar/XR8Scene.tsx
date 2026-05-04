@@ -251,6 +251,8 @@ const XR8Scene = ({
         }
 
         modelGroup.add(model);
+        // Markers-only placement: stay hidden until lock fires.
+        model.visible = false;
       }
 
       // ── Variance helpers ──
@@ -286,6 +288,8 @@ const XR8Scene = ({
 
         model.matrix.copy(lockedMatrix);
         model.matrixAutoUpdate = false;
+        // Reveal the model — first visible frame = correct locked frame.
+        model.visible = true;
         anchorState = "locked";
         console.log("[XR8Scene] Model locked.", hasGyroRef.current ? "Gyro active." : "No gyro.");
       }

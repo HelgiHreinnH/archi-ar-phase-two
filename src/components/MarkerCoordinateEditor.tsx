@@ -25,7 +25,7 @@ interface MarkerCoordinateEditorProps {
 }
 
 const DEFAULT_MARKERS: MarkerPoint[] = [
-  { index: 1, x: 0, y: 0, z: 0, label: "Anchor Point" },
+  { index: 1, x: 0, y: 0, z: 0, label: "Reference Point" },
   { index: 2, x: 2000, y: 0, z: 0, label: "Reference Point" },
   { index: 3, x: 0, y: 0, z: 1500, label: "Reference Point" },
 ];

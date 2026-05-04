@@ -50,7 +50,7 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Set the XYZ coordinates for each marker point. These define where the AR model anchors in real space.
+        Set the XYZ coordinates for each reference marker. Together they define the coordinate frame the AR model is placed within — no marker is the origin.
       </p>
       {markerData && markerData.length > 0 && (
         <div className="rounded-lg border bg-muted/30 p-3">
