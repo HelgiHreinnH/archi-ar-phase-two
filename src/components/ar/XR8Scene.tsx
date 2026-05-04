@@ -34,8 +34,10 @@ interface XR8SceneProps {
  * These are loaded dynamically at AR runtime only.
  */
 
-const THREE_ESM_URL = "https://unpkg.com/three@0.160.0/build/three.module.js";
-const GLTF_LOADER_URL = "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+// Phase 2.3 — Self-hosted Three.js. Removes one external DNS+TLS hop and
+// shares the same-origin HTTP cache with the XR8 engine bundle.
+const THREE_ESM_URL = "/assets/three/three.module.js";
+const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
 
 const MARKER_SIZE_MM = 150;
 const FLOAT_ABOVE_MARKER = 0.267;
