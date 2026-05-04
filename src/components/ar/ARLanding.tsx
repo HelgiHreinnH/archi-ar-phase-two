@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Box, Smartphone, Camera } from "lucide-react";
@@ -11,12 +12,59 @@ interface ARLandingProps {
     scale?: string | null;
     model_url?: string | null;
     marker_data?: unknown;
+    /** Pre-signed model URL (multipoint path) — preloaded during dwell */
+    signed_model_url?: string | null;
+    tracking_format?: string | null;
+    tracking_file_url?: string | null;
+    mind_file_url?: string | null;
   };
   onLaunchAR: () => void;
 }
 
 const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
   const isMultipoint = project.mode !== "tabletop";
+
+  // ── Phase 1.2 — Preload heavy AR assets during landing-page dwell ──
+  // The user typically reads the landing page for 2–4s. Use that time to
+  // download the XR8 engine scripts and tracking/model assets so they're
+  // already cached the moment they tap "Launch AR".
+  useEffect(() => {
+    const links: HTMLLinkElement[] = [];
+    const addPreload = (href: string, as: "script" | "fetch", type?: string) => {
+      if (!href) return;
+      // Skip if already preloaded/loaded
+      if (document.querySelector(`link[rel="preload"][href="${href}"]`)) return;
+      const link = document.createElement("link");
+      link.rel = "preload";
+      link.as = as;
+      link.href = href;
+      if (as === "fetch") link.crossOrigin = "anonymous";
+      if (type) link.type = type;
+      document.head.appendChild(link);
+      links.push(link);
+    };
+
+    // XR8 engine — only relevant for the 8thwall path, but caching them is harmless.
+    if (isMultipoint) {
+      addPreload("/assets/xr8/xr8.js", "script");
+      addPreload("/assets/xr8/xr-slam.js", "script");
+      addPreload("/assets/xr8/xrextras.js", "script");
+    }
+
+    // Tracking file (.mind or .wtc)
+    const trackingUrl = project.tracking_file_url || project.mind_file_url;
+    if (trackingUrl) addPreload(trackingUrl, "fetch");
+
+    // GLB model — biggest single asset
+    const modelHref = project.signed_model_url ?? null;
+    if (modelHref) addPreload(modelHref, "fetch", "model/gltf-binary");
+
+    return () => {
+      // Don't remove on unmount: the browser cache should retain them for the
+      // imminent navigation into the AR view.
+    };
+  }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url]);
+
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
