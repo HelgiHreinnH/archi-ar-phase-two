@@ -39,9 +39,9 @@ interface MindARSceneProps {
   prefetchedModel?: ArrayBuffer | null;
 }
 
-const THREE_ESM_URL =
-  "https://unpkg.com/three@0.160.0/build/three.module.js";
-const GLTF_LOADER_URL = "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+// Phase 2.3 — Self-hosted Three.js. See XR8Scene.tsx for rationale.
+const THREE_ESM_URL = "/assets/three/three.module.js";
+const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
 const MINDAR_THREE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Box, Smartphone, Camera } from "lucide-react";
+import { prewarmCamera, releaseWarmCamera } from "@/lib/cameraPrewarm";
 
 interface ARLandingProps {
   project: {
@@ -60,11 +61,23 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
     const modelHref = project.signed_model_url ?? project.model_url ?? null;
     if (modelHref) addPreload(modelHref, "fetch", "model/gltf-binary");
 
+    // Phase 2.1 — Pre-warm the camera if the user has previously granted permission.
+    // No-op (and silent) on first-time visitors so we don't surprise them with a prompt.
+    prewarmCamera();
+
     return () => {
       // Don't remove on unmount: the browser cache should retain them for the
       // imminent navigation into the AR view.
     };
   }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url, project.model_url]);
+
+  // Release the warm camera only on real page exit, not on internal navigation
+  // into the AR view (which would needlessly kill the stream we just warmed).
+  useEffect(() => {
+    const handler = () => releaseWarmCamera();
+    window.addEventListener("pagehide", handler);
+    return () => window.removeEventListener("pagehide", handler);
+  }, []);
 
 
   return (
@@ -109,7 +122,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
                 : "View the 3D model with orbit controls, then tap 'View in AR' to place it on any surface using your device's built-in AR."}
             </p>
           </div>
-          <Button size="lg" className="w-full gap-2" onClick={onLaunchAR}>
+          <Button size="lg" className="w-full gap-2" onClick={() => { prewarmCamera(); onLaunchAR(); }}>
             <Camera className="h-4 w-4" />
             Launch AR Camera
           </Button>

@@ -56,73 +56,82 @@ const ARDetection = ({
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
 
-  // ── Fix 8 + Phase 1.4: Prefetch GLB during scanning, with real progress ──
+  // ── Fix 8 + Phase 1.4 + Phase 2.2: Prefetch GLB *and* tracking file in parallel ──
   const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
   const [prefetchProgress, setPrefetchProgress] = useState<number | null>(null);
   const prefetchStarted = useRef(false);
 
   useEffect(() => {
-    if (!modelUrl || prefetchStarted.current) return;
+    if (prefetchStarted.current) return;
+    if (!modelUrl && !imageTargetSrc) return;
     prefetchStarted.current = true;
 
     const ac = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch(modelUrl, { signal: ac.signal });
-        if (!res.ok) throw new Error(`GLB fetch failed: ${res.status}`);
 
-        const totalHeader = res.headers.get("content-length");
-        const total = totalHeader ? Number(totalHeader) : 0;
+    // Tracking file (.mind/.wtc): fire-and-forget, just warms the HTTP cache so
+    // the AR engine's own loader hits it instantly. We don't need the bytes here.
+    if (imageTargetSrc) {
+      fetch(imageTargetSrc, { signal: ac.signal, cache: "force-cache" }).catch(() => {});
+    }
 
-        // Stream the body so we can report real percentage progress.
-        if (!res.body || typeof res.body.getReader !== "function") {
-          const buffer = await res.arrayBuffer();
-          setPrefetchProgress(100);
-          setPrefetchedModel(buffer);
-          return;
-        }
+    // GLB: stream so we can show real progress.
+    if (modelUrl) {
+      (async () => {
+        try {
+          const res = await fetch(modelUrl, { signal: ac.signal });
+          if (!res.ok) throw new Error(`GLB fetch failed: ${res.status}`);
 
-        const reader = res.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let received = 0;
-        let lastReported = -1;
+          const totalHeader = res.headers.get("content-length");
+          const total = totalHeader ? Number(totalHeader) : 0;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            chunks.push(value);
-            received += value.length;
-            if (total > 0) {
-              const pct = Math.min(99, Math.round((received / total) * 100));
-              if (pct !== lastReported) {
-                lastReported = pct;
-                setPrefetchProgress(pct);
+          if (!res.body || typeof res.body.getReader !== "function") {
+            const buffer = await res.arrayBuffer();
+            setPrefetchProgress(100);
+            setPrefetchedModel(buffer);
+            return;
+          }
+
+          const reader = res.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let received = 0;
+          let lastReported = -1;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              received += value.length;
+              if (total > 0) {
+                const pct = Math.min(99, Math.round((received / total) * 100));
+                if (pct !== lastReported) {
+                  lastReported = pct;
+                  setPrefetchProgress(pct);
+                }
               }
             }
           }
-        }
 
-        // Flatten chunks into a single ArrayBuffer
-        const buffer = new Uint8Array(received);
-        let offset = 0;
-        for (const c of chunks) {
-          buffer.set(c, offset);
-          offset += c.length;
+          const buffer = new Uint8Array(received);
+          let offset = 0;
+          for (const c of chunks) {
+            buffer.set(c, offset);
+            offset += c.length;
+          }
+          setPrefetchProgress(100);
+          setPrefetchedModel(buffer.buffer);
+          console.log(
+            `[ARDetection] GLB prefetched (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`
+          );
+        } catch (err) {
+          if ((err as Error).name === "AbortError") return;
+          console.warn("[ARDetection] GLB prefetch failed, will fall back to URL loading:", err);
         }
-        setPrefetchProgress(100);
-        setPrefetchedModel(buffer.buffer);
-        console.log(
-          `[ARDetection] GLB prefetched (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`
-        );
-      } catch (err) {
-        if ((err as Error).name === "AbortError") return;
-        console.warn("[ARDetection] GLB prefetch failed, will fall back to URL loading:", err);
-      }
-    })();
+      })();
+    }
 
     return () => ac.abort();
-  }, [modelUrl]);
+  }, [modelUrl, imageTargetSrc]);
 
   const isMultipoint = mode !== "tabletop";
   const markerKeys = Object.keys(markers);
