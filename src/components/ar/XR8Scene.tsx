@@ -50,9 +50,28 @@ async function loadXR8Engine(): Promise<void> {
 
   const loadScript = (src: string): Promise<void> =>
     new Promise((resolve, reject) => {
+      // Reuse an existing tag if a preload/script for this src is already in flight.
+      const existing = document.querySelector<HTMLScriptElement>(
+        `script[data-archi-xr8="${src}"]`
+      );
+      if (existing) {
+        if (existing.dataset.loaded === "true") {
+          resolve();
+        } else {
+          existing.addEventListener("load", () => resolve(), { once: true });
+          existing.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
+        }
+        return;
+      }
       const script = document.createElement("script");
       script.src = src;
-      script.onload = () => resolve();
+      // Force ordered execution even when dispatched in parallel.
+      script.async = false;
+      script.dataset.archiXr8 = src;
+      script.onload = () => {
+        script.dataset.loaded = "true";
+        resolve();
+      };
       script.onerror = () => reject(new Error(`Failed to load ${src}`));
       document.head.appendChild(script);
     });
