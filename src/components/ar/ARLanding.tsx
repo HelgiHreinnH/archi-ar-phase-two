@@ -61,11 +61,22 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
     const modelHref = project.signed_model_url ?? project.model_url ?? null;
     if (modelHref) addPreload(modelHref, "fetch", "model/gltf-binary");
 
+    // Phase 2.1 — Pre-warm the camera if the user has previously granted permission.
+    // No-op (and silent) on first-time visitors so we don't surprise them with a prompt.
+    prewarmCamera();
+
     return () => {
       // Don't remove on unmount: the browser cache should retain them for the
       // imminent navigation into the AR view.
     };
   }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url, project.model_url]);
+
+  // Release the warm camera if the user navigates away from the landing page
+  // without launching AR (e.g. closes the tab, hits back). The AR engines will
+  // re-acquire if they need it.
+  useEffect(() => {
+    return () => releaseWarmCamera();
+  }, []);
 
 
   return (
