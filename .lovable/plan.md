@@ -1,79 +1,91 @@
-# AR Performance Boost — Implementation Plan
+# Phase 5 — Off-thread parsing & GLB compression ✅
 
-Based on the May 2026 brainstorm. Targets the three biggest dead-air moments: button → camera (~4s), blank-cube model load (~6.25s), and AR placement (~12.5s). Phased so each phase ships independently and is measurable.
+Two independent sub-phases. Ship 5.2 first (biggest absolute win — typically 5–10× model size reduction), then 5.1 (smoothness during placement).
 
-## Phase 1 — Quick wins (highest ROI, ~1 session)
+---
 
-**1.1 Parallel XR8 script loading**
-`src/components/ar/XR8Scene.tsx` `loadXR8Engine()` currently awaits the three scripts sequentially (1MB + 5.3MB + 132KB). Switch to `Promise.all([...])`. The browser preserves execution order automatically. Expected saving: 2–4s on 4G.
+## 5.2 — Automatic GLB compression at upload time (priority)
 
-**1.2 Preload + preconnect on landing**
-In `src/components/ar/ARLanding.tsx`, inject `<link rel="preload" as="script">` for `/assets/xr8/xr8.js`, `/assets/xr8/xr-slam.js`, `/assets/xr8/xrextras.js` and `<link rel="preconnect">` for `unpkg.com`, `cdn.jsdelivr.net` on mount. Downloads start during the 2–4s the user reads the landing page.
+**Goal:** Every uploaded GLB is automatically optimized server-side. Typical 8–15 MB models become 1.5–3 MB. The viewer code path stays unchanged — projects just point at the optimized file.
 
-**1.3 DNS-prefetch in index.html**
-Add `dns-prefetch`/`preconnect` tags for unpkg, jsDelivr, ga.jspm.io in `<head>`.
+### New edge function: `optimize-model`
 
-**1.4 Real GLB download progress**
-Replace the `fetch().arrayBuffer()` in `ARDetection.tsx` (and the equivalent in `ARViewer`/scenes) with a `ReadableStream` reader using `Content-Length`. Surface a real `<Progress>` bar in the "Loading 3D model…" state instead of the static cube. Same load time, much better perceived speed.
+Path: `supabase/functions/optimize-model/index.ts`. Standard Lovable Cloud setup (manual CORS, JWT validated in code, uses service-role key for storage writes).
 
-**1.5 Cap renderer pixel ratio**
-In `XR8Scene.tsx` and `MindARScene.tsx`, enforce `renderer.setPixelRatio(Math.min(devicePixelRatio, 2))`. One-line fix that halves GPU fill on 3× Retina iPhones.
+Inputs (POST JSON):
+- `projectId: string`
+- `inputPath: string` — the storage path the client just uploaded to (e.g. `${projectId}/model.glb`)
 
-**1.6 Lock camera resolution**
-Pass explicit `{ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } }` constraints wherever `getUserMedia`/XR8 camera config is invoked, so iOS doesn't pick 4K.
+Flow:
+1. Validate JWT, confirm `auth.uid()` owns the project (`is_project_owner` RPC already exists).
+2. Download the original from `project-models` via service role.
+3. Run through `gltf-transform` pipeline:
+   - `dedup()` + `prune()` + `weld()` (geometry cleanup, removes unused nodes/textures/materials)
+   - `resample()` (animation cleanup if present)
+   - `draco({ method: 'edgebreaker' })` for geometry compression
+   - `textureCompress({ targetFormat: 'webp', quality: 80, resize: [2048, 2048] })` — WebP is well-supported by Three.js's GLTFLoader and avoids the KTX2/Basis worker setup. Resizing caps oversized textures to 2K.
+4. Upload to `${projectId}/optimized.glb` in the same `project-models` bucket (`upsert: true`).
+5. Update `projects.model_url = '${projectId}/optimized.glb'` and a new `projects.original_model_url` (preserved for re-runs / debugging).
+6. Return `{ ok: true, optimizedPath, originalSize, optimizedSize, ratio }`.
+7. On any failure: leave `model_url` pointing at the original, return `{ ok: false, error }` so the client surfaces it but keeps the project usable.
 
-## Phase 2 — Camera pre-warm + asset prefetch parallelism ✅
+Dependencies (npm specifiers, edge-runtime safe):
+- `npm:@gltf-transform/core`
+- `npm:@gltf-transform/extensions`
+- `npm:@gltf-transform/functions`
+- `npm:draco3dgltf` (Draco encoder)
+- `npm:sharp` for `textureCompress` — verify this loads in Deno edge-runtime; if not, fall back to `textureCompress` with the built-in encoder or skip texture compression and rely on Draco-only (still ~3–5× saving on geometry-heavy models).
 
-**2.1 Pre-warm camera during landing** ✅
-`src/lib/cameraPrewarm.ts` holds a singleton `MediaStream`. `ARLanding` calls `prewarmCamera()` on mount (silent — only acquires if Permissions API reports `granted`) and again on the Launch AR click as a user-gesture fallback. Stream is released on `pagehide`, not on internal navigation.
+### DB migration
+- Add nullable column `projects.original_model_url text`.
 
-**2.2 Prefetch `.mind`/`.wtc` in parallel with GLB** ✅
-`ARDetection.tsx` now fires a `cache: "force-cache"` fetch for `imageTargetSrc` alongside the streamed GLB prefetch, so both arrive together.
+### Client wiring
+- `src/components/ModelUploader.tsx`: after the existing storage upload + `projects.update({ model_url })`, immediately call `supabase.functions.invoke('optimize-model', { body: { projectId, inputPath: filePath } })`.
+- New UI state in the uploader between "uploaded" and "done": **"Optimizing model… (this can take 30–60s)"** with a spinner, replacing the current immediate success toast.
+- On success: show "Optimized: 12.3 MB → 2.1 MB (5.8× smaller)" toast.
+- On failure: show "Optimization skipped — using original" toast (non-blocking) and proceed normally.
+- Same call wired into `src/components/wizard/StepModel.tsx` (whichever path is in active use; both call `ModelUploader`).
+- Don't run optimization for `.usdz` (Apple-native, leave untouched).
 
-**2.3 Self-host Three.js + GLTFLoader** ✅
-`public/assets/three/three.module.js` + `public/assets/three/jsm/loaders/GLTFLoader.js` (rewrote the bare `from 'three'` import to a relative path). `XR8Scene` and `MindARScene` now load both from same-origin URLs.
+### Cache implications
+The `projects.updated_at` field auto-bumps when we write the new `model_url`, which naturally invalidates the Phase 4 IndexedDB cache for any user who previously loaded the unoptimized version. No extra work needed.
 
-## Phase 3 — Bundle & code-splitting ✅
+---
 
-**3.1 Route-level `React.lazy`** ✅
-`src/App.tsx` converts every route to `lazy()` with a single `<Suspense>` fallback. The `/view/:shareId` route no longer pulls dashboard, project-detail, settings or wizard code into its initial bundle.
+## 5.1 — Off-thread GLTF parsing (smaller win, ships after 5.2)
 
-**3.2 Vite manual chunks** ✅
-`vite.config.ts` splits `vendor-react`, `vendor-query`, `vendor-supabase`, and a `vendor-radix` cluster into long-lived chunks that survive deploys.
+**Goal:** Keep camera tracking smooth during the parse-and-place transition. Today, parsing a 5 MB GLB blocks the main thread for 200–600 ms on mid-range Android.
 
-**3.3 Lazy-load `@google/model-viewer`** ✅
-Removed the top-level `import "@google/model-viewer"` from `ModelViewerScene.tsx` and `ModelViewer3D.tsx`; both now `import()` it inside a `useEffect` and gate rendering on `customElements.get("model-viewer")`. The multi-point AR path no longer ships ~200KB it never uses.
+### Changes
+- `public/assets/three/jsm/loaders/DRACOLoader.js` — self-host alongside the existing GLTFLoader (Phase 2 pattern).
+- `public/assets/three/jsm/libs/draco/` — host the Draco decoder WASM + JS files (`draco_decoder.wasm`, `draco_wasm_wrapper.js`, plus the JS fallback). These ship with three.js.
+- `src/components/ar/XR8Scene.tsx` and `src/components/ar/MindARScene.tsx`:
+  - Dynamically import `DRACOLoader`, configure with `setDecoderPath('/assets/three/jsm/libs/draco/')` and `setWorkerLimit(2)`.
+  - Attach to the existing GLTFLoader via `loader.setDRACOLoader(dracoLoader)`.
+  - Switch from `loader.load(url, onLoad)` to `loader.parseAsync(arrayBuffer, '')` so parsing yields properly between chunks. Keep the existing prefetched-buffer code path from Phase 1.
+- No API changes for the rest of the AR pipeline — `onLoad` semantics are preserved.
 
-## Phase 4 — Persistent caching ✅
+### Why this matters with 5.2
+After 5.2 every model arrives Draco-encoded, so DRACOLoader is no longer optional — it's required for the viewer to render the optimized GLBs. 5.1 must ship in the same release as 5.2 (or immediately after) for backward compatibility, otherwise old optimized models will fail to load.
 
-**4.1 IndexedDB cache for GLB + tracking files** ✅
-`src/lib/assetCache.ts` is a tiny IDB wrapper (no external dep) keyed by `shareId + project.updated_at`. `ARDetection.tsx` checks the cache before each prefetch and writes back on success. Repeat visits to the same experience load the GLB with zero network bytes. Republish bumps `updated_at`, naturally invalidating the cache.
+**Sequencing:** ship 5.1 (decoder hosted + wired) first as a no-op for current models, then ship 5.2 to start producing Draco GLBs. This avoids any window where new GLBs exist that the viewer can't decode.
 
-**4.2 Signed URL session cache** ✅
-`ARViewer.tsx` caches the `get-public-project` response in `sessionStorage` for 10 minutes (well inside the 2h signed-URL window). Internal navigation/refresh skips the edge-fn round-trip. The cache is busted explicitly in the Launch AR refetch path so signed URLs are always fresh at the start of an AR session. The edge function now also returns `updated_at` so the IDB cache key stays stable across reloads.
+---
 
-## Phase 5 — Off-thread parsing & GLB optimization (medium effort)
+## Validation
+- Upload a known-large GLB (10+ MB) through the wizard → confirm "Optimizing…" UI → check `projects` table for `optimized.glb` path and bytes saved.
+- Open the experience on mobile → tracking initializes, model renders identically to original.
+- Republish → IDB cache key changes → fresh download of the new optimized file.
+- Phase 1.4 progress bar still reports correct byte totals against the optimized file.
 
-**5.1 GLTFLoader on a worker thread**
-Use `loader.parseAsync` with `DRACOLoader` configured with a worker. Keeps camera tracking smooth during the parse-and-place transition.
+## Out of scope
+- KTX2/Basis textures (deferred — needs Basis transcoder worker; WebP gets us most of the way).
+- Reprocessing existing already-uploaded models (one-time backfill script could be added later if needed).
+- LOD generation.
 
-**5.2 GLB compression at upload time** (highest single ROI from brainstorm)
-New Supabase Edge Function `optimize-model` triggered after upload. Pipes the uploaded GLB through `gltf-transform` (Draco geometry + KTX2 textures + weld + prune). Stores `optimized.glb` next to the original; the project record points to the optimized one. Typical 8–15MB → 1.5–3MB. Loader code stays unchanged.
-- Upload UX: show "Optimizing model…" step in `ModelUploader`/wizard while the function runs.
-- Fallback: if optimization fails, keep the original.
-
-## Out of scope for this plan
-- Cloudflare CDN in front of Supabase Storage (infra change, requires DNS access — flag as a follow-up).
-- Service Worker for repeat visitors (revisit after Phase 4 IndexedDB lands; partly redundant).
-- LOD-0 proxy mesh streaming (defer until after compression measurements show whether it's still needed).
-
-## Suggested ship order
-Phase 1 → Phase 2 → Phase 4 → Phase 3 → Phase 5. (Phases 1, 2, 4 are user-visible perf; 3 is build hygiene; 5 is the biggest absolute win but largest scope.)
-
-## How we'll know it worked
-After each phase, re-record the QR → AR flow on the same device/network and compare against the brainstorm's baseline metrics:
-- Button tap → camera open (target: <1.5s after Phase 1+2)
-- "Loading 3D model…" duration (target: <2s after Phase 5, perceived <1s after Phase 1.4 progress bar)
-- Time to model placed (target: <5s end-to-end after all phases)
-
-Want me to start with Phase 1, or bundle Phases 1+2 into the first implementation pass?
+## Files touched
+- New: `supabase/functions/optimize-model/index.ts`
+- New: `public/assets/three/jsm/loaders/DRACOLoader.js`
+- New: `public/assets/three/jsm/libs/draco/*` (decoder assets)
+- Migration: add `projects.original_model_url`
+- Edited: `src/components/ModelUploader.tsx`, `src/components/ar/XR8Scene.tsx`, `src/components/ar/MindARScene.tsx`, `.lovable/plan.md`

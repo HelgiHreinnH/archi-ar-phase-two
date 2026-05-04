@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Upload, RefreshCw, AlertTriangle } from "lucide-react";
+import { Upload, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
@@ -32,6 +32,7 @@ function validateFile(file: File): string | null {
 const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: ModelUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -119,6 +120,42 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
           // Silently ignore — user can enter markers manually
         }
       }
+
+      // Phase 5.2 — Server-side GLB optimization. Skip USDZ; never block.
+      if (file.name.toLowerCase().endsWith(".glb")) {
+        setIsOptimizing(true);
+        try {
+          const { data, error: optErr } = await supabase.functions.invoke("optimize-model", {
+            body: { projectId, inputPath: filePath },
+          });
+          if (optErr) throw optErr;
+          if (data?.ok && data.optimizedPath) {
+            const before = (data.originalSize / (1024 * 1024)).toFixed(1);
+            const after = (data.optimizedSize / (1024 * 1024)).toFixed(1);
+            toast({
+              title: "Model optimized",
+              description: `${before} MB → ${after} MB (${data.ratio}× smaller)`,
+            });
+            onUploadComplete(data.optimizedPath);
+          } else if (data?.skipped) {
+            // No-gain or non-glb — silently keep original
+          } else {
+            toast({
+              title: "Optimization skipped",
+              description: "Using original model — performance may be slower.",
+              variant: "destructive",
+            });
+          }
+        } catch (optErr) {
+          console.warn("[ModelUploader] Optimization failed:", optErr);
+          toast({
+            title: "Optimization skipped",
+            description: "Using original model — performance may be slower.",
+          });
+        } finally {
+          setIsOptimizing(false);
+        }
+      }
     } catch (err: any) {
       if (err?.message !== "Network error during upload" || !abortRef.current?.signal.aborted) {
         setError(err?.message || "Upload failed. Please try again.");
@@ -144,7 +181,15 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
 
   return (
     <div className="space-y-3">
-      {isUploading ? (
+      {isOptimizing ? (
+        <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
+          <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
+          <p className="text-sm font-medium">Optimizing model…</p>
+          <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+            Compressing geometry for faster AR loading. This usually takes 15–60 seconds.
+          </p>
+        </div>
+      ) : isUploading ? (
         <UploadProgress
           progress={progress}
           uploadedBytes={uploadedBytes}

@@ -38,6 +38,8 @@ interface XR8SceneProps {
 // shares the same-origin HTTP cache with the XR8 engine bundle.
 const THREE_ESM_URL = "/assets/three/three.module.js";
 const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
+const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
+const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 
 const MARKER_SIZE_MM = 150;
 const FLOAT_ABOVE_MARKER = 0.267;
@@ -198,7 +200,12 @@ const XR8Scene = ({
       // ── Load GLB model ──
       if (modelUrl || prefetchedModel) {
         const { GLTFLoader } = await import(/* @vite-ignore */ GLTF_LOADER_URL);
+        const { DRACOLoader } = await import(/* @vite-ignore */ DRACO_LOADER_URL);
         const loader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+        dracoLoader.setWorkerLimit(2);
+        loader.setDRACOLoader(dracoLoader);
 
         let gltf: any;
         if (prefetchedModel) {
