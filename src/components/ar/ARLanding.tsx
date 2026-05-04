@@ -71,11 +71,12 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
     };
   }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url, project.model_url]);
 
-  // Release the warm camera if the user navigates away from the landing page
-  // without launching AR (e.g. closes the tab, hits back). The AR engines will
-  // re-acquire if they need it.
+  // Release the warm camera only on real page exit, not on internal navigation
+  // into the AR view (which would needlessly kill the stream we just warmed).
   useEffect(() => {
-    return () => releaseWarmCamera();
+    const handler = () => releaseWarmCamera();
+    window.addEventListener("pagehide", handler);
+    return () => window.removeEventListener("pagehide", handler);
   }, []);
 
 
