@@ -50,17 +50,40 @@ async function loadXR8Engine(): Promise<void> {
 
   const loadScript = (src: string): Promise<void> =>
     new Promise((resolve, reject) => {
+      // Reuse an existing tag if a preload/script for this src is already in flight.
+      const existing = document.querySelector<HTMLScriptElement>(
+        `script[data-archi-xr8="${src}"]`
+      );
+      if (existing) {
+        if (existing.dataset.loaded === "true") {
+          resolve();
+        } else {
+          existing.addEventListener("load", () => resolve(), { once: true });
+          existing.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
+        }
+        return;
+      }
       const script = document.createElement("script");
       script.src = src;
-      script.onload = () => resolve();
+      // Force ordered execution even when dispatched in parallel.
+      script.async = false;
+      script.dataset.archiXr8 = src;
+      script.onload = () => {
+        script.dataset.loaded = "true";
+        resolve();
+      };
       script.onerror = () => reject(new Error(`Failed to load ${src}`));
       document.head.appendChild(script);
     });
 
-  // Load XR8 core, then SLAM module, then extras
-  await loadScript("/assets/xr8/xr8.js");
-  await loadScript("/assets/xr8/xr-slam.js");
-  await loadScript("/assets/xr8/xrextras.js");
+  // Load XR8 core, SLAM module, and extras in parallel.
+  // Browser preserves <script> execution order automatically when appended in
+  // sequence, so dispatch all three downloads at once and await completion.
+  await Promise.all([
+    loadScript("/assets/xr8/xr8.js"),
+    loadScript("/assets/xr8/xr-slam.js"),
+    loadScript("/assets/xr8/xrextras.js"),
+  ]);
 
   if (!(window as any).XR8) {
     throw new Error("XR8 engine loaded but XR8 global not found");
@@ -134,7 +157,8 @@ const XR8Scene = ({
         antialias: true,
       });
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      // Cap pixel ratio at 2: halves GPU fill rate on 3× Retina iPhones with no visible quality loss.
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
       // Lighting
       const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.8);

@@ -1,85 +1,81 @@
-# Multi-Point AR — Fix & Polish Plan
+# AR Performance Boost — Implementation Plan
 
-Based on the May 2 Platform Assessment and a fresh code audit, three of the four "blocking bugs" listed in Notion are **already fixed in the codebase** (GLTFLoader CDN URL, `.mind` wiring in `useMultipointGeneration`, gyro quaternion + screen orientation correction). What remains is **Fix 3 (model URL delivery for QR clients)** plus a set of robustness gaps that surface once a real client-facing session runs end-to-end.
+Based on the May 2026 brainstorm. Targets the three biggest dead-air moments: button → camera (~4s), blank-cube model load (~6.25s), and AR placement (~12.5s). Phased so each phase ships independently and is measurable.
 
-This plan addresses those remaining issues and adds the small UX/observability work needed before an architect takes the system to a real site.
+## Phase 1 — Quick wins (highest ROI, ~1 session)
 
----
+**1.1 Parallel XR8 script loading**
+`src/components/ar/XR8Scene.tsx` `loadXR8Engine()` currently awaits the three scripts sequentially (1MB + 5.3MB + 132KB). Switch to `Promise.all([...])`. The browser preserves execution order automatically. Expected saving: 2–4s on 4G.
 
-## 1. Model URL delivery for QR clients (Fix 3, adapted)
+**1.2 Preload + preconnect on landing**
+In `src/components/ar/ARLanding.tsx`, inject `<link rel="preload" as="script">` for `/assets/xr8/xr8.js`, `/assets/xr8/xr-slam.js`, `/assets/xr8/xrextras.js` and `<link rel="preconnect">` for `unpkg.com`, `cdn.jsdelivr.net` on mount. Downloads start during the 2–4s the user reads the landing page.
 
-The Notion doc recommends swapping `createSignedUrl` for `getPublicUrl`. That cannot be applied directly — the storage buckets are **private by design** (per the project's storage security memory) and must stay that way. The actual problem is the **15-minute signed-URL TTL** in `get-public-project`: a client who scans the QR, walks to the space, and starts AR 16 minutes later sees a silent 400/403 on the model fetch.
+**1.3 DNS-prefetch in index.html**
+Add `dns-prefetch`/`preconnect` tags for unpkg, jsDelivr, ga.jspm.io in `<head>`.
 
-**Changes:**
-- `supabase/functions/get-public-project/index.ts`
-  - Bump `SIGNED_URL_EXPIRY` from `900` (15 min) to `7200` (2 hours) for model + mind + tracking + marker assets. Long enough for a full client walkthrough; short enough to remain a credential.
-  - Add explicit `error` field to the response when `model_url` is set but signing failed, so the viewer can show a real error instead of a blank screen.
-  - Tighten the `catch` block: log `err.message` to function logs (currently swallowed) so we can diagnose 500s.
+**1.4 Real GLB download progress**
+Replace the `fetch().arrayBuffer()` in `ARDetection.tsx` (and the equivalent in `ARViewer`/scenes) with a `ReadableStream` reader using `Content-Length`. Surface a real `<Progress>` bar in the "Loading 3D model…" state instead of the static cube. Same load time, much better perceived speed.
 
-- `src/pages/ARViewer.tsx`
-  - Show a clear "Model unavailable — please refresh the page" error if `publicModelUrl` is null after load (currently falls into a generic "Preparing 3D model…" spinner forever for multipoint and a blank for the model-viewer branch).
-  - When the QR landing page is open for a long time (e.g. >90 min), re-invoke `get-public-project` on `launchAR()` to refresh signed URLs before entering AR. Use react-query's `refetch()`.
+**1.5 Cap renderer pixel ratio**
+In `XR8Scene.tsx` and `MindARScene.tsx`, enforce `renderer.setPixelRatio(Math.min(devicePixelRatio, 2))`. One-line fix that halves GPU fill on 3× Retina iPhones.
 
-## 2. Edge function hardening
+**1.6 Lock camera resolution**
+Pass explicit `{ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } }` constraints wherever `getUserMedia`/XR8 camera config is invoked, so iOS doesn't pick 4K.
 
-The "Invalid share link format" error from earlier in this thread shows the edge function is being called with non-UUID `shareId`s in some flows.
+## Phase 2 — Camera pre-warm + asset prefetch parallelism
 
-- `src/pages/ARViewer.tsx` already gates on the UUID regex before calling — keep that.
-- In the edge function, return a `200` with `{ project: null, reason: 'invalid' }` instead of `400` for malformed IDs, so react-query doesn't treat it as a network error and retry-loop. Surface "Experience Not Found" UI either way.
-- Add a structured response shape: `{ project, urls: { model, mind, tracking, qr, markers } }` rather than spreading signed URLs over the project record. Cleaner client code and easier to extend in Phase 3.
+**2.1 Pre-warm camera during landing**
+In `ARLanding`, call `getUserMedia(...)` silently after the user grants any prior permission (or on first interaction to satisfy the gesture requirement). Park the stream in a hidden `<video>`. On Launch AR, hand the live stream to MindAR/XR8 instead of re-requesting. Removes the 1–2s camera init from perceived load.
+- Fallback: if pre-warm fails (permission prompt blocked), fall back to today's flow.
+- Cleanup: stop tracks if the user leaves the landing page.
 
-## 3. `.mind` verification gate in generation
+**2.2 Prefetch `.mind`/`.wtc` in parallel with GLB**
+Today only the GLB is prefetched. Add the tracking file to the prefetch alongside it so both arrive together.
 
-The generation hook now compiles and uploads the `.mind` file, but never verifies it can actually be re-fetched and parsed before flipping `status: active`. A failed upload silently activates a dead project.
+**2.3 Self-host Three.js + GLTFLoader**
+Move `three.module.js` and `GLTFLoader.js` into `public/assets/three/` and update the importmap in `index.html`. Removes one external DNS+TLS hop. Same-origin cache shared with XR8.
 
-- `src/hooks/useMultipointGeneration.ts`
-  - After uploading `targets.mind`, fetch a signed URL and `HEAD` the file to confirm it's reachable.
-  - Optionally also verify byte-length > some sane minimum (>1KB).
-  - Only then run the `status: 'active'` update. On failure, surface a toast and leave the project in `draft`.
+## Phase 3 — Bundle & code-splitting
 
-## 4. Gyro robustness — DeviceMotion fallback
+**3.1 Route-level `React.lazy`**
+Convert `App.tsx` route imports to `lazy()` with a `<Suspense>` fallback. The AR viewer at `/view/:shareId` should not download dashboard, project-detail, settings, or wizard code.
 
-The current `arGyro.ts` listens only to `deviceorientation`. On some Android browsers (and in iframe previews) `deviceorientation` never fires while `devicemotion` does. The walk-around then degrades to "no rotation compensation at all" with no warning.
+**3.2 Vite manual chunks**
+Add `build.rollupOptions.output.manualChunks` in `vite.config.ts` splitting `react`/`react-dom`/`react-router-dom`, `@tanstack/react-query`, `@supabase/supabase-js`, and the Radix UI cluster. Keeps vendor chunks cacheable across deploys.
 
-- `src/lib/arGyro.ts`
-  - In `createGyroListener`, if no `deviceorientation` event arrives within 1500 ms, attach a `devicemotion` listener and integrate `rotationRate` to derive a synthetic alpha/beta/gamma. Mark the source on `hasGyroRef` so callers can warn.
-- `src/components/ar/MindARScene.tsx`
-  - If neither source produces data within 3 s of locking, show a one-time toast: "Gyroscope unavailable — model may drift if you walk around."
+**3.3 Lazy-load `@google/model-viewer`**
+Move the `import "@google/model-viewer"` out of `ModelViewer3D.tsx`/`ModelViewerScene.tsx` top-level into a dynamic `import()` inside a `useEffect`. Saves ~200KB on the multi-point AR path that never uses it.
 
-## 5. N-marker UX polish
+## Phase 4 — Persistent caching
 
-The marker status UI (per the marker memory) supports up to 6 with badges and >6 with a progress bar, but the **detection guidance text** is fixed-string. When 7+ markers are configured, the user has no idea which physical marker to scan next.
+**4.1 IndexedDB cache for GLB + tracking files**
+Add `idb-keyval` (or a tiny custom wrapper). Key by `shareId + project.updated_at` to invalidate on republish. On next visit: model load = 0 network. Implement in the prefetch helper so both paths benefit.
 
-- `src/components/ar/ARDetection.tsx`
-  - When >6 markers, surface the **next un-detected marker by index + colour swatch** in the bottom guidance area: "Scan marker #4 (orange) next".
-  - Include a "Skip — I have at least 3" button once ≥3 markers are detected, so triangulation can start without forcing the architect to walk to every single one. (Procrustes already works on the best 3 of N.)
+**4.2 Signed URL session cache**
+Cache the `get-public-project` response in `sessionStorage` for the same `shareId` while inside the 15-minute signed URL window. Eliminates the edge-function round-trip on internal navigation/refresh.
 
-## 6. Observability for first end-to-end test (Action Item #6)
+## Phase 5 — Off-thread parsing & GLB optimization (medium effort)
 
-Helgi's first end-to-end test is the key Phase-2 milestone. Make it diagnosable.
+**5.1 GLTFLoader on a worker thread**
+Use `loader.parseAsync` with `DRACOLoader` configured with a worker. Keeps camera tracking smooth during the parse-and-place transition.
 
-- Add lightweight console-tagged logs (`[ar-flow]`, `[ar-detect]`, `[ar-lock]`) at every state transition in `MindARScene` and `ARViewer`, gated by a `?debug=1` URL param so production sessions stay quiet.
-- When `?debug=1` is set, render a tiny floating panel showing: detected markers, locked state, current gyro source, signed-URL expiry countdown.
+**5.2 GLB compression at upload time** (highest single ROI from brainstorm)
+New Supabase Edge Function `optimize-model` triggered after upload. Pipes the uploaded GLB through `gltf-transform` (Draco geometry + KTX2 textures + weld + prune). Stores `optimized.glb` next to the original; the project record points to the optimized one. Typical 8–15MB → 1.5–3MB. Loader code stays unchanged.
+- Upload UX: show "Optimizing model…" step in `ModelUploader`/wizard while the function runs.
+- Fallback: if optimization fails, keep the original.
 
-## 7. Out of scope for this pass
+## Out of scope for this plan
+- Cloudflare CDN in front of Supabase Storage (infra change, requires DNS access — flag as a follow-up).
+- Service Worker for repeat visitors (revisit after Phase 4 IndexedDB lands; partly redundant).
+- LOD-0 proxy mesh streaming (defer until after compression measurements show whether it's still needed).
 
-- **Phase 3 — server-side `.mind` compilation via 8th Wall `image-target-cli`.** Recorded in the AR Engine memory; tracked in the Notion roadmap; needs its own planning round once the open-source XR Engine license FAQ has been read.
-- **Phase 4 — XR8 World Effects SLAM walk-around.** XR8Scene scaffolding is already in the repo behind the `tracking_format = '8thwall-wtc'` switch. No code changes here until Helgi self-hosts the engine binaries.
-- **Tabletop "Activate AR / camera" bug** referenced earlier — still awaiting clarification on which exact button labels are involved; not bundled into this multi-point plan.
+## Suggested ship order
+Phase 1 → Phase 2 → Phase 4 → Phase 3 → Phase 5. (Phases 1, 2, 4 are user-visible perf; 3 is build hygiene; 5 is the biggest absolute win but largest scope.)
 
----
+## How we'll know it worked
+After each phase, re-record the QR → AR flow on the same device/network and compare against the brainstorm's baseline metrics:
+- Button tap → camera open (target: <1.5s after Phase 1+2)
+- "Loading 3D model…" duration (target: <2s after Phase 5, perceived <1s after Phase 1.4 progress bar)
+- Time to model placed (target: <5s end-to-end after all phases)
 
-## Technical summary (for reference)
-
-```text
-File                                        Change
-------------------------------------------  -----------------------------------------
-supabase/functions/get-public-project/      TTL → 2h, structured response, log errors
-src/pages/ARViewer.tsx                       Refetch URLs on launchAR, error UI
-src/hooks/useMultipointGeneration.ts         Verify .mind reachability before activate
-src/lib/arGyro.ts                            DeviceMotion fallback path
-src/components/ar/MindARScene.tsx            Gyro-missing toast, debug logs
-src/components/ar/ARDetection.tsx            N-marker next-marker hint, "Skip" CTA
-```
-
-No database migrations, no new dependencies, no new edge functions. All changes are additive within the existing multipoint pipeline.
+Want me to start with Phase 1, or bundle Phases 1+2 into the first implementation pass?

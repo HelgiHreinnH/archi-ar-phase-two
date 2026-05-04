@@ -56,26 +56,72 @@ const ARDetection = ({
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
 
-  // ── Fix 8: Prefetch GLB during scanning phase ─────────────────
+  // ── Fix 8 + Phase 1.4: Prefetch GLB during scanning, with real progress ──
   const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
+  const [prefetchProgress, setPrefetchProgress] = useState<number | null>(null);
   const prefetchStarted = useRef(false);
 
   useEffect(() => {
     if (!modelUrl || prefetchStarted.current) return;
     prefetchStarted.current = true;
 
-    fetch(modelUrl)
-      .then((res) => {
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(modelUrl, { signal: ac.signal });
         if (!res.ok) throw new Error(`GLB fetch failed: ${res.status}`);
-        return res.arrayBuffer();
-      })
-      .then((buffer) => {
-        setPrefetchedModel(buffer);
-        console.log(`[ARDetection] GLB prefetched (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-      })
-      .catch((err) => {
+
+        const totalHeader = res.headers.get("content-length");
+        const total = totalHeader ? Number(totalHeader) : 0;
+
+        // Stream the body so we can report real percentage progress.
+        if (!res.body || typeof res.body.getReader !== "function") {
+          const buffer = await res.arrayBuffer();
+          setPrefetchProgress(100);
+          setPrefetchedModel(buffer);
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        let lastReported = -1;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            received += value.length;
+            if (total > 0) {
+              const pct = Math.min(99, Math.round((received / total) * 100));
+              if (pct !== lastReported) {
+                lastReported = pct;
+                setPrefetchProgress(pct);
+              }
+            }
+          }
+        }
+
+        // Flatten chunks into a single ArrayBuffer
+        const buffer = new Uint8Array(received);
+        let offset = 0;
+        for (const c of chunks) {
+          buffer.set(c, offset);
+          offset += c.length;
+        }
+        setPrefetchProgress(100);
+        setPrefetchedModel(buffer.buffer);
+        console.log(
+          `[ARDetection] GLB prefetched (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`
+        );
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
         console.warn("[ARDetection] GLB prefetch failed, will fall back to URL loading:", err);
-      });
+      }
+    })();
+
+    return () => ac.abort();
   }, [modelUrl]);
 
   const isMultipoint = mode !== "tabletop";
@@ -275,6 +321,15 @@ const ARDetection = ({
               </div>
               {guideExpanded && (
                 <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{guideDescription}</p>
+              )}
+              {/* Phase 1.4 — real GLB download progress */}
+              {prefetchProgress != null && prefetchProgress < 100 && !prefetchedModel && (
+                <div className="mt-3 space-y-1.5">
+                  <Progress value={prefetchProgress} className="h-1.5" />
+                  <p className="text-[10px] text-muted-foreground">
+                    Downloading 3D model… {prefetchProgress}%
+                  </p>
+                </div>
               )}
             </button>
           </div>
