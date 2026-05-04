@@ -181,7 +181,15 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
 
   return (
     <div className="space-y-3">
-      {isUploading ? (
+      {isOptimizing ? (
+        <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
+          <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
+          <p className="text-sm font-medium">Optimizing model…</p>
+          <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+            Compressing geometry for faster AR loading. This usually takes 15–60 seconds.
+          </p>
+        </div>
+      ) : isUploading ? (
         <UploadProgress
           progress={progress}
           uploadedBytes={uploadedBytes}
