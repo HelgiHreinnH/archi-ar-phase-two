@@ -33,24 +33,24 @@ Pass explicit `{ video: { facingMode: "environment", width: { ideal: 1280 }, hei
 **2.3 Self-host Three.js + GLTFLoader** ✅
 `public/assets/three/three.module.js` + `public/assets/three/jsm/loaders/GLTFLoader.js` (rewrote the bare `from 'three'` import to a relative path). `XR8Scene` and `MindARScene` now load both from same-origin URLs.
 
-## Phase 3 — Bundle & code-splitting
+## Phase 3 — Bundle & code-splitting ✅
 
-**3.1 Route-level `React.lazy`**
-Convert `App.tsx` route imports to `lazy()` with a `<Suspense>` fallback. The AR viewer at `/view/:shareId` should not download dashboard, project-detail, settings, or wizard code.
+**3.1 Route-level `React.lazy`** ✅
+`src/App.tsx` converts every route to `lazy()` with a single `<Suspense>` fallback. The `/view/:shareId` route no longer pulls dashboard, project-detail, settings or wizard code into its initial bundle.
 
-**3.2 Vite manual chunks**
-Add `build.rollupOptions.output.manualChunks` in `vite.config.ts` splitting `react`/`react-dom`/`react-router-dom`, `@tanstack/react-query`, `@supabase/supabase-js`, and the Radix UI cluster. Keeps vendor chunks cacheable across deploys.
+**3.2 Vite manual chunks** ✅
+`vite.config.ts` splits `vendor-react`, `vendor-query`, `vendor-supabase`, and a `vendor-radix` cluster into long-lived chunks that survive deploys.
 
-**3.3 Lazy-load `@google/model-viewer`**
-Move the `import "@google/model-viewer"` out of `ModelViewer3D.tsx`/`ModelViewerScene.tsx` top-level into a dynamic `import()` inside a `useEffect`. Saves ~200KB on the multi-point AR path that never uses it.
+**3.3 Lazy-load `@google/model-viewer`** ✅
+Removed the top-level `import "@google/model-viewer"` from `ModelViewerScene.tsx` and `ModelViewer3D.tsx`; both now `import()` it inside a `useEffect` and gate rendering on `customElements.get("model-viewer")`. The multi-point AR path no longer ships ~200KB it never uses.
 
-## Phase 4 — Persistent caching
+## Phase 4 — Persistent caching ✅
 
-**4.1 IndexedDB cache for GLB + tracking files**
-Add `idb-keyval` (or a tiny custom wrapper). Key by `shareId + project.updated_at` to invalidate on republish. On next visit: model load = 0 network. Implement in the prefetch helper so both paths benefit.
+**4.1 IndexedDB cache for GLB + tracking files** ✅
+`src/lib/assetCache.ts` is a tiny IDB wrapper (no external dep) keyed by `shareId + project.updated_at`. `ARDetection.tsx` checks the cache before each prefetch and writes back on success. Repeat visits to the same experience load the GLB with zero network bytes. Republish bumps `updated_at`, naturally invalidating the cache.
 
-**4.2 Signed URL session cache**
-Cache the `get-public-project` response in `sessionStorage` for the same `shareId` while inside the 15-minute signed URL window. Eliminates the edge-function round-trip on internal navigation/refresh.
+**4.2 Signed URL session cache** ✅
+`ARViewer.tsx` caches the `get-public-project` response in `sessionStorage` for 10 minutes (well inside the 2h signed-URL window). Internal navigation/refresh skips the edge-fn round-trip. The cache is busted explicitly in the Launch AR refetch path so signed URLs are always fresh at the start of an AR session. The edge function now also returns `updated_at` so the IDB cache key stays stable across reloads.
 
 ## Phase 5 — Off-thread parsing & GLB optimization (medium effort)
 
