@@ -352,6 +352,7 @@ const ARViewer = () => {
           initialRotation={project.initial_rotation || 0}
           project={project}
           markerData={markerData}
+          shareId={shareId}
         />
       );
   }
