@@ -122,7 +122,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
                 : "View the 3D model with orbit controls, then tap 'View in AR' to place it on any surface using your device's built-in AR."}
             </p>
           </div>
-          <Button size="lg" className="w-full gap-2" onClick={onLaunchAR}>
+          <Button size="lg" className="w-full gap-2" onClick={() => { prewarmCamera(); onLaunchAR(); }}>
             <Camera className="h-4 w-4" />
             Launch AR Camera
           </Button>
