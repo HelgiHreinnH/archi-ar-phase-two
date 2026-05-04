@@ -55,8 +55,9 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
     const trackingUrl = project.tracking_file_url || project.mind_file_url;
     if (trackingUrl) addPreload(trackingUrl, "fetch");
 
-    // GLB model — biggest single asset
-    const modelHref = project.signed_model_url ?? null;
+    // GLB model — biggest single asset. In the public AR flow, project.model_url
+    // is already the signed URL from get-public-project.
+    const modelHref = project.signed_model_url ?? project.model_url ?? null;
     if (modelHref) addPreload(modelHref, "fetch", "model/gltf-binary");
 
     return () => {
