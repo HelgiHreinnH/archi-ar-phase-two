@@ -178,6 +178,9 @@ const MindARScene = ({
       mindarRef.current = mindarThree;
 
       const { renderer, scene, camera } = mindarThree;
+      // Cap pixel ratio at 2 to halve GPU fill rate on 3× Retina iPhones.
+      try { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); } catch { /* ignore */ }
+
 
       // Lighting
       const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.8);
