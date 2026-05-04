@@ -23,13 +23,39 @@ const ARViewer = () => {
   const [viewState, setViewState] = useState<ViewerState>("landing");
 
   // Fetch project via rate-limited edge function, with direct query fallback
+  // Phase 4.2 — sessionStorage cache for the get-public-project response.
+  // Signed URLs live 2h; we cache for 10min to bound staleness while still
+  // eliminating the edge-fn round-trip on internal navigation/refresh.
+  const PUBLIC_PROJECT_CACHE_TTL_MS = 10 * 60 * 1000;
+  const sessionCacheKey = shareId ? `archi-pp::${shareId}` : null;
+
   const { data: projectResponse, isLoading, error, refetch } = useQuery({
     queryKey: ["public-project", shareId],
     queryFn: async () => {
+      // Try sessionStorage first
+      if (sessionCacheKey && typeof sessionStorage !== "undefined") {
+        try {
+          const raw = sessionStorage.getItem(sessionCacheKey);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { at: number; data: unknown };
+            if (Date.now() - parsed.at < PUBLIC_PROJECT_CACHE_TTL_MS) {
+              dlog("public-project served from sessionStorage");
+              return parsed.data;
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+
       const { data, error: fnError } = await supabase.functions.invoke("get-public-project", {
         body: { shareId },
       });
       if (fnError || !data) throw new Error("Experience not found or unavailable");
+
+      if (sessionCacheKey && typeof sessionStorage !== "undefined") {
+        try {
+          sessionStorage.setItem(sessionCacheKey, JSON.stringify({ at: Date.now(), data }));
+        } catch { /* quota — ignore */ }
+      }
       return data;
     },
     enabled: !!shareId && shareId !== ":shareId" && /^[0-9a-f-]{36}$/i.test(shareId),
