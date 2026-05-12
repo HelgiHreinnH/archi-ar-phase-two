@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,9 @@ import {
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor, normalizeMarkerData } from "@/lib/markerTypes";
-import ModelViewer3D from "@/components/ModelViewer3D";
+// Track A — lazy-load the 3D preview so the dashboard route doesn't pull in
+// model-viewer (~400KB) and three.js until ProjectOverview actually mounts.
+const ModelViewer3D = lazy(() => import("@/components/ModelViewer3D"));
 import SharePopover from "@/components/SharePopover";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
@@ -44,7 +47,9 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
       {/* Top row: 3D Preview + Info card */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
         {project.model_url && (
-          <ModelViewer3D modelUrl={project.model_url} className="aspect-video w-full rounded-lg" />
+          <Suspense fallback={<div className="aspect-video w-full rounded-lg bg-muted animate-pulse" />}>
+            <ModelViewer3D modelUrl={project.model_url} className="aspect-video w-full rounded-lg" />
+          </Suspense>
         )}
 
         <Card className="flex flex-col">

@@ -77,6 +77,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
         xhr.open("POST", url, true);
         xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`);
         xhr.setRequestHeader("x-upsert", "true");
+        // Track A — long-lived CDN cache. Storage paths include projectId+filename
+        // so any republish writes to a new path; we never need to invalidate.
+        xhr.setRequestHeader("cache-control", "public, max-age=31536000, immutable");
 
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
