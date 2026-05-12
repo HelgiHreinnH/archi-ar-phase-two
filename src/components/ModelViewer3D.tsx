@@ -7,12 +7,38 @@ interface ModelViewer3DProps {
   className?: string;
 }
 
+// Track A — bump TTL from 10min to 24h so internal navigation reuses the same
+// signed URL and the Supabase Storage edge can actually cache the GLB. The
+// path always includes projectId+filename so republishes get a fresh path.
+const SIGNED_URL_TTL_SEC = 60 * 60 * 24;
+const SIGNED_URL_CACHE_MS = (SIGNED_URL_TTL_SEC - 60) * 1000; // refresh 1min before expiry
+
+interface CachedSigned { url: string; at: number }
+
+function readCache(path: string): string | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(`archi-mv3d::${path}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedSigned;
+    if (Date.now() - parsed.at < SIGNED_URL_CACHE_MS) return parsed.url;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function writeCache(path: string, url: string) {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(`archi-mv3d::${path}`, JSON.stringify({ url, at: Date.now() } satisfies CachedSigned));
+  } catch { /* quota — ignore */ }
+}
+
 const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
-  const isGlb = modelUrl.toLowerCase().endsWith(".glb");
   const isUsdz = modelUrl.toLowerCase().endsWith(".usdz");
+  const mvRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (mvReady) return;
@@ -23,18 +49,35 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
 
   useEffect(() => {
     setError(false);
+    const cached = readCache(modelUrl);
+    if (cached) { setSignedUrl(cached); return; }
     setSignedUrl(null);
+    let cancelled = false;
     supabase.storage
       .from("project-models")
-      .createSignedUrl(modelUrl, 600)
+      .createSignedUrl(modelUrl, SIGNED_URL_TTL_SEC)
       .then(({ data, error: err }) => {
+        if (cancelled) return;
         if (err || !data?.signedUrl) {
           setError(true);
         } else {
+          writeCache(modelUrl, data.signedUrl);
           setSignedUrl(data.signedUrl);
         }
       });
+    return () => { cancelled = true; };
   }, [modelUrl]);
+
+  // Track A — Three.js dispose on unmount. <model-viewer> internally creates
+  // a renderer + scene per element; clearing the src and removing the node
+  // is what actually triggers its disposeScene path.
+  useEffect(() => {
+    return () => {
+      const el = mvRef.current as (HTMLElement & { src?: string }) | null;
+      if (!el) return;
+      try { el.removeAttribute("src"); } catch { /* noop */ }
+    };
+  }, []);
 
   if (error) {
     return (
@@ -55,6 +98,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   return (
     <div className={`rounded-lg overflow-hidden bg-muted/50 border ${className}`}>
       <model-viewer
+        ref={mvRef as React.MutableRefObject<any>}
         src={signedUrl}
         ios-src={isUsdz ? signedUrl : undefined}
         alt="3D model preview"
