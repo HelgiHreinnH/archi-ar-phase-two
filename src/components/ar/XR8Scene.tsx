@@ -5,6 +5,7 @@ import {
   createGyroListener,
 } from "@/lib/arGyro";
 import type { MarkerPoint } from "@/lib/markerTypes";
+import { teardownThree } from "@/lib/threeDispose";
 
 interface XR8SceneProps {
   /** URL of the compiled .wtc image target file */
@@ -466,7 +467,9 @@ const XR8Scene = ({
         } catch {
           // Ignore cleanup errors
         }
-        renderer.dispose();
+        // Track A — full Three.js teardown (geometry/material/texture + GL ctx)
+        // to fix the 98%-heap leak from repeated AR mounts.
+        try { teardownThree(scene, renderer); } catch { /* noop */ }
       };
     } catch (err) {
       console.error("[XR8Scene] Initialization error:", err);
