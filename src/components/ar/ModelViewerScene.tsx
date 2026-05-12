@@ -24,6 +24,7 @@ interface ModelViewerSceneProps {
 const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
+  const mvRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (mvReady) return;
@@ -31,6 +32,16 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
     import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
     return () => { cancelled = true; };
   }, [mvReady]);
+
+  // Track A — release the model-viewer's internal Three.js renderer/textures
+  // on unmount so navigating between experiences doesn't stack GPU memory.
+  useEffect(() => {
+    return () => {
+      const el = mvRef.current as (HTMLElement & { src?: string }) | null;
+      if (!el) return;
+      try { el.removeAttribute("src"); } catch { /* noop */ }
+    };
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col">
