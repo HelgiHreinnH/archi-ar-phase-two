@@ -129,6 +129,8 @@ Deno.serve(async (req) => {
       .upload(optimizedPath, optimizedBytes, {
         contentType: "model/gltf-binary",
         upsert: true,
+        // Track A — long-lived CDN cache for the optimized GLB.
+        cacheControl: "31536000, immutable",
       });
     if (upErr) {
       return json({ ok: false, error: `Upload failed: ${upErr.message}` }, 200);
