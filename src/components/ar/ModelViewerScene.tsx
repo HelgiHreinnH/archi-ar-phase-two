@@ -89,6 +89,7 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
           </div>
         ) : (
         <model-viewer
+          ref={mvRef as React.MutableRefObject<any>}
           src={modelUrl}
           ar
           ar-modes="webxr scene-viewer quick-look"
