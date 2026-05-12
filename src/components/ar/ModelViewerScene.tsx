@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 // Phase 3.3 — Lazy-load <model-viewer>. The multi-point AR path never uses it
 // (it goes through XR8/MindAR), so keeping ~200KB out of that bundle is free.
 import { ArrowLeft, Box, Info, ChevronDown } from "lucide-react";
