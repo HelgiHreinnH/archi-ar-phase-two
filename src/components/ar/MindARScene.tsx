@@ -5,6 +5,7 @@ import {
   applyGyroCompensation,
   createGyroListener,
 } from "@/lib/arGyro";
+import { teardownThree } from "@/lib/threeDispose";
 
 interface MindARSceneProps {
   /** URL of the .mind compiled image target file */
@@ -647,6 +648,8 @@ const MindARScene = ({
       mindarRef.current._cleanupGyro = cleanupGyro;
       mindarRef.current._occlusionTimers = occlusionTimers;
       mindarRef.current._stallTimer = stallTimer;
+      mindarRef.current._scene = scene;
+      mindarRef.current._renderer = renderer;
 
     } catch (err) {
       console.error("MindAR initialization error:", err);
@@ -675,10 +678,17 @@ const MindARScene = ({
           if (mindarRef.current._stallTimer) {
             clearTimeout(mindarRef.current._stallTimer);
           }
+          // Halt render loop before disposing GL resources
+          try { mindarRef.current._renderer?.setAnimationLoop?.(null); } catch { /* noop */ }
           mindarRef.current.stop();
         } catch {
           // Ignore cleanup errors
         }
+        // Track A — release Three.js GPU resources to prevent the 98%-heap leak
+        // documented in the May 12 audit.
+        try {
+          teardownThree(mindarRef.current._scene, mindarRef.current._renderer);
+        } catch { /* noop */ }
         mindarRef.current = null;
       }
     };
