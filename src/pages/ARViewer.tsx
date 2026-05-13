@@ -10,9 +10,10 @@ import ARPermission from "@/components/ar/ARPermission";
 import ARDetection from "@/components/ar/ARDetection";
 import ModelViewerScene from "@/components/ar/ModelViewerScene";
 import ModelUnavailableRecovery from "@/components/ar/ModelUnavailableRecovery";
+import { MindARSRIError } from "@/lib/sriError";
 
 type Project = Tables<"projects">;
-type ViewerState = "landing" | "briefing" | "permission-denied" | "detecting" | "model-viewer";
+type ViewerState = "landing" | "briefing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
