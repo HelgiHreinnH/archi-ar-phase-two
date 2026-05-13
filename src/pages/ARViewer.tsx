@@ -156,8 +156,14 @@ const ARViewer = () => {
   }, [getInitialMarkers]);
 
   const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
+  const [sriErrorUrl, setSriErrorUrl] = useState<string | null>(null);
 
   const handleARError = useCallback((err?: Error) => {
+    if (err instanceof MindARSRIError) {
+      setSriErrorUrl(err.url);
+      setViewState("sri-error");
+      return;
+    }
     setArErrorMessage(err?.message || "Camera access was denied.");
     setViewState("permission-denied");
   }, []);
