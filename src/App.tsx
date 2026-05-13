@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -30,6 +30,12 @@ const RouteFallback = () => (
   </div>
 );
 
+// Audit C-2 (May 2026): preserves the :id when redirecting legacy /projects/:id bookmarks.
+const LegacyProjectIdRedirect = () => {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/dashboard/experiences/${id ?? ""}`} replace />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -53,8 +59,7 @@ const App = () => (
               {/* Legacy Phase 1 redirects — audit C-2 (May 2026): added :id redirect to close 404 hole */}
               <Route path="projects" element={<Navigate to="/dashboard/experiences" replace />} />
               <Route path="projects/new" element={<Navigate to="/dashboard/experiences/new" replace />} />
-              <Route path="projects/:id" element={<Navigate to="/dashboard/experiences" replace />} />
-              <Route path="projects/:id" element={<ProjectDetail />} />
+              <Route path="projects/:id" element={<LegacyProjectIdRedirect />} />
               <Route path="experiences" element={<ProjectsList />} />
               <Route path="experiences/new" element={<NewProject />} />
               <Route path="experiences/:id" element={<ProjectDetail />} />
