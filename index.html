@@ -36,6 +36,18 @@
       }
     </script>
 
+    <!-- Audit C-1 / L-5 (May 2026): Modulepreload + SRI for the MindAR runtime.
+         The actual import in MindARScene.tsx is dynamic (await import(URL)) and
+         dynamic imports cannot carry an integrity attribute. Preloading here with
+         integrity makes the browser verify the hash before the module is reused
+         by the later import. Recompute when bumping `mind-ar` version. -->
+    <link
+      rel="modulepreload"
+      href="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+      integrity="sha384-V4MJvKKF+j4p5na1bzvsCAqd88oPPyGSRD/QSJM0Ad+Nkx88/3wnkr7Cx3caZmpt"
+      crossorigin="anonymous"
+    />
+
   <meta property="og:title" content="Archi AR">
   <meta name="twitter:title" content="Archi AR">
   <meta property="og:description" content="The Archi AR prototype">

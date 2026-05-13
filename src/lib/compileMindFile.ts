@@ -29,6 +29,15 @@ declare global {
 const CDN_BASE =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js";
 
+// Audit C-1 / L-5 (May 2026): SRI hash pinned for the MindAR compiler entry module.
+// Recompute when bumping `mind-ar` version:
+//   curl -sL <CDN_BASE> | python3 -c "import sys,hashlib,base64; print('sha384-'+base64.b64encode(hashlib.sha384(sys.stdin.buffer.read()).digest()).decode())"
+// NOTE: SRI on the entry verifies only this file. Its dynamic sub-imports
+// (controller-*.js, ui-*.js) are referenced by content-hashed filenames pinned
+// inside this verified module, so tampering with the chain would invalidate
+// either this hash or the URL the browser resolves.
+const CDN_SRI = "sha384-hWwJbySAF+K3yQuqupwebOlSqX/EqF48nEWrP0b07KI4dPCptfGG63ldC2IgjRRg";
+
 /**
  * Load the MindAR compiler via an ES module script tag.
  * The CDN file sets `window.MINDAR.IMAGE = { Controller, Compiler, UI }`.
@@ -43,9 +52,7 @@ function loadCompilerScript(): Promise<void> {
     const script = document.createElement("script");
     script.type = "module";
     script.src = CDN_BASE;
-    // SRI readiness: add crossorigin for Subresource Integrity hash verification.
-    // TODO: Pin integrity hash when deploying to production:
-    //   script.integrity = "sha384-<computed-hash>";
+    script.integrity = CDN_SRI;
     script.crossOrigin = "anonymous";
 
     script.onload = () => {
@@ -56,7 +63,7 @@ function loadCompilerScript(): Promise<void> {
     };
 
     script.onerror = () =>
-      reject(new Error("Failed to load MindAR compiler script"));
+      reject(new Error("Failed to load MindAR compiler script (SRI mismatch or network error)"));
 
     document.head.appendChild(script);
   });
