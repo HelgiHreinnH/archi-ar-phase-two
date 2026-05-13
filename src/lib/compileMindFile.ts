@@ -38,6 +38,8 @@ const CDN_BASE =
 // either this hash or the URL the browser resolves.
 const CDN_SRI = "sha384-hWwJbySAF+K3yQuqupwebOlSqX/EqF48nEWrP0b07KI4dPCptfGG63ldC2IgjRRg";
 
+import { MindARSRIError, isLikelySRIFailure, sriBypassEnabled } from "./sriError";
+
 /**
  * Load the MindAR compiler via an ES module script tag.
  * The CDN file sets `window.MINDAR.IMAGE = { Controller, Compiler, UI }`.
@@ -52,8 +54,14 @@ function loadCompilerScript(): Promise<void> {
     const script = document.createElement("script");
     script.type = "module";
     script.src = CDN_BASE;
-    script.integrity = CDN_SRI;
-    script.crossOrigin = "anonymous";
+    // Audit C-1: allow a `?nosri=1` recovery path so users can unblock
+    // themselves when our pinned hash drifts from the current CDN bytes.
+    if (!sriBypassEnabled()) {
+      script.integrity = CDN_SRI;
+      script.crossOrigin = "anonymous";
+    } else {
+      script.crossOrigin = "anonymous";
+    }
 
     script.onload = () => {
       // Module scripts resolve all static imports before onload fires,
@@ -62,8 +70,16 @@ function loadCompilerScript(): Promise<void> {
       resolve();
     };
 
-    script.onerror = () =>
-      reject(new Error("Failed to load MindAR compiler script (SRI mismatch or network error)"));
+    script.onerror = async () => {
+      // Disambiguate SRI mismatch vs network failure by re-fetching the URL.
+      const reachable = await isLikelySRIFailure(CDN_BASE);
+      if (reachable) {
+        reject(new MindARSRIError(CDN_BASE,
+          "MindAR compiler integrity check failed. The CDN file may have been updated upstream."));
+      } else {
+        reject(new Error("Failed to load MindAR compiler script (network error)"));
+      }
+    };
 
     document.head.appendChild(script);
   });

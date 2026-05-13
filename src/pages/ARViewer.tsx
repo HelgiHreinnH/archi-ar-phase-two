@@ -10,9 +10,10 @@ import ARPermission from "@/components/ar/ARPermission";
 import ARDetection from "@/components/ar/ARDetection";
 import ModelViewerScene from "@/components/ar/ModelViewerScene";
 import ModelUnavailableRecovery from "@/components/ar/ModelUnavailableRecovery";
+import { MindARSRIError } from "@/lib/sriError";
 
 type Project = Tables<"projects">;
-type ViewerState = "landing" | "briefing" | "permission-denied" | "detecting" | "model-viewer";
+type ViewerState = "landing" | "briefing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
@@ -155,8 +156,14 @@ const ARViewer = () => {
   }, [getInitialMarkers]);
 
   const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
+  const [sriErrorUrl, setSriErrorUrl] = useState<string | null>(null);
 
   const handleARError = useCallback((err?: Error) => {
+    if (err instanceof MindARSRIError) {
+      setSriErrorUrl(err.url);
+      setViewState("sri-error");
+      return;
+    }
     setArErrorMessage(err?.message || "Camera access was denied.");
     setViewState("permission-denied");
   }, []);
@@ -302,6 +309,57 @@ const ARViewer = () => {
           errorMessage={arErrorMessage}
         />
       );
+
+    case "sri-error": {
+      const reloadWithBypass = () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("nosri", "1");
+        window.location.replace(url.toString());
+      };
+      return (
+        <div className="fixed inset-0 bg-background flex items-center justify-center p-6">
+          <div className="max-w-md w-full text-center space-y-5 animate-fade-in">
+            <AlertTriangle className="h-12 w-12 text-destructive mx-auto" />
+            <div className="space-y-2">
+              <h1 className="font-display text-xl font-bold">AR engine could not be verified</h1>
+              <p className="text-sm text-muted-foreground">
+                The AR tracking library failed its security integrity check. This usually
+                means the library was updated upstream and our pinned signature is now
+                out of date — your device and connection are fine.
+              </p>
+              {sriErrorUrl && (
+                <p className="text-[11px] text-muted-foreground/60 font-mono break-all pt-1">
+                  {sriErrorUrl}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={launchAR}
+                className="w-full h-11 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+              >
+                Try again
+              </button>
+              <button
+                onClick={reloadWithBypass}
+                className="w-full h-11 rounded-md border border-input bg-background text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                Continue without integrity check
+              </button>
+              <button
+                onClick={() => setViewState("landing")}
+                className="w-full h-10 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Back
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground/70">
+              If this keeps happening, please report the experience link to support.
+            </p>
+          </div>
+        </div>
+      );
+    }
 
     case "model-viewer":
       if (!isModelReady) {
