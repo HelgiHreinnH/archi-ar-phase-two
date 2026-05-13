@@ -31,6 +31,7 @@ declare namespace JSX {
       loading?: "auto" | "lazy" | "eager";
       reveal?: "auto" | "manual";
       "interaction-prompt"?: "auto" | "none";
+      crossorigin?: "anonymous" | "use-credentials";
     };
   }
 }
