@@ -50,9 +50,10 @@ const App = () => (
               }
             >
               <Route index element={<DashboardHome />} />
-              {/* Support both old and new routes */}
+              {/* Legacy Phase 1 redirects — audit C-2 (May 2026): added :id redirect to close 404 hole */}
               <Route path="projects" element={<Navigate to="/dashboard/experiences" replace />} />
               <Route path="projects/new" element={<Navigate to="/dashboard/experiences/new" replace />} />
+              <Route path="projects/:id" element={<Navigate to="/dashboard/experiences" replace />} />
               <Route path="projects/:id" element={<ProjectDetail />} />
               <Route path="experiences" element={<ProjectsList />} />
               <Route path="experiences/new" element={<NewProject />} />
