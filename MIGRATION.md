@@ -16,8 +16,12 @@ a fork hosted outside Lovable).
 ## 0. Prerequisites
 
 - Supabase CLI installed and logged in: `supabase login`
-- Access token for project ref `njrytsladmfhbttsitmn`
+- Access token + service-role key for project ref `njrytsladmfhbttsitmn`
+  (service-role key is needed to curl-test edge functions post-deploy)
 - The repo checked out **outside Lovable** (or a copy you can edit freely)
+- **Node 18+** (for `supabase gen types`)
+- **Postgres 15+ client tools** (`pg_dump`, `psql`) — only required if you do the optional data migration in §5
+- DNS / domain admin access if redirect URLs or custom domain need updating
 - A backup of any production data on the old project that needs to be migrated
 
 ---
@@ -46,12 +50,21 @@ psql "postgresql://postgres.<project-ref>:<password>@aws-0-eu-central-1.pooler.s
 # Paste the contents of migrations/external/0001_init.sql and run.
 ```
 
+Then apply the post-init hardening (indexes + extension cleanup):
+
+```bash
+psql "postgresql://postgres.<project-ref>:<password>@aws-0-eu-central-1.pooler.supabase.com:6543/postgres" \
+  -f migrations/external/0002_post_init.sql
+```
+
 Verify in the dashboard:
 
 - `public.profiles` and `public.projects` exist with the columns listed in the SQL header
 - RLS is enabled on both tables
 - Both `project-models` and `project-assets` buckets exist and are **private**
 - Triggers `update_*_updated_at`, `validate_project_mode_trigger`, and `on_auth_user_created` exist
+- Indexes `idx_projects_user_id`, `idx_projects_share_link`, `idx_projects_status` exist on `public.projects` (from `0002_post_init.sql`)
+- Auto-created unique index `projects_share_link_key` is present (used by `get-public-project`)
 
 ---
 
@@ -72,6 +85,20 @@ by the Supabase runtime — no manual secret configuration needed.
 Sanity-check `optimize-model` in particular: it pulls `@gltf-transform/*` and
 `draco3dgltf` from npm at cold-start. First invocation will be ~5–10 s slower.
 
+### 2.5. Edge function JWT settings — **most likely cut-over breakage**
+
+Before deploying, ensure `supabase/config.toml` on the ejected copy contains:
+
+```toml
+[functions.get-public-project]
+verify_jwt = false
+```
+
+Without this, every public AR share link returns 401 because the viewer is
+unauthenticated by design. The other three functions (`optimize-model`,
+`export-user-data`, `delete-user-data`) keep the default (JWT verified) — they
+all validate the caller in code via `auth.getClaims()`.
+
 ---
 
 ## 3. Configure auth on the new project
@@ -84,6 +111,21 @@ In the Supabase dashboard for `njrytsladmfhbttsitmn`:
 2. **Authentication → URL Configuration**
    - Set **Site URL** to your deployment URL (e.g. `https://archi-ar.lovable.app` or your custom domain)
    - Add `https://archi-ar.lovable.app/**` and your custom domain wildcard to the **Redirect URLs** allowlist
+3. **Authentication → Policies / Password**
+   - Enable **leaked-password protection (HIBP)**
+   - Set **minimum password length** ≥ 8
+4. **Authentication → SMTP** — **required before production traffic**
+   - Configure custom SMTP (SendGrid, Resend, AWS SES, …). Supabase shared SMTP has a low daily cap and poor deliverability and will silently lose confirmation emails under load.
+5. **Authentication → Sessions / Tokens**
+   - Confirm default JWT expiry (1h) and refresh-token rotation are acceptable for your use case
+6. **Authentication → Rate Limits** — defaults are fine; document where they live so on-call knows where to look
+
+### 3.5. Storage CORS
+
+In **Storage → Settings → CORS**, verify both `project-models` and `project-assets`
+allow `GET` from `*` (or explicitly allowlist your app + custom-domain origins).
+If CORS is tightened without updating the allowlist, AR loads fail silently in
+the browser with a `CORS error` in the network tab and no on-screen feedback.
 
 ---
 
@@ -123,9 +165,9 @@ No code change needed — it reads from the env vars above. Just confirm it comp
 
 The fresh project starts empty. If you need to bring users + projects + storage objects across:
 
-1. **Auth users** — export from old project Auth → Users → CSV, then `INSERT` into new project (passwords cannot be moved; users will need to reset).
+1. **Auth users** — export from old project Auth → Users → CSV, then `INSERT` into new project. Passwords cannot be moved, so **trigger a bulk password-reset email** immediately after import (Authentication → Users → bulk action, or scripted via the admin API). Without this, users will silently fail to sign in with no guidance.
 2. **`public.profiles` + `public.projects`** — `pg_dump --data-only --table=public.profiles --table=public.projects` from old, restore into new.
-3. **Storage** — `supabase storage download` from old, `supabase storage upload` to new, preserving paths (`{projectId}/...`).
+3. **Storage** — `supabase storage download` from old, then `supabase storage upload` to new, preserving paths (`{projectId}/...`). **Pass `--cache-control "31536000, immutable"` on the upload** so copied objects pick up the Track A CDN posture; otherwise they keep the default short-cache headers and the performance audit gains are lost on migrated data.
 4. Re-run signed-URL minting once before announcing the cut-over.
 
 For a development environment, it is acceptable to start clean.
@@ -143,6 +185,7 @@ After cut-over, walk through the full happy path against `njrytsladmfhbttsitmn`:
 - Repeat for a Multi-Point project with 3+ markers
 - Settings → Export my data → file downloads
 - Settings → Delete my account → cascades cleanly
+- Tail edge function logs (`supabase functions logs optimize-model --project-ref njrytsladmfhbttsitmn`) and confirm a fresh GLB upload prints `originalSize → optimizedSize (Nx)`. A silently-failing cold-start npm pull will produce no such line — catch it here, not from a user complaint.
 
 ---
 
@@ -152,12 +195,17 @@ If anything breaks, revert the three env vars in step 4 to the old values and
 redeploy. The old Lovable project keeps running unchanged at
 `https://hjaqqfuebfpxpbyldcso.supabase.co`.
 
+**Caveat:** any data created on the new project between cut-over and rollback
+is lost on the flip-back. Capture a `pg_dump` of the new project (and a storage
+snapshot if uploads happened) before reverting env vars.
+
 ---
 
 ## File map
 
 ```
 migrations/external/0001_init.sql   # Combined schema + RLS + buckets
+migrations/external/0002_post_init.sql  # Indexes + extension cleanup (run after 0001)
 MIGRATION.md                        # This runbook
 supabase/functions/
   get-public-project/index.ts
