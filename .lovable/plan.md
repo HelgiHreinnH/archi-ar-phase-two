@@ -1,66 +1,49 @@
-# Migration hardening — patches for the external Supabase cut-over
+# Codebase Streamlining Plan — May 2026 Audit
 
-Two file changes only. No app code touched, no Lovable Cloud tables modified.
+Mirrors the audit's Phase A/B/C structure. Each item maps 1:1 to a finding so we can check them off against the Notion doc.
 
-## 1. New file: `migrations/external/0002_post_init.sql`
+## Phase 0 — Critical (do first, separate commit)
 
-Idempotent follow-up to `0001_init.sql`, run on the new project right after the initial migration.
+**C-1 · Single Three.js instance**
+- `index.html`: change importmap so `"three"` resolves to the self-hosted `/assets/three/three.module.js` (and add `"three/addons/": "/assets/three/jsm/"`), keep `mindar-image-three` on jsdelivr.
+- Verify in DevTools Network tab on `/view/:shareId` that only one `three.module.js` is fetched, and that MindAR detection still locks (matrix instanceof checks now align).
+- Risk: MindAR is pinned to a Three version range. If detection breaks, fall back to keeping unpkg but pointing the self-hosted scene loaders at the same unpkg URL — i.e. unify in the other direction. Decision criterion: whichever path keeps MindAR working.
 
-Contents:
+## Phase A — Quick wins (one commit, no behavior change)
 
-- **Indexes** for the dashboard's hot queries
-  - `CREATE INDEX IF NOT EXISTS idx_projects_user_id ON public.projects(user_id);`
-  - `CREATE INDEX IF NOT EXISTS idx_projects_share_link ON public.projects(share_link) WHERE share_link IS NOT NULL;` (partial — most rows are null)
-  - `CREATE INDEX IF NOT EXISTS idx_projects_status ON public.projects(status);`
-- **Drop the unused extension** to keep the surface clean
-  - `DROP EXTENSION IF EXISTS "uuid-ossp";` (everything uses `gen_random_uuid()`)
-- **Header comment** explaining: this file exists because `0001_init.sql` was written before these gaps were caught in review; future projects should fold these into `0001`.
+| # | Change | File |
+|---|---|---|
+| A2 | Delete stale `<!-- TODO -->` comments; update `meta[name=author]` | `index.html` |
+| A3 | Hoist `PUBLIC_PROJECT_CACHE_TTL_MS` to module scope | `src/pages/ARViewer.tsx` |
+| A4 | Drop redundant `getSession()` — rely on `INITIAL_SESSION` event | `src/hooks/useAuth.ts` |
+| A5 | Inline `onTargetFound`/`onTargetLost` props (drop arrow wrappers) | `src/components/ar/ARDetection.tsx` |
+| A6 | Delete unused `MarkerPoint` re-export | `src/lib/generateMarkers.ts` |
 
-## 2. Revise `MIGRATION.md`
+Verification: `bun run build` passes, app loads, dashboard + AR viewer smoke-test.
 
-Targeted edits, not a rewrite:
+## Phase B — Medium effort (separate commits per item)
 
-### §0 Prerequisites — add
-- Node 18+ (for `supabase gen types`)
-- Postgres 15+ client tools (`pg_dump`, `psql`) for the optional data migration
-- Service-role key for the new project (needed to curl-test edge functions post-deploy)
-- DNS / domain admin access if redirect URLs change
+- **B1 · Unify toast system.** Migrate `ModelUnavailableRecovery.tsx` from `sonner` to `@/hooks/use-toast`. Remove `<Sonner />` from `App.tsx`. Verify no other `from "sonner"` imports remain (`rg "from \"sonner\""`).
+- **B2 · Screenshot button.** Implement real capture via `canvas.toBlob` + download anchor (audit option B). Selector covers both MindAR (`#mindar-ar-container canvas`) and XR8 mounts; fall back to `document.querySelector("canvas")` if neither matches. Toast on success/failure.
+- **B3 · Dead export.** Remove `getWarmStream` export from `src/lib/cameraPrewarm.ts` (keep internal singleton; only the prewarm trigger is used).
+- **B4 · ARLanding markers UI.** Replace hardcoded A/B/C circles with N indexed circles driven by `project.marker_data?.length`. Reuse the marker color palette from `src/lib/markerTypes.ts`. Keep the >12 fallback (color + index) consistent with the marker visual identity rule.
+- **B5 · Production domain.** Update `PUBLISHED_APP_URL` in `src/lib/publicExperienceUrl.ts` to `https://designingforusers.com` (current custom domain). Confirm preview origin detection still routes preview links correctly.
 
-### §1 — add
-- Run `0002_post_init.sql` immediately after `0001_init.sql`
-- Verification line: confirm `projects_share_link_key` (auto unique index) and the three `idx_projects_*` indexes exist
+## Phase C — Requires planning
 
-### New §2.5 "Edge function JWT settings" — **the most likely cut-over breakage**
-Before deploying, ensure `supabase/config.toml` on the ejected copy contains:
-```toml
-[functions.get-public-project]
-verify_jwt = false
-```
-Without this, the public AR viewer will get 401s on every share link. Note that `optimize-model`, `export-user-data`, and `delete-user-data` keep the default (JWT verified) since they validate the caller in code.
+- **C1 · SRI for MindAR compiler CDN.** Compute the sha384 once, pin it in `src/lib/compileMindFile.ts` script tag (or fetch + integrity attr if dynamic). Re-pin whenever we bump `mind-ar` version.
+- **C2 · Legacy `/dashboard/projects` routes.** Add the missing `/:id` redirect first (closes the 404 hole). Then once analytics confirm zero traffic for ~30 days, drop all three legacy routes.
+- **C3 · Screenshot — covered by B2.** If we choose audit option A (remove the button) instead, C3 is dropped.
 
-### §3 Auth — expand
-- Configure custom SMTP before any production traffic (Supabase shared SMTP has a low daily cap and poor deliverability)
-- Enable leaked-password protection (HIBP) and set min password length ≥ 8
-- Confirm default JWT expiry / refresh-token rotation are acceptable
-- Default rate limits are fine; document where to find them
+## Out of scope (audit §6 — do not touch)
 
-### New §3.5 "Storage CORS"
-- Verify both buckets allow `GET` from `*` (or explicitly allowlist app origins). AR loads will fail silently if this is tightened.
+`computeWorldTransform.ts`, `parseGlbMarkers.ts`, MindAR state machine in `MindARScene.tsx`, `arGyro.ts`, `assetCache.ts`, `useMultipointGeneration.ts` HEAD-verify step, `App.tsx` lazy routes, XR8 parallel loader.
 
-### §5 Data migration — clarify
-- Step 1: after importing auth users, trigger a bulk password-reset email (passwords cannot be moved)
-- Step 3: re-upload storage objects with `--cache-control "31536000, immutable"` so they pick up the Track A CDN posture; copied objects keep their old (default) headers otherwise
+## Sequencing & verification
 
-### §6 Smoke test — add
-- Tail edge function logs and confirm `optimize-model` prints `originalSize → optimizedSize (Nx)` on a fresh upload (catches a silently-failing cold-start npm pull)
+1. Phase 0 alone → manual AR smoke test on mobile (multipoint lock + tabletop placement).
+2. Phase A as one commit → build + quick click-through.
+3. Phase B items as individual commits so any regression is bisectable.
+4. Phase C scheduled after Phase B ships and bakes for a few days.
 
-### §7 Rollback — add
-- One sentence: any data created on the new project between cut-over and rollback is lost; capture a `pg_dump` before flipping env vars back
-
-### Note in the file map
-- Add `migrations/external/0002_post_init.sql` to the list
-
-## Out of scope
-- No changes to the live Lovable Cloud DB or `supabase/config.toml` in this repo (Lovable manages it; the `verify_jwt` block only applies on the ejected copy targeting the new project).
-- No app code touched.
-- No data migration executed — runbook only.
+No DB/migration changes. No edge function changes. Frontend + `index.html` only.
