@@ -153,8 +153,10 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
           </div>
         ) : (
         <model-viewer
+          key={retryKey}
           ref={mvRef as React.MutableRefObject<any>}
           src={modelUrl}
+          crossorigin="anonymous"
           ar
           ar-modes="webxr scene-viewer quick-look"
           ar-scale="auto"
@@ -173,7 +175,6 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             height: "100%",
             position: "absolute",
             inset: 0,
-            // Use CSS custom properties for theming
             "--poster-color": "transparent",
           } as React.CSSProperties}
         >
@@ -202,6 +203,35 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             </div>
           </div>
         </model-viewer>
+        )}
+
+        {/* Error overlay — shown when load fails or times out */}
+        {loadState === "error" && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/95 p-6 animate-fade-in">
+            <div className="max-w-sm text-center space-y-4">
+              <Box className="h-12 w-12 text-destructive mx-auto" />
+              <div className="space-y-2">
+                <h2 className="font-display text-lg font-semibold">Couldn't load 3D model</h2>
+                <p className="text-sm text-muted-foreground">
+                  {errorDetail ?? "Something went wrong while preparing the model."}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleRetry}
+                  className="w-full h-11 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                >
+                  Try again
+                </button>
+                <button
+                  onClick={onBack}
+                  className="w-full h-10 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
