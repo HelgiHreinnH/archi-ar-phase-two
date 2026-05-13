@@ -1,4 +1,5 @@
-const PUBLISHED_APP_URL = "https://archi-ar.lovable.app";
+// Audit L-1 (May 2026): use the production custom domain.
+const PUBLISHED_APP_URL = "https://designingforusers.com";
 
 function isPreviewOrigin(origin: string) {
   return (

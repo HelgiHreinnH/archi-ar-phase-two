@@ -5,8 +5,6 @@
  */
 import { type MarkerPoint, getSafeMarkerColor } from "@/lib/markerTypes";
 
-export type { MarkerPoint } from "@/lib/markerTypes";
-
 export interface GeneratedMarker {
   id: string;
   index: number;

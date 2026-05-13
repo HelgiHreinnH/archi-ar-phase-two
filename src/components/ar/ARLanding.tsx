@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Box, Smartphone, Camera } from "lucide-react";
 import { prewarmCamera, releaseWarmCamera } from "@/lib/cameraPrewarm";
+import { normalizeMarkerData, getMarkerColor } from "@/lib/markerTypes";
 
 interface ARLandingProps {
   project: {
@@ -134,25 +135,40 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
             <span className="text-muted-foreground">Mode</span>
             <span className="font-medium">{isMultipoint ? "Multi-Point" : "Tabletop"}</span>
           </div>
-          {isMultipoint && (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Markers Required</span>
-              <div className="flex gap-1.5">
-                {["A", "B", "C"].map((id) => (
-                  <span
-                    key={id}
-                    className="inline-flex items-center justify-center h-5 w-5 rounded-full text-[10px] font-bold text-white"
-                    style={{
-                      backgroundColor:
-                        id === "A" ? "hsl(0 100% 60%)" : id === "B" ? "hsl(145 63% 49%)" : "hsl(211 100% 50%)",
-                    }}
-                  >
-                    {id}
-                  </span>
-                ))}
+          {isMultipoint && (() => {
+            // Audit B-4 (May 2026): replace hardcoded A/B/C with N indexed circles
+            // driven by actual marker_data length. Show up to 8 inline; collapse the rest.
+            const markers = normalizeMarkerData(project.marker_data) ?? [];
+            const count = markers.length;
+            if (count === 0) return null;
+            const visible = markers.slice(0, 8);
+            const overflow = count - visible.length;
+            return (
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Markers Required</span>
+                <div className="flex gap-1.5 items-center flex-wrap justify-end">
+                  {visible.map((m) => {
+                    const color = getMarkerColor(m.index);
+                    return (
+                      <span
+                        key={m.index}
+                        title={`Marker ${m.index} (${color.name})`}
+                        className="inline-flex items-center justify-center h-5 w-5 rounded-full text-[10px] font-bold text-white"
+                        style={{ backgroundColor: color.bg }}
+                      >
+                        {m.index}
+                      </span>
+                    );
+                  })}
+                  {overflow > 0 && (
+                    <span className="text-xs text-muted-foreground font-medium ml-1">
+                      +{overflow}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           {!isMultipoint && project.scale && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Scale</span>

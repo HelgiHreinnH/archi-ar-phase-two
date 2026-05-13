@@ -194,8 +194,36 @@ const ARDetection = ({
     }
   }, [allDetected, isActive, onAllDetected, isMultipoint]);
 
+  // Audit H-2 (May 2026): real screenshot capture from the active AR canvas.
+  // Tries MindAR's labeled container first, falls back to XR8's bare canvas.
   const handleScreenshot = () => {
-    toast({ title: "Screenshot saved", description: "Image saved to your photo library." });
+    const canvas =
+      (document.querySelector("#mindar-ar-container canvas") as HTMLCanvasElement | null) ??
+      (document.querySelector("canvas") as HTMLCanvasElement | null);
+    if (!canvas) {
+      toast({ title: "Screenshot unavailable", description: "AR canvas not ready yet.", variant: "destructive" });
+      return;
+    }
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          toast({ title: "Screenshot failed", description: "Could not capture image.", variant: "destructive" });
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `archi-ar-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast({ title: "Screenshot saved", description: "Image downloaded to your device." });
+      }, "image/png");
+    } catch (err) {
+      console.error("[ARDetection] Screenshot error:", err);
+      toast({ title: "Screenshot failed", description: (err as Error).message, variant: "destructive" });
+    }
   };
 
   if (!imageTargetSrc) {
@@ -319,8 +347,8 @@ const ARDetection = ({
           initialRotation={initialRotation}
           markerData={markerData}
           prefetchedModel={prefetchedModel}
-          onTargetFound={(index) => onTargetFound?.(index)}
-          onTargetLost={(index) => onTargetLost?.(index)}
+          onTargetFound={onTargetFound}
+          onTargetLost={onTargetLost}
           onReady={() => setArReady(true)}
           onError={(err) => {
             console.error("XR8 Error:", err);
@@ -337,8 +365,8 @@ const ARDetection = ({
           initialRotation={initialRotation}
           markerData={markerData}
           prefetchedModel={prefetchedModel}
-          onTargetFound={(index) => onTargetFound?.(index)}
-          onTargetLost={(index) => onTargetLost?.(index)}
+          onTargetFound={onTargetFound}
+          onTargetLost={onTargetLost}
           onReady={() => setArReady(true)}
           onError={(err) => {
             console.error("MindAR Error:", err);
