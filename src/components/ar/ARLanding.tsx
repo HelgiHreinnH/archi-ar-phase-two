@@ -57,10 +57,11 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
     const trackingUrl = project.tracking_file_url || project.mind_file_url;
     if (trackingUrl) addPreload(trackingUrl, "fetch");
 
-    // GLB model — biggest single asset. In the public AR flow, project.model_url
-    // is already the signed URL from get-public-project.
+    // GLB model — biggest single asset. We only preload for the multipoint path
+    // because tabletop refetches a fresh signed URL on Launch (see ARViewer.launchAR),
+    // which would invalidate any preload we set here and waste mobile bandwidth.
     const modelHref = project.signed_model_url ?? project.model_url ?? null;
-    if (modelHref) addPreload(modelHref, "fetch", "model/gltf-binary");
+    if (modelHref && isMultipoint) addPreload(modelHref, "fetch", "model/gltf-binary");
 
     // Phase 2.1 — Pre-warm the camera if the user has previously granted permission.
     // No-op (and silent) on first-time visitors so we don't surprise them with a prompt.
