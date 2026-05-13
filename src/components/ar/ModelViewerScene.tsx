@@ -21,17 +21,75 @@ interface ModelViewerSceneProps {
  * - Native AR via ARKit Quick Look (iOS) and Scene Viewer (Android)
  * - No printed marker needed — uses device SLAM for surface detection
  */
+const LOAD_TIMEOUT_MS = 25_000;
+
 const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
+  const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const mvRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (mvReady) return;
     let cancelled = false;
-    import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
+    import("@google/model-viewer")
+      .then(() => { if (!cancelled) setMvReady(true); })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[ModelViewerScene] Failed to load <model-viewer> module:", err);
+        setLoadState("error");
+        setErrorDetail("Failed to load the 3D engine. Check your connection and try again.");
+      });
     return () => { cancelled = true; };
   }, [mvReady]);
+
+  // Wire load/error/timeout handlers onto the model-viewer element so the user
+  // gets a real error UI instead of an indefinite spinner if the GLB stalls.
+  useEffect(() => {
+    if (!mvReady) return;
+    const el = mvRef.current;
+    if (!el) return;
+
+    setLoadState("loading");
+    setErrorDetail(null);
+
+    const onLoad = () => {
+      console.log("[ModelViewerScene] model loaded");
+      setLoadState("loaded");
+    };
+    const onError = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      console.error("[ModelViewerScene] model-viewer error:", detail);
+      setErrorDetail(
+        typeof detail === "object" && detail && "type" in detail
+          ? `Model failed to load (${(detail as { type: string }).type}).`
+          : "Model failed to load."
+      );
+      setLoadState("error");
+    };
+
+    el.addEventListener("load", onLoad);
+    el.addEventListener("error", onError);
+
+    const timeout = window.setTimeout(() => {
+      setLoadState((prev) => {
+        if (prev === "loading") {
+          console.warn("[ModelViewerScene] load timeout after", LOAD_TIMEOUT_MS, "ms");
+          setErrorDetail("The 3D model is taking too long to load. Check your connection.");
+          return "error";
+        }
+        return prev;
+      });
+    }, LOAD_TIMEOUT_MS);
+
+    return () => {
+      el.removeEventListener("load", onLoad);
+      el.removeEventListener("error", onError);
+      window.clearTimeout(timeout);
+    };
+  }, [mvReady, modelUrl, retryKey]);
 
   // Track A — release the model-viewer's internal Three.js renderer/textures
   // on unmount so navigating between experiences doesn't stack GPU memory.
@@ -42,6 +100,12 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
       try { el.removeAttribute("src"); } catch { /* noop */ }
     };
   }, []);
+
+  const handleRetry = () => {
+    setLoadState("loading");
+    setErrorDetail(null);
+    setRetryKey((k) => k + 1);
+  };
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col">
@@ -89,8 +153,10 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
           </div>
         ) : (
         <model-viewer
+          key={retryKey}
           ref={mvRef as React.MutableRefObject<any>}
           src={modelUrl}
+          crossorigin="anonymous"
           ar
           ar-modes="webxr scene-viewer quick-look"
           ar-scale="auto"
@@ -109,7 +175,6 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             height: "100%",
             position: "absolute",
             inset: 0,
-            // Use CSS custom properties for theming
             "--poster-color": "transparent",
           } as React.CSSProperties}
         >
@@ -138,6 +203,35 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             </div>
           </div>
         </model-viewer>
+        )}
+
+        {/* Error overlay — shown when load fails or times out */}
+        {loadState === "error" && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/95 p-6 animate-fade-in">
+            <div className="max-w-sm text-center space-y-4">
+              <Box className="h-12 w-12 text-destructive mx-auto" />
+              <div className="space-y-2">
+                <h2 className="font-display text-lg font-semibold">Couldn't load 3D model</h2>
+                <p className="text-sm text-muted-foreground">
+                  {errorDetail ?? "Something went wrong while preparing the model."}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleRetry}
+                  className="w-full h-11 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                >
+                  Try again
+                </button>
+                <button
+                  onClick={onBack}
+                  className="w-full h-10 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
