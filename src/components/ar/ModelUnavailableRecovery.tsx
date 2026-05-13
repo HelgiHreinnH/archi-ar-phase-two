@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle, Loader2, Copy, Check, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/hooks/use-toast";
 
 interface ModelUnavailableRecoveryProps {
   shareId: string;
@@ -54,13 +54,16 @@ const ModelUnavailableRecovery = ({
     try {
       await navigator.clipboard.writeText(shareId);
       setCopied(true);
-      toast.success("Reference ID copied", {
+      toast({
+        title: "Reference ID copied",
         description: "Send it to the project owner so they can investigate.",
       });
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      toast.error("Could not copy automatically", {
+      toast({
+        title: "Could not copy automatically",
         description: shareId,
+        variant: "destructive",
       });
     }
   };

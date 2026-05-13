@@ -66,12 +66,8 @@ export async function prewarmCamera(): Promise<MediaStream | null> {
   return warmInFlight;
 }
 
-export function getWarmStream(): MediaStream | null {
-  if (warmStream && warmStream.getVideoTracks().some((t) => t.readyState === "live")) {
-    return warmStream;
-  }
-  return null;
-}
+// Audit M-3 (May 2026): getWarmStream() was exported but never imported anywhere.
+// Removed until a real consumer integrates the warm stream into the AR engine.
 
 export function releaseWarmCamera(): void {
   if (warmStream) {

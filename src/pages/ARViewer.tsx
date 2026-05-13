@@ -18,15 +18,15 @@ type MarkerStatus = "searching" | "detected" | "locked";
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
 const dlog = (...args: unknown[]) => { if (DEBUG) console.log("[ar-flow]", ...args); };
 
+// Phase 4.2 — sessionStorage cache for the get-public-project response.
+// Signed URLs live 2h; we cache for 10min to bound staleness while still
+// eliminating the edge-fn round-trip on internal navigation/refresh.
+// Audit M-2 (May 2026): hoisted to module scope to avoid per-render redeclare.
+const PUBLIC_PROJECT_CACHE_TTL_MS = 10 * 60 * 1000;
+
 const ARViewer = () => {
   const { shareId } = useParams<{ shareId: string }>();
   const [viewState, setViewState] = useState<ViewerState>("landing");
-
-  // Fetch project via rate-limited edge function, with direct query fallback
-  // Phase 4.2 — sessionStorage cache for the get-public-project response.
-  // Signed URLs live 2h; we cache for 10min to bound staleness while still
-  // eliminating the edge-fn round-trip on internal navigation/refresh.
-  const PUBLIC_PROJECT_CACHE_TTL_MS = 10 * 60 * 1000;
   const sessionCacheKey = shareId ? `archi-pp::${shareId}` : null;
 
   const { data: projectResponse, isLoading, error, refetch } = useQuery({
