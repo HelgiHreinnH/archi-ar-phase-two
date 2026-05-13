@@ -87,7 +87,21 @@ const GLB_MAGIC = 0x46546C67;
 
 async function loadMindAR(): Promise<void> {
   if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
-  await import(/* @vite-ignore */ MINDAR_THREE_URL);
+  try {
+    await import(/* @vite-ignore */ MINDAR_THREE_URL);
+  } catch (err) {
+    // Audit C-1: A failed dynamic import for the MindAR runtime is most often
+    // either an SRI mismatch (the modulepreload integrity hash in index.html
+    // no longer matches the CDN bytes) or a network/CORS issue. Disambiguate
+    // by probing the URL so we can surface a precise, actionable error.
+    const { MindARSRIError, isLikelySRIFailure } = await import("@/lib/sriError");
+    const reachable = await isLikelySRIFailure(MINDAR_THREE_URL);
+    if (reachable) {
+      throw new MindARSRIError(MINDAR_THREE_URL,
+        "MindAR runtime integrity check failed. The CDN file may have been updated upstream.");
+    }
+    throw err instanceof Error ? err : new Error(String(err));
+  }
   if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
     throw new Error("MindAR module loaded but runtime not found on window.MINDAR");
   }
