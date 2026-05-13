@@ -21,17 +21,75 @@ interface ModelViewerSceneProps {
  * - Native AR via ARKit Quick Look (iOS) and Scene Viewer (Android)
  * - No printed marker needed — uses device SLAM for surface detection
  */
+const LOAD_TIMEOUT_MS = 25_000;
+
 const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
+  const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const mvRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (mvReady) return;
     let cancelled = false;
-    import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
+    import("@google/model-viewer")
+      .then(() => { if (!cancelled) setMvReady(true); })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[ModelViewerScene] Failed to load <model-viewer> module:", err);
+        setLoadState("error");
+        setErrorDetail("Failed to load the 3D engine. Check your connection and try again.");
+      });
     return () => { cancelled = true; };
   }, [mvReady]);
+
+  // Wire load/error/timeout handlers onto the model-viewer element so the user
+  // gets a real error UI instead of an indefinite spinner if the GLB stalls.
+  useEffect(() => {
+    if (!mvReady) return;
+    const el = mvRef.current;
+    if (!el) return;
+
+    setLoadState("loading");
+    setErrorDetail(null);
+
+    const onLoad = () => {
+      console.log("[ModelViewerScene] model loaded");
+      setLoadState("loaded");
+    };
+    const onError = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      console.error("[ModelViewerScene] model-viewer error:", detail);
+      setErrorDetail(
+        typeof detail === "object" && detail && "type" in detail
+          ? `Model failed to load (${(detail as { type: string }).type}).`
+          : "Model failed to load."
+      );
+      setLoadState("error");
+    };
+
+    el.addEventListener("load", onLoad);
+    el.addEventListener("error", onError);
+
+    const timeout = window.setTimeout(() => {
+      setLoadState((prev) => {
+        if (prev === "loading") {
+          console.warn("[ModelViewerScene] load timeout after", LOAD_TIMEOUT_MS, "ms");
+          setErrorDetail("The 3D model is taking too long to load. Check your connection.");
+          return "error";
+        }
+        return prev;
+      });
+    }, LOAD_TIMEOUT_MS);
+
+    return () => {
+      el.removeEventListener("load", onLoad);
+      el.removeEventListener("error", onError);
+      window.clearTimeout(timeout);
+    };
+  }, [mvReady, modelUrl, retryKey]);
 
   // Track A — release the model-viewer's internal Three.js renderer/textures
   // on unmount so navigating between experiences doesn't stack GPU memory.
@@ -42,6 +100,12 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
       try { el.removeAttribute("src"); } catch { /* noop */ }
     };
   }, []);
+
+  const handleRetry = () => {
+    setLoadState("loading");
+    setErrorDetail(null);
+    setRetryKey((k) => k + 1);
+  };
 
   return (
     <div className="fixed inset-0 bg-background flex flex-col">
