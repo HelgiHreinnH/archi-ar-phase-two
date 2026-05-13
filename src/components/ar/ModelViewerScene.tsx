@@ -156,7 +156,7 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
           key={retryKey}
           ref={mvRef as React.MutableRefObject<any>}
           src={modelUrl}
-          crossorigin="anonymous"
+          crossOrigin="anonymous"
           ar
           ar-modes="webxr scene-viewer quick-look"
           ar-scale="auto"
