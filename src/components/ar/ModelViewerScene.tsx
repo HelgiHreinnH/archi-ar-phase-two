@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 // (it goes through XR8/MindAR), so keeping ~200KB out of that bundle is free.
 import { ArrowLeft, Box, Info, ChevronDown, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 // iOS Safari's native AR (Quick Look) only accepts .usdz — handing it a .glb
 // produces an indefinite OS-level spinner. Detect iOS so we can hide or replace
