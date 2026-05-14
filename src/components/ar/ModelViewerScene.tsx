@@ -132,9 +132,10 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
     return () => {
       el.removeEventListener("load", onLoad);
       el.removeEventListener("error", onError);
+      el.removeEventListener("ar-status", onArStatus);
       window.clearTimeout(timeout);
     };
-  }, [mvReady, modelUrl, retryKey]);
+  }, [mvReady, modelUrl, retryKey, usdzUrl, project.id]);
 
   // Track A — release the model-viewer's internal Three.js renderer/textures
   // on unmount so navigating between experiences doesn't stack GPU memory.
