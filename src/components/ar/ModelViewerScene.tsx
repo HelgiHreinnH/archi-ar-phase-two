@@ -165,12 +165,17 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             </div>
           </div>
         ) : (
+        {(() => {
+          const iosUsdz = hasUsdz(modelUrl) ? modelUrl : undefined;
+          const iosBlocked = isIOS() && !iosUsdz;
+          return (
         <model-viewer
           key={retryKey}
           ref={mvRef as React.MutableRefObject<any>}
           src={modelUrl}
+          {...(iosUsdz ? { "ios-src": iosUsdz } : {})}
           crossorigin="anonymous"
-          ar
+          {...(iosBlocked ? {} : { ar: true })}
           ar-modes="webxr scene-viewer quick-look"
           ar-scale="auto"
           ar-placement="floor"
@@ -191,24 +196,59 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             "--poster-color": "transparent",
           } as React.CSSProperties}
         >
-          {/* Custom AR button */}
-          <button
-            slot="ar-button"
-            className={cn(
-              "absolute bottom-6 left-1/2 -translate-x-1/2",
-              "px-6 py-3 rounded-full",
-              "bg-primary text-primary-foreground",
-              "font-display font-semibold text-sm",
-              "shadow-lg shadow-primary/30",
-              "flex items-center gap-2",
-              "active:scale-95 transition-transform"
-            )}
-          >
-            <Box className="h-4 w-4" />
-            View in AR
-          </button>
+          {/* Custom AR button — hidden on iOS when no USDZ is available
+              (Apple Quick Look can't open GLB and would hang on a spinner). */}
+          {iosBlocked ? (
+            <div
+              slot="ar-button"
+              className={cn(
+                "absolute bottom-6 left-1/2 -translate-x-1/2 w-[min(92%,22rem)]",
+                "px-4 py-3 rounded-xl",
+                "bg-card/95 backdrop-blur border border-border",
+                "shadow-lg",
+                "flex items-start gap-3 text-left"
+              )}
+              role="status"
+            >
+              <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="text-sm font-display font-semibold">
+                  AR view not available on iPhone
+                </p>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  Apple AR requires a .usdz file. Open this link on Android, or
+                  ask the project owner to re-export with USDZ.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <button
+              slot="ar-button"
+              className={cn(
+                "absolute bottom-6 left-1/2 -translate-x-1/2",
+                "px-6 py-3 rounded-full",
+                "bg-primary text-primary-foreground",
+                "font-display font-semibold text-sm",
+                "shadow-lg shadow-primary/30",
+                "flex items-center gap-2",
+                "active:scale-95 transition-transform"
+              )}
+            >
+              <Box className="h-4 w-4" />
+              View in AR
+            </button>
+          )}
 
           {/* Loading poster */}
+          <div slot="poster" className="flex items-center justify-center w-full h-full bg-muted">
+            <div className="text-center space-y-3">
+              <Box className="h-10 w-10 text-muted-foreground/40 mx-auto animate-pulse" />
+              <p className="text-sm text-muted-foreground">Loading 3D model…</p>
+            </div>
+          </div>
+        </model-viewer>
+          );
+        })()}
           <div slot="poster" className="flex items-center justify-center w-full h-full bg-muted">
             <div className="text-center space-y-3">
               <Box className="h-10 w-10 text-muted-foreground/40 mx-auto animate-pulse" />
