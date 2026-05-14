@@ -159,9 +159,10 @@ Deno.serve(async (req) => {
     }
 
     // Sign all storage URLs so private buckets work
-    const [signedModelUrl, signedMindFileUrl, signedQrCodeUrl, signedTrackingFileUrl] =
+    const [signedModelUrl, signedUsdzUrl, signedMindFileUrl, signedQrCodeUrl, signedTrackingFileUrl] =
       await Promise.all([
         signUrl(supabase, "project-models", data.model_url),
+        signUrl(supabase, "project-models", data.usdz_model_url),
         signUrl(supabase, "project-assets", data.mind_file_url),
         signUrl(supabase, "project-assets", data.qr_code_url),
         signUrl(supabase, "project-models", data.tracking_file_url),
@@ -195,6 +196,7 @@ Deno.serve(async (req) => {
     const responseData = {
       ...data,
       model_url: signedModelUrl,
+      usdz_model_url: signedUsdzUrl,
       mind_file_url: signedMindFileUrl,
       qr_code_url: signedQrCodeUrl,
       marker_image_urls: signedMarkerImageUrls,
