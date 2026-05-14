@@ -294,7 +294,7 @@ const ARViewer = () => {
             <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
             <h2 className="font-display text-xl font-bold">{project.name}</h2>
             {project.client_name && (
-              <p className="text-sm text-muted-foreground">by {project.client_name}</p>
+              <p className="text-sm text-muted-foreground">for {project.client_name}</p>
             )}
             <p className="text-xs text-muted-foreground">Preparing your AR experience…</p>
           </div>
