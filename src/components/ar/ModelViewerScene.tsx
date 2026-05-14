@@ -92,6 +92,32 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
     el.addEventListener("load", onLoad);
     el.addEventListener("error", onError);
 
+    // Track when iOS Quick Look (or Scene Viewer) actually opens AR. model-viewer
+    // dispatches `ar-status` with detail.status === "session-started" once the
+    // OS-level AR session is live — that's our success signal for the launch.
+    const onArStatus = (ev: Event) => {
+      const status = (ev as CustomEvent).detail?.status;
+      if (status !== "session-started") return;
+      if (launchReportedRef.current || !project.id) return;
+      launchReportedRef.current = true;
+      const ext = modelUrl?.split("?")[0]?.split(".").pop()?.toLowerCase() ?? null;
+      const iosUsdzAvailable = !!usdzUrl || ext === "usdz";
+      supabase.from("ar_events").insert({
+        project_id: project.id,
+        event_type: "ar_launched",
+        user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+        metadata: {
+          model_url_ext: ext,
+          platform: isIOS() ? "ios" : "other",
+          launched_via: isIOS() && iosUsdzAvailable ? "quick-look" : "scene-viewer-or-webxr",
+          launched_at: new Date().toISOString(),
+        },
+      }).then(({ error }) => {
+        if (error) console.warn("[ModelViewerScene] ar_launched insert failed:", error.message);
+      });
+    };
+    el.addEventListener("ar-status", onArStatus);
+
     const timeout = window.setTimeout(() => {
       setLoadState((prev) => {
         if (prev === "loading") {
