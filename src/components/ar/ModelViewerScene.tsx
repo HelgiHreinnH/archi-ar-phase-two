@@ -20,7 +20,10 @@ const hasUsdz = (url: string | undefined | null): boolean =>
 
 interface ModelViewerSceneProps {
   modelUrl: string;
+  /** Optional pre-signed USDZ companion URL — required for iOS Quick Look. */
+  usdzUrl?: string | null;
   project: {
+    id?: string;
     name: string;
     description?: string | null;
     scale?: string | null;
