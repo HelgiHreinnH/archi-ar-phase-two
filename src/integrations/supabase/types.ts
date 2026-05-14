@@ -14,6 +14,41 @@ export type Database = {
   }
   public: {
     Tables: {
+      ar_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          project_id: string
+          user_agent: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          project_id: string
+          user_agent?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          project_id?: string
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ar_events_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           company: string | null
@@ -67,6 +102,7 @@ export type Database = {
           tracking_file_url: string | null
           tracking_format: string
           updated_at: string
+          usdz_model_url: string | null
           user_id: string
         }
         Insert: {
@@ -91,6 +127,7 @@ export type Database = {
           tracking_file_url?: string | null
           tracking_format?: string
           updated_at?: string
+          usdz_model_url?: string | null
           user_id: string
         }
         Update: {
@@ -115,6 +152,7 @@ export type Database = {
           tracking_file_url?: string | null
           tracking_format?: string
           updated_at?: string
+          usdz_model_url?: string | null
           user_id?: string
         }
         Relationships: []
