@@ -40,13 +40,14 @@ interface ModelViewerSceneProps {
  */
 const LOAD_TIMEOUT_MS = 25_000;
 
-const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) => {
+const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSceneProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const mvRef = useRef<HTMLElement | null>(null);
+  const blockedReportedRef = useRef(false);
 
   useEffect(() => {
     if (mvReady) return;
