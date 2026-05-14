@@ -48,6 +48,7 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
   const [retryKey, setRetryKey] = useState(0);
   const mvRef = useRef<HTMLElement | null>(null);
   const blockedReportedRef = useRef(false);
+  const launchReportedRef = useRef(false);
 
   useEffect(() => {
     if (mvReady) return;
