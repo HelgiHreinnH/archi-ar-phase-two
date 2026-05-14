@@ -375,6 +375,7 @@ const ARViewer = () => {
       return (
         <ModelViewerScene
           modelUrl={publicModelUrl || ""}
+          usdzUrl={project?.usdz_model_url ?? null}
           project={project}
           onBack={() => setViewState("landing")}
         />

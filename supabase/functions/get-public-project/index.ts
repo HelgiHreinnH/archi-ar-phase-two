@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     const { data, error } = await supabase
       .from("projects")
       .select(
-        "name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url, tracking_file_url, tracking_format, updated_at"
+        "id, name, description, client_name, model_url, usdz_model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url, tracking_file_url, tracking_format, updated_at"
       )
       .eq("share_link", shareId)
       .eq("status", "active")
@@ -159,9 +159,10 @@ Deno.serve(async (req) => {
     }
 
     // Sign all storage URLs so private buckets work
-    const [signedModelUrl, signedMindFileUrl, signedQrCodeUrl, signedTrackingFileUrl] =
+    const [signedModelUrl, signedUsdzUrl, signedMindFileUrl, signedQrCodeUrl, signedTrackingFileUrl] =
       await Promise.all([
         signUrl(supabase, "project-models", data.model_url),
+        signUrl(supabase, "project-models", data.usdz_model_url),
         signUrl(supabase, "project-assets", data.mind_file_url),
         signUrl(supabase, "project-assets", data.qr_code_url),
         signUrl(supabase, "project-models", data.tracking_file_url),
@@ -195,6 +196,7 @@ Deno.serve(async (req) => {
     const responseData = {
       ...data,
       model_url: signedModelUrl,
+      usdz_model_url: signedUsdzUrl,
       mind_file_url: signedMindFileUrl,
       qr_code_url: signedQrCodeUrl,
       marker_image_urls: signedMarkerImageUrls,

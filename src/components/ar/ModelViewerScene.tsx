@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 // (it goes through XR8/MindAR), so keeping ~200KB out of that bundle is free.
 import { ArrowLeft, Box, Info, ChevronDown, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 // iOS Safari's native AR (Quick Look) only accepts .usdz — handing it a .glb
 // produces an indefinite OS-level spinner. Detect iOS so we can hide or replace
@@ -19,7 +20,10 @@ const hasUsdz = (url: string | undefined | null): boolean =>
 
 interface ModelViewerSceneProps {
   modelUrl: string;
+  /** Optional pre-signed USDZ companion URL — required for iOS Quick Look. */
+  usdzUrl?: string | null;
   project: {
+    id?: string;
     name: string;
     description?: string | null;
     scale?: string | null;
@@ -36,13 +40,14 @@ interface ModelViewerSceneProps {
  */
 const LOAD_TIMEOUT_MS = 25_000;
 
-const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) => {
+const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSceneProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const mvRef = useRef<HTMLElement | null>(null);
+  const blockedReportedRef = useRef(false);
 
   useEffect(() => {
     if (mvReady) return;
@@ -165,8 +170,26 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             </div>
           </div>
         ) : (() => {
-          const iosUsdz = hasUsdz(modelUrl) ? modelUrl : undefined;
+          // Prefer the explicit USDZ companion uploaded by the architect; fall
+          // back to the primary modelUrl only if it itself is a .usdz.
+          const iosUsdz = usdzUrl || (hasUsdz(modelUrl) ? modelUrl : undefined);
           const iosBlocked = isIOS() && !iosUsdz;
+
+          // Fire-and-forget analytics: log once per mount when iOS users land on
+          // a project without a USDZ companion. Lets owners measure how often
+          // the warning appears so they can prioritise re-exporting USDZ.
+          if (iosBlocked && !blockedReportedRef.current && project.id) {
+            blockedReportedRef.current = true;
+            supabase.from("ar_events").insert({
+              project_id: project.id,
+              event_type: "ios_glb_blocked",
+              user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+              metadata: { model_url_ext: modelUrl?.split("?")[0]?.split(".").pop() ?? null },
+            }).then(({ error }) => {
+              if (error) console.warn("[ModelViewerScene] ar_events insert failed:", error.message);
+            });
+          }
+
           return (
         <model-viewer
           key={retryKey}

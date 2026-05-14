@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ModelUploader from "@/components/ModelUploader";
 import ModelPreview from "@/components/ModelPreview";
+import UsdzCompanionUploader from "@/components/UsdzCompanionUploader";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
 
@@ -14,6 +15,14 @@ interface StepModelProps {
 
 const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => {
   const [showUploader, setShowUploader] = useState(false);
+
+  // USDZ companion is only meaningful for the tabletop path, which goes through
+  // <model-viewer> + iOS Quick Look. Multipoint uses XR8 and renders GLB
+  // directly, so iOS works there regardless of USDZ.
+  const isTabletop = project.mode === "tabletop";
+  const primaryIsGlb = project.model_url?.toLowerCase().endsWith(".glb");
+  const showUsdzCompanion =
+    isTabletop && !!project.model_url && !!primaryIsGlb && !showUploader;
 
   return (
     <div className="space-y-4">
@@ -39,6 +48,14 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
             setShowUploader(false);
           }}
           onMarkersDetected={onMarkersDetected}
+        />
+      )}
+
+      {showUsdzCompanion && (
+        <UsdzCompanionUploader
+          projectId={project.id}
+          usdzUrl={project.usdz_model_url}
+          onChange={onUpdate}
         />
       )}
     </div>
