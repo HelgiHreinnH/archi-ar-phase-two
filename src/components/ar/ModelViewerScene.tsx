@@ -170,8 +170,26 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
             </div>
           </div>
         ) : (() => {
-          const iosUsdz = hasUsdz(modelUrl) ? modelUrl : undefined;
+          // Prefer the explicit USDZ companion uploaded by the architect; fall
+          // back to the primary modelUrl only if it itself is a .usdz.
+          const iosUsdz = usdzUrl || (hasUsdz(modelUrl) ? modelUrl : undefined);
           const iosBlocked = isIOS() && !iosUsdz;
+
+          // Fire-and-forget analytics: log once per mount when iOS users land on
+          // a project without a USDZ companion. Lets owners measure how often
+          // the warning appears so they can prioritise re-exporting USDZ.
+          if (iosBlocked && !blockedReportedRef.current && project.id) {
+            blockedReportedRef.current = true;
+            supabase.from("ar_events").insert({
+              project_id: project.id,
+              event_type: "ios_glb_blocked",
+              user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+              metadata: { model_url_ext: modelUrl?.split("?")[0]?.split(".").pop() ?? null },
+            }).then(({ error }) => {
+              if (error) console.warn("[ModelViewerScene] ar_events insert failed:", error.message);
+            });
+          }
+
           return (
         <model-viewer
           key={retryKey}
