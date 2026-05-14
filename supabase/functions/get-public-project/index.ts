@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     const { data, error } = await supabase
       .from("projects")
       .select(
-        "name, description, client_name, model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url, tracking_file_url, tracking_format, updated_at"
+        "id, name, description, client_name, model_url, usdz_model_url, mode, scale, marker_data, status, initial_rotation, mind_file_url, marker_image_urls, qr_code_url, tracking_file_url, tracking_format, updated_at"
       )
       .eq("share_link", shareId)
       .eq("status", "active")
