@@ -164,8 +164,7 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
               <p className="text-sm text-muted-foreground">Loading 3D engine…</p>
             </div>
           </div>
-        ) : (
-        {(() => {
+        ) : (() => {
           const iosUsdz = hasUsdz(modelUrl) ? modelUrl : undefined;
           const iosBlocked = isIOS() && !iosUsdz;
           return (
@@ -196,8 +195,9 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
             "--poster-color": "transparent",
           } as React.CSSProperties}
         >
-          {/* Custom AR button — hidden on iOS when no USDZ is available
-              (Apple Quick Look can't open GLB and would hang on a spinner). */}
+          {/* Custom AR button — replaced with an explanatory message on iOS
+              when no USDZ companion is available (Quick Look can't open GLB
+              and would otherwise hang on an OS-level spinner). */}
           {iosBlocked ? (
             <div
               slot="ar-button"
@@ -249,14 +249,6 @@ const ModelViewerScene = ({ modelUrl, project, onBack }: ModelViewerSceneProps) 
         </model-viewer>
           );
         })()}
-          <div slot="poster" className="flex items-center justify-center w-full h-full bg-muted">
-            <div className="text-center space-y-3">
-              <Box className="h-10 w-10 text-muted-foreground/40 mx-auto animate-pulse" />
-              <p className="text-sm text-muted-foreground">Loading 3D model…</p>
-            </div>
-          </div>
-        </model-viewer>
-        )}
 
         {/* Error overlay — shown when load fails or times out */}
         {loadState === "error" && (
