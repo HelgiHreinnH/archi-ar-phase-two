@@ -1,8 +1,21 @@
 import { useEffect, useState, useRef } from "react";
 // Phase 3.3 — Lazy-load <model-viewer>. The multi-point AR path never uses it
 // (it goes through XR8/MindAR), so keeping ~200KB out of that bundle is free.
-import { ArrowLeft, Box, Info, ChevronDown } from "lucide-react";
+import { ArrowLeft, Box, Info, ChevronDown, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// iOS Safari's native AR (Quick Look) only accepts .usdz — handing it a .glb
+// produces an indefinite OS-level spinner. Detect iOS so we can hide or replace
+// the "View in AR" button when no USDZ companion is available.
+const isIOS = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  // iPhone/iPad/iPod, plus iPadOS 13+ which masquerades as Mac with touch
+  return /iPad|iPhone|iPod/.test(ua) ||
+    (ua.includes("Mac") && typeof document !== "undefined" && "ontouchend" in document);
+};
+const hasUsdz = (url: string | undefined | null): boolean =>
+  !!url && url.split("?")[0].toLowerCase().endsWith(".usdz");
 
 interface ModelViewerSceneProps {
   modelUrl: string;
