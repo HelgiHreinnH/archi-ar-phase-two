@@ -542,4 +542,4 @@ const MultipointViewer = ({
   );
 };
 
-export default ARDetection;
+export default MultipointViewer;
