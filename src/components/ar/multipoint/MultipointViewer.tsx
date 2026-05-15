@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import MindARScene from "./MindARScene";
-import XR8Scene from "./XR8Scene";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
 
