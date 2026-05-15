@@ -167,10 +167,8 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Determine which image target source to use based on tracking format
-  const imageTargetSrc = trackingFormat === "8thwall-wtc"
-    ? (trackingFileUrl || undefined)
-    : (project?.mind_file_url || undefined);
+  // Multipoint tracking source: always the .mind file
+  const imageTargetSrc = project?.mind_file_url || undefined;
 
   // Model URL comes pre-signed from the edge function (buckets are private)
   const publicModelUrl = project?.model_url || null;
