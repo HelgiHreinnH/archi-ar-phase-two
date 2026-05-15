@@ -49,21 +49,8 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     return () => { cancelled = true; };
   }, [mvReady, isUsdz]);
 
-  // USDZ cannot be rendered in browser — model-viewer only speaks GLB/GLTF.
-  // Show a clear placeholder instead of a broken spinner.
-  if (isUsdz) {
-    return (
-      <div className={`flex flex-col items-center justify-center gap-2 bg-muted/50 border rounded-lg p-4 ${className}`}>
-        <Box className="h-8 w-8 text-muted-foreground/50" />
-        <p className="text-xs font-medium text-muted-foreground">USDZ · AR on iPhone</p>
-        <p className="text-[10px] text-muted-foreground/60 text-center">
-          3D preview not available in browser — viewable on iPhone / iPad via Quick Look
-        </p>
-      </div>
-    );
-  }
-
   useEffect(() => {
+    if (isUsdz) return;
     setError(false);
     const cached = readCache(modelUrl);
     if (cached) { setSignedUrl(cached); return; }
@@ -82,7 +69,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
         }
       });
     return () => { cancelled = true; };
-  }, [modelUrl]);
+  }, [modelUrl, isUsdz]);
 
   // Track A — Three.js dispose on unmount. <model-viewer> internally creates
   // a renderer + scene per element; clearing the src and removing the node
@@ -94,6 +81,20 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
       try { el.removeAttribute("src"); } catch { /* noop */ }
     };
   }, []);
+
+  // USDZ cannot be rendered in browser — model-viewer only speaks GLB/GLTF.
+  // Show a clear placeholder instead of a broken spinner.
+  if (isUsdz) {
+    return (
+      <div className={`flex flex-col items-center justify-center gap-2 bg-muted/50 border rounded-lg p-4 ${className}`}>
+        <Box className="h-8 w-8 text-muted-foreground/50" />
+        <p className="text-xs font-medium text-muted-foreground">USDZ · AR on iPhone</p>
+        <p className="text-[10px] text-muted-foreground/60 text-center">
+          3D preview not available in browser — viewable on iPhone / iPad via Quick Look
+        </p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
