@@ -55,17 +55,14 @@ async function signUrl(
   // For USDZ files, request transform:{format:'origin'} so Supabase serves the
   // file from the origin directly. iOS Quick Look is fragile with the standard
   // signed-URL 302 redirect chain and frequently stalls on the loading spinner.
-  const signOptions = options?.transformOrigin
-    ? ({ transform: { format: "origin" } } as Parameters<
-        ReturnType<typeof createClient>["storage"]["from"] extends (...a: unknown[]) => infer R
-          ? R extends { createSignedUrl: (...a: infer P) => unknown } ? P[2] : never
-          : never
-      >)
+  const signOptions: Record<string, unknown> | undefined = options?.transformOrigin
+    ? { transform: { format: "origin" } }
     : undefined;
 
   const { data, error } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(storePath, SIGNED_URL_EXPIRY, signOptions as never);
+    // deno-lint-ignore no-explicit-any
+    .createSignedUrl(storePath, SIGNED_URL_EXPIRY, signOptions as any);
 
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
