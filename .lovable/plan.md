@@ -1,49 +1,86 @@
-# Codebase Streamlining Plan — May 2026 Audit
+## Goal
 
-Mirrors the audit's Phase A/B/C structure. Each item maps 1:1 to a finding so we can check them off against the Notion doc.
+Restructure the AR layer so Tabletop and Multipoint are two fully independent trees that share only Supabase, auth, projects, storage, and QR. This unlocks shipping Tabletop now without multipoint risk, and lets Multipoint be rebuilt cleanly later (Railway compiler, Rhino plugin). After the split, apply the "Ship Tabletop Now" fixes from the roadmap and put Multipoint behind a Coming Soon state.
 
-## Phase 0 — Critical (do first, separate commit)
+The plan is sequenced so each step is independently shippable. No DB schema or migration changes.
 
-**C-1 · Single Three.js instance**
-- `index.html`: change importmap so `"three"` resolves to the self-hosted `/assets/three/three.module.js` (and add `"three/addons/": "/assets/three/jsm/"`), keep `mindar-image-three` on jsdelivr.
-- Verify in DevTools Network tab on `/view/:shareId` that only one `three.module.js` is fetched, and that MindAR detection still locks (matrix instanceof checks now align).
-- Risk: MindAR is pinned to a Three version range. If detection breaks, fall back to keeping unpkg but pointing the self-hosted scene loaders at the same unpkg URL — i.e. unify in the other direction. Decision criterion: whichever path keeps MindAR working.
+---
 
-## Phase A — Quick wins (one commit, no behavior change)
+## Phase 1 — Hard split (architectural, no behavior change)
 
-| # | Change | File |
-|---|---|---|
-| A2 | Delete stale `<!-- TODO -->` comments; update `meta[name=author]` | `index.html` |
-| A3 | Hoist `PUBLIC_PROJECT_CACHE_TTL_MS` to module scope | `src/pages/ARViewer.tsx` |
-| A4 | Drop redundant `getSession()` — rely on `INITIAL_SESSION` event | `src/hooks/useAuth.ts` |
-| A5 | Inline `onTargetFound`/`onTargetLost` props (drop arrow wrappers) | `src/components/ar/ARDetection.tsx` |
-| A6 | Delete unused `MarkerPoint` re-export | `src/lib/generateMarkers.ts` |
+Target structure:
 
-Verification: `bun run build` passes, app loads, dashboard + AR viewer smoke-test.
+```text
+src/components/ar/
+  shared/                    ← used by both trees
+    ARLanding.tsx
+    ARPermission.tsx
+    ModelUnavailableRecovery.tsx
+  tabletop/
+    TabletopViewer.tsx       ← was ModelViewerScene.tsx, USDZ + ar-status only
+  multipoint/
+    MultipointViewer.tsx     ← was MindARScene.tsx
+    ARDetection.tsx          ← multipoint-only scan UI
+  ARRouter.tsx               ← reads project.mode, picks one tree
+```
 
-## Phase B — Medium effort (separate commits per item)
+Steps:
+1. Create the three subdirectories and move existing files (no logic edits in the move commit). Update imports across `ARViewer.tsx`, wizard, dashboard.
+2. Rename `ARViewer.tsx` to act as `ARRouter.tsx` semantics: it keeps the public `/view/:shareId` route and project-fetch responsibility, but delegates rendering to `TabletopViewer` or `MultipointViewer` based on `project.mode`. Neither viewer imports the other.
+3. Delete `XR8Scene.tsx` and `public/assets/xr8/` (dead code per audit §13). Confirm nothing references it (`rg -n "XR8|xr8"`).
+4. Split hooks: keep `useTabletopGeneration.ts` in `hooks/` (already isolated), keep `useMultipointGeneration.ts` likewise. Confirm no cross-imports.
+5. Verify build, then smoke-test both modes in preview.
 
-- **B1 · Unify toast system.** Migrate `ModelUnavailableRecovery.tsx` from `sonner` to `@/hooks/use-toast`. Remove `<Sonner />` from `App.tsx`. Verify no other `from "sonner"` imports remain (`rg "from \"sonner\""`).
-- **B2 · Screenshot button.** Implement real capture via `canvas.toBlob` + download anchor (audit option B). Selector covers both MindAR (`#mindar-ar-container canvas`) and XR8 mounts; fall back to `document.querySelector("canvas")` if neither matches. Toast on success/failure.
-- **B3 · Dead export.** Remove `getWarmStream` export from `src/lib/cameraPrewarm.ts` (keep internal singleton; only the prewarm trigger is used).
-- **B4 · ARLanding markers UI.** Replace hardcoded A/B/C circles with N indexed circles driven by `project.marker_data?.length`. Reuse the marker color palette from `src/lib/markerTypes.ts`. Keep the >12 fallback (color + index) consistent with the marker visual identity rule.
-- **B5 · Production domain.** Update `PUBLISHED_APP_URL` in `src/lib/publicExperienceUrl.ts` to `https://designingforusers.com` (current custom domain). Confirm preview origin detection still routes preview links correctly.
+Deliverable: identical behavior, but each tree can now be edited in isolation.
 
-## Phase C — Requires planning
+---
 
-- **C1 · SRI for MindAR compiler CDN.** Compute the sha384 once, pin it in `src/lib/compileMindFile.ts` script tag (or fetch + integrity attr if dynamic). Re-pin whenever we bump `mind-ar` version.
-- **C2 · Legacy `/dashboard/projects` routes.** Add the missing `/:id` redirect first (closes the 404 hole). Then once analytics confirm zero traffic for ~30 days, drop all three legacy routes.
-- **C3 · Screenshot — covered by B2.** If we choose audit option A (remove the button) instead, C3 is dropped.
+## Phase 2 — Ship Tabletop fixes
 
-## Out of scope (audit §6 — do not touch)
+Apply only to the `tabletop/` tree and shared infra:
+- `ModelViewer3D.tsx` — confirm USDZ early-return is live (already done in last sessions; verify after move).
+- `get-public-project/index.ts` — for the **tabletop** model URL and USDZ URL, replace `createSignedUrl` with `getPublicUrl` (bucket is public). Keep multipoint paths on signed URLs for now since multipoint is being gated.
+- Storage upload in `ModelUploader.tsx` and `UsdzCompanionUploader.tsx` — add `cacheControl: '31536000, immutable'` and content-hashed filenames.
+- `TabletopViewer.tsx` — add a Three.js dispose pass on unmount (geometries, materials, textures, renderer).
+- Replace the 2-second `setTimeout` in tabletop `launchAR()` with a real readiness signal (model-viewer `load` event + camera ready).
 
-`computeWorldTransform.ts`, `parseGlbMarkers.ts`, MindAR state machine in `MindARScene.tsx`, `arGyro.ts`, `assetCache.ts`, `useMultipointGeneration.ts` HEAD-verify step, `App.tsx` lazy routes, XR8 parallel loader.
+---
 
-## Sequencing & verification
+## Phase 3 — Gate Multipoint with Coming Soon
 
-1. Phase 0 alone → manual AR smoke test on mobile (multipoint lock + tabletop placement).
-2. Phase A as one commit → build + quick click-through.
-3. Phase B items as individual commits so any regression is bisectable.
-4. Phase C scheduled after Phase B ships and bakes for a few days.
+In `NewProject.tsx`:
+- Keep the Multipoint mode card visible with its description.
+- Replace the CTA with a disabled button labelled "Coming soon — Rhino integration launching Q3 2026".
+- Add a small waitlist link (mailto or simple form, decided with user before build).
+- Existing multipoint projects in the dashboard remain viewable/editable so we don't break current users; only **new** multipoint creation is blocked.
 
-No DB/migration changes. No edge function changes. Frontend + `index.html` only.
+---
+
+## Phase 4 — Out of scope for this plan (tracked, not built now)
+
+Roadmapped but not part of this execution:
+- Railway `.mind` compilation microservice
+- Rhino plugin v1.0
+- Paddle credit/payment system
+- Migration off Lovable Cloud to dedicated Supabase project
+- IndexedDB signed-URL cache
+- Coordinate round-trip push from McNeel folder
+- Test suite
+
+These each warrant their own plan once Tabletop is live.
+
+---
+
+## Verification per phase
+
+- Phase 1: `bun run build` clean, `/view/:shareId` loads for one tabletop and one multipoint project, no console errors, no XR8 imports remain.
+- Phase 2: tabletop QR opens AR on iOS Safari without 403s; repeat load is visibly faster; mobile heap stays flat across multiple AR opens.
+- Phase 3: `/dashboard/experiences/new` shows Multipoint disabled; existing multipoint projects still render.
+
+---
+
+## Open questions before building
+
+1. For the Multipoint "Coming Soon" gate — waitlist mailto, simple Supabase table, or just a static message?
+2. Should existing multipoint projects keep working in the AR viewer, or also show "Coming soon" to clients? (Recommendation: keep working for existing ones, block only new creation.)
+3. Confirm we keep `ARViewer.tsx` as the route file and add `ARRouter` logic inside it, vs renaming the file (rename touches `App.tsx` route import only).
