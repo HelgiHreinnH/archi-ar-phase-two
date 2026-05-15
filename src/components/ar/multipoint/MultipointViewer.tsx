@@ -47,10 +47,8 @@ const MultipointViewer = ({
   initialRotation = 0,
   project,
   markerData,
-  trackingFormat = "mindar-mind",
   shareId,
-}: ARDetectionProps) => {
-  const useXR8 = trackingFormat === "8thwall-wtc";
+}: MultipointViewerProps) => {
   const [guideExpanded, setGuideExpanded] = useState(true);
   const [arReady, setArReady] = useState(false);
   const [isActive, setIsActive] = useState(false);
