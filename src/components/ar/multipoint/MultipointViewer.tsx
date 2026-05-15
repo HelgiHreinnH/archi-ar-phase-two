@@ -331,44 +331,24 @@ const MultipointViewer = ({
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
-      {/* AR scene — routes to XR8 or MindAR based on tracking format */}
-      {useXR8 ? (
-        <XR8Scene
-          imageTargetSrc={imageTargetSrc}
-          modelUrl={modelUrl}
-          mode={mode}
-          maxTrack={isMultipoint ? totalMarkers : 1}
-          modelScale={modelScale}
-          initialRotation={initialRotation}
-          markerData={markerData}
-          prefetchedModel={prefetchedModel}
-          onTargetFound={onTargetFound}
-          onTargetLost={onTargetLost}
-          onReady={() => setArReady(true)}
-          onError={(err) => {
-            console.error("XR8 Error:", err);
-            onError?.(err);
-          }}
-        />
-      ) : (
-        <MindARScene
-          imageTargetSrc={imageTargetSrc}
-          modelUrl={modelUrl}
-          mode={mode}
-          maxTrack={isMultipoint ? totalMarkers : 1}
-          modelScale={modelScale}
-          initialRotation={initialRotation}
-          markerData={markerData}
-          prefetchedModel={prefetchedModel}
-          onTargetFound={onTargetFound}
-          onTargetLost={onTargetLost}
-          onReady={() => setArReady(true)}
-          onError={(err) => {
-            console.error("MindAR Error:", err);
-            onError?.(err);
-          }}
-        />
-      )}
+      {/* AR scene — MindAR (multipoint image tracking) */}
+      <MindARScene
+        imageTargetSrc={imageTargetSrc}
+        modelUrl={modelUrl}
+        mode={mode}
+        maxTrack={isMultipoint ? totalMarkers : 1}
+        modelScale={modelScale}
+        initialRotation={initialRotation}
+        markerData={markerData}
+        prefetchedModel={prefetchedModel}
+        onTargetFound={onTargetFound}
+        onTargetLost={onTargetLost}
+        onReady={() => setArReady(true)}
+        onError={(err) => {
+          console.error("MindAR Error:", err);
+          onError?.(err);
+        }}
+      />
 
       {/* ── DETECTION PHASE UI ── */}
       {!isActive && (
