@@ -44,16 +44,28 @@ function checkRateLimit(ip: string): boolean {
 async function signUrl(
   supabase: ReturnType<typeof createClient>,
   bucket: string,
-  path: string | null | undefined
+  path: string | null | undefined,
+  options?: { transformOrigin?: boolean }
 ): Promise<string | null> {
   if (!path) return null;
   // If it's already a full URL, extract the storage path
   const storePath = extractStoragePath(path, bucket);
   if (!storePath) return null;
 
+  // For USDZ files, request transform:{format:'origin'} so Supabase serves the
+  // file from the origin directly. iOS Quick Look is fragile with the standard
+  // signed-URL 302 redirect chain and frequently stalls on the loading spinner.
+  const signOptions = options?.transformOrigin
+    ? ({ transform: { format: "origin" } } as Parameters<
+        ReturnType<typeof createClient>["storage"]["from"] extends (...a: unknown[]) => infer R
+          ? R extends { createSignedUrl: (...a: infer P) => unknown } ? P[2] : never
+          : never
+      >)
+    : undefined;
+
   const { data, error } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(storePath, SIGNED_URL_EXPIRY);
+    .createSignedUrl(storePath, SIGNED_URL_EXPIRY, signOptions as never);
 
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
