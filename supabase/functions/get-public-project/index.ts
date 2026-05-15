@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const SIGNED_URL_EXPIRY = 7200; // 2 hours — long enough for full client walkthrough
+const SIGNED_URL_EXPIRY = 86400; // 24 hours — covers same-day walkthroughs without mid-session 403s
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
