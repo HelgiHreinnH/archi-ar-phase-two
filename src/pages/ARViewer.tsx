@@ -373,7 +373,7 @@ const ARViewer = () => {
         );
       }
       return (
-        <ModelViewerScene
+        <TabletopViewer
           modelUrl={publicModelUrl || ""}
           usdzUrl={project?.usdz_model_url ?? null}
           project={project}
