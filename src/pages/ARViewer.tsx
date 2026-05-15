@@ -5,11 +5,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2, AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { normalizeMarkerData } from "@/lib/markerTypes";
-import ARLanding from "@/components/ar/ARLanding";
-import ARPermission from "@/components/ar/ARPermission";
-import ARDetection from "@/components/ar/ARDetection";
-import ModelViewerScene from "@/components/ar/ModelViewerScene";
-import ModelUnavailableRecovery from "@/components/ar/ModelUnavailableRecovery";
+import ARLanding from "@/components/ar/shared/ARLanding";
+import ARPermission from "@/components/ar/shared/ARPermission";
+import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRecovery";
+import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
+import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
 import { MindARSRIError } from "@/lib/sriError";
 
 type Project = Tables<"projects">;
@@ -72,8 +72,7 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
-  const trackingFormat = project?.tracking_format || "mindar-mind";
-  const trackingFileUrl = project?.tracking_file_url || null;
+  // Multipoint always uses MindAR with a .mind file (8th Wall XR8 path removed)
 
   // Dynamic marker status state
   const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({});
@@ -168,10 +167,8 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Determine which image target source to use based on tracking format
-  const imageTargetSrc = trackingFormat === "8thwall-wtc"
-    ? (trackingFileUrl || undefined)
-    : (project?.mind_file_url || undefined);
+  // Multipoint tracking source: always the .mind file
+  const imageTargetSrc = project?.mind_file_url || undefined;
 
   // Model URL comes pre-signed from the edge function (buckets are private)
   const publicModelUrl = project?.model_url || null;
@@ -373,7 +370,7 @@ const ARViewer = () => {
         );
       }
       return (
-        <ModelViewerScene
+        <TabletopViewer
           modelUrl={publicModelUrl || ""}
           usdzUrl={project?.usdz_model_url ?? null}
           project={project}
@@ -393,12 +390,11 @@ const ARViewer = () => {
         );
       }
       return (
-        <ARDetection
+        <MultipointViewer
           key={resetKey}
           mode={project.mode}
           markers={markers}
           markerCount={markerCount}
-          trackingFormat={trackingFormat}
           onTargetFound={handleTargetFound}
           onTargetLost={handleTargetLost}
           onCancel={() => setViewState("landing")}
