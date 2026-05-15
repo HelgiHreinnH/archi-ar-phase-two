@@ -9,7 +9,7 @@ import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache"
 
 type MarkerStatus = "searching" | "detected" | "locked";
 
-interface ARDetectionProps {
+interface MultipointViewerProps {
   mode: string;
   markers: Record<string, MarkerStatus>;
   markerCount?: number;
@@ -26,13 +26,11 @@ interface ARDetectionProps {
   initialRotation?: number;
   project?: { name: string; description?: string | null; share_link?: string | null; updated_at?: string | null };
   markerData?: MarkerPoint[] | null;
-  /** Tracking format — determines which AR engine to use */
-  trackingFormat?: string;
   /** Share UUID — used as part of the persistent asset cache key */
   shareId?: string;
 }
 
-const ARDetection = ({
+const MultipointViewer = ({
   mode,
   markers,
   markerCount,
