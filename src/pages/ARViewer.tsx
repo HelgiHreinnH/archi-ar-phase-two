@@ -5,11 +5,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2, AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { normalizeMarkerData } from "@/lib/markerTypes";
-import ARLanding from "@/components/ar/ARLanding";
-import ARPermission from "@/components/ar/ARPermission";
-import ARDetection from "@/components/ar/ARDetection";
-import ModelViewerScene from "@/components/ar/ModelViewerScene";
-import ModelUnavailableRecovery from "@/components/ar/ModelUnavailableRecovery";
+import ARLanding from "@/components/ar/shared/ARLanding";
+import ARPermission from "@/components/ar/shared/ARPermission";
+import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRecovery";
+import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
+import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
 import { MindARSRIError } from "@/lib/sriError";
 
 type Project = Tables<"projects">;
