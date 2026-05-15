@@ -16,6 +16,9 @@ const NewProject = () => {
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<Mode>("tabletop");
+  // Multi-Point is temporarily gated while we ship the Rhino integration + Railway .mind compiler (Q3 2026).
+  // Existing multipoint experiences keep working in the dashboard and AR viewer — only new creation is blocked.
+  const MULTIPOINT_DISABLED = true;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
