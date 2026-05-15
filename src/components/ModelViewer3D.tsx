@@ -42,11 +42,26 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const mvRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    if (isUsdz) return; // USDZ can't render in WebGL — skip loading model-viewer module
     if (mvReady) return;
     let cancelled = false;
     import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
     return () => { cancelled = true; };
-  }, [mvReady]);
+  }, [mvReady, isUsdz]);
+
+  // USDZ cannot be rendered in browser — model-viewer only speaks GLB/GLTF.
+  // Show a clear placeholder instead of a broken spinner.
+  if (isUsdz) {
+    return (
+      <div className={`flex flex-col items-center justify-center gap-2 bg-muted/50 border rounded-lg p-4 ${className}`}>
+        <Box className="h-8 w-8 text-muted-foreground/50" />
+        <p className="text-xs font-medium text-muted-foreground">USDZ · AR on iPhone</p>
+        <p className="text-[10px] text-muted-foreground/60 text-center">
+          3D preview not available in browser — viewable on iPhone / iPad via Quick Look
+        </p>
+      </div>
+    );
+  }
 
   useEffect(() => {
     setError(false);
