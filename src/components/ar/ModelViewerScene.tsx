@@ -199,9 +199,14 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
           </div>
         ) : (() => {
           // Prefer the explicit USDZ companion uploaded by the architect; fall
-          // back to the primary modelUrl only if it itself is a .usdz.
-          const iosUsdz = usdzUrl || (hasUsdz(modelUrl) ? modelUrl : undefined);
+          // back to the primary modelUrl only if it itself is a .usdz. Both
+          // candidates must pass hasUsdz() — a stale/malformed usdz_model_url
+          // would otherwise silently enable AR and trigger a Quick Look spinner.
+          const iosUsdz = (hasUsdz(usdzUrl) ? usdzUrl : null) || (hasUsdz(modelUrl) ? modelUrl : undefined);
           const iosBlocked = isIOS() && !iosUsdz;
+          // model-viewer only renders GLB/GLTF in WebGL — never set src= to a
+          // USDZ, that produces an indefinite loading spinner in the browser.
+          const isModelUrlUsdz = hasUsdz(modelUrl);
 
           // Fire-and-forget analytics: log once per mount when iOS users land on
           // a project without a USDZ companion. Lets owners measure how often
@@ -222,7 +227,7 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
         <model-viewer
           key={retryKey}
           ref={mvRef as React.MutableRefObject<any>}
-          src={modelUrl}
+          {...(!isModelUrlUsdz ? { src: modelUrl } : {})}
           {...(iosUsdz ? { "ios-src": iosUsdz } : {})}
           crossorigin="anonymous"
           {...(iosBlocked ? {} : { ar: true })}
