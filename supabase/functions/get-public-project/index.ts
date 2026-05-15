@@ -44,16 +44,25 @@ function checkRateLimit(ip: string): boolean {
 async function signUrl(
   supabase: ReturnType<typeof createClient>,
   bucket: string,
-  path: string | null | undefined
+  path: string | null | undefined,
+  options?: { transformOrigin?: boolean }
 ): Promise<string | null> {
   if (!path) return null;
   // If it's already a full URL, extract the storage path
   const storePath = extractStoragePath(path, bucket);
   if (!storePath) return null;
 
+  // For USDZ files, request transform:{format:'origin'} so Supabase serves the
+  // file from the origin directly. iOS Quick Look is fragile with the standard
+  // signed-URL 302 redirect chain and frequently stalls on the loading spinner.
+  const signOptions: Record<string, unknown> | undefined = options?.transformOrigin
+    ? { transform: { format: "origin" } }
+    : undefined;
+
   const { data, error } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(storePath, SIGNED_URL_EXPIRY);
+    // deno-lint-ignore no-explicit-any
+    .createSignedUrl(storePath, SIGNED_URL_EXPIRY, signOptions as any);
 
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
@@ -158,11 +167,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Sign all storage URLs so private buckets work
+    // Sign all storage URLs so private buckets work. USDZ paths get
+    // transform:{format:'origin'} so iOS Quick Look avoids the 302 redirect.
+    const modelIsUsdz = !!data.model_url && data.model_url.toLowerCase().split("?")[0].endsWith(".usdz");
     const [signedModelUrl, signedUsdzUrl, signedMindFileUrl, signedQrCodeUrl, signedTrackingFileUrl] =
       await Promise.all([
-        signUrl(supabase, "project-models", data.model_url),
-        signUrl(supabase, "project-models", data.usdz_model_url),
+        signUrl(supabase, "project-models", data.model_url, modelIsUsdz ? { transformOrigin: true } : undefined),
+        signUrl(supabase, "project-models", data.usdz_model_url, { transformOrigin: true }),
         signUrl(supabase, "project-assets", data.mind_file_url),
         signUrl(supabase, "project-assets", data.qr_code_url),
         signUrl(supabase, "project-models", data.tracking_file_url),
