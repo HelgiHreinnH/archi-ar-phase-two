@@ -105,15 +105,16 @@ const ARViewer = () => {
       dlog("refetch failed (will continue with cached URLs):", e);
     }
 
-    // Brief pause for the briefing screen, then start AR
-    setTimeout(async () => {
-      if (!isMultipoint) {
-        // Tabletop: use native AR via <model-viewer> — no marker needed
-        dlog("launchAR → model-viewer (tabletop)");
-        setViewState("model-viewer");
-        return;
-      }
+    // Tabletop: model-viewer has its own readiness flow + loading spinner,
+    // so flip straight there. Multipoint keeps a brief dwell to mask gyro
+    // permission + MindAR engine init.
+    if (!isMultipoint) {
+      dlog("launchAR → model-viewer (tabletop)");
+      setViewState("model-viewer");
+      return;
+    }
 
+    setTimeout(async () => {
       // Multi-point: request gyro permission, then launch detection
       try {
         const DOE = DeviceOrientationEvent as any;
