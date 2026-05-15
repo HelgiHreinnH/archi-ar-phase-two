@@ -18,7 +18,7 @@ const isIOS = (): boolean => {
 const hasUsdz = (url: string | undefined | null): boolean =>
   !!url && url.split("?")[0].toLowerCase().endsWith(".usdz");
 
-interface ModelViewerSceneProps {
+interface TabletopViewerProps {
   modelUrl: string;
   /** Optional pre-signed USDZ companion URL — required for iOS Quick Look. */
   usdzUrl?: string | null;
@@ -40,7 +40,7 @@ interface ModelViewerSceneProps {
  */
 const LOAD_TIMEOUT_MS = 25_000;
 
-const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSceneProps) => {
+const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerProps) => {
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
@@ -57,7 +57,7 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
       .then(() => { if (!cancelled) setMvReady(true); })
       .catch((err) => {
         if (cancelled) return;
-        console.error("[ModelViewerScene] Failed to load <model-viewer> module:", err);
+        console.error("[TabletopViewer] Failed to load <model-viewer> module:", err);
         setLoadState("error");
         setErrorDetail("Failed to load the 3D engine. Check your connection and try again.");
       });
@@ -75,12 +75,12 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
     setErrorDetail(null);
 
     const onLoad = () => {
-      console.log("[ModelViewerScene] model loaded");
+      console.log("[TabletopViewer] model loaded");
       setLoadState("loaded");
     };
     const onError = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
-      console.error("[ModelViewerScene] model-viewer error:", detail);
+      console.error("[TabletopViewer] model-viewer error:", detail);
       setErrorDetail(
         typeof detail === "object" && detail && "type" in detail
           ? `Model failed to load (${(detail as { type: string }).type}).`
@@ -113,7 +113,7 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
           launched_at: new Date().toISOString(),
         },
       }).then(({ error }) => {
-        if (error) console.warn("[ModelViewerScene] ar_launched insert failed:", error.message);
+        if (error) console.warn("[TabletopViewer] ar_launched insert failed:", error.message);
       });
     };
     el.addEventListener("ar-status", onArStatus);
@@ -121,7 +121,7 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
     const timeout = window.setTimeout(() => {
       setLoadState((prev) => {
         if (prev === "loading") {
-          console.warn("[ModelViewerScene] load timeout after", LOAD_TIMEOUT_MS, "ms");
+          console.warn("[TabletopViewer] load timeout after", LOAD_TIMEOUT_MS, "ms");
           setErrorDetail("The 3D model is taking too long to load. Check your connection.");
           return "error";
         }
@@ -219,7 +219,7 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
               user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
               metadata: { model_url_ext: modelUrl?.split("?")[0]?.split(".").pop() ?? null },
             }).then(({ error }) => {
-              if (error) console.warn("[ModelViewerScene] ar_events insert failed:", error.message);
+              if (error) console.warn("[TabletopViewer] ar_events insert failed:", error.message);
             });
           }
 
@@ -346,4 +346,4 @@ const ModelViewerScene = ({ modelUrl, usdzUrl, project, onBack }: ModelViewerSce
   );
 };
 
-export default ModelViewerScene;
+export default TabletopViewer;
