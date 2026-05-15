@@ -76,22 +76,36 @@ const NewProject = () => {
 
         <button
           type="button"
-          onClick={() => setMode("multipoint")}
+          onClick={() => !MULTIPOINT_DISABLED && setMode("multipoint")}
+          disabled={MULTIPOINT_DISABLED}
+          aria-disabled={MULTIPOINT_DISABLED}
           className={`relative rounded-xl border-2 p-5 text-left transition-all ${
-            mode === "multipoint"
-              ? "border-primary bg-primary/5 shadow-sm"
-              : "border-border hover:border-primary/30"
+            MULTIPOINT_DISABLED
+              ? "border-border bg-muted/30 cursor-not-allowed opacity-75"
+              : mode === "multipoint"
+                ? "border-primary bg-primary/5 shadow-sm"
+                : "border-border hover:border-primary/30"
           }`}
         >
+          {MULTIPOINT_DISABLED && (
+            <span className="absolute top-3 right-3 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wide">
+              Coming soon
+            </span>
+          )}
           <div className="flex items-center gap-3 mb-2">
-            <div className={`rounded-lg p-2 ${mode === "multipoint" ? "bg-primary/10" : "bg-muted"}`}>
-              <MapPin className={`h-5 w-5 ${mode === "multipoint" ? "text-primary" : "text-muted-foreground"}`} />
+            <div className={`rounded-lg p-2 ${!MULTIPOINT_DISABLED && mode === "multipoint" ? "bg-primary/10" : "bg-muted"}`}>
+              <MapPin className={`h-5 w-5 ${!MULTIPOINT_DISABLED && mode === "multipoint" ? "text-primary" : "text-muted-foreground"}`} />
             </div>
             <span className="font-display font-semibold">Multi-Point</span>
           </div>
           <p className="text-sm text-muted-foreground">
             Three markers placed in the room. Full-scale spatial visualization at 1:1 in the actual space.
           </p>
+          {MULTIPOINT_DISABLED && (
+            <p className="mt-3 text-xs text-amber-700">
+              Launching with native Rhino integration in Q3 2026.
+            </p>
+          )}
         </button>
       </div>
 
