@@ -26,10 +26,10 @@ interface ARLandingProps {
 const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
   const isMultipoint = project.mode !== "tabletop";
 
-  // ── Phase 1.2 — Preload heavy AR assets during landing-page dwell ──
+  // ── Preload heavy AR assets during landing-page dwell ──
   // The user typically reads the landing page for 2–4s. Use that time to
-  // download the XR8 engine scripts and tracking/model assets so they're
-  // already cached the moment they tap "Launch AR".
+  // download the tracking/model assets so they're already cached the moment
+  // they tap "Launch AR".
   useEffect(() => {
     const links: HTMLLinkElement[] = [];
     const addPreload = (href: string, as: "script" | "fetch", type?: string) => {
@@ -45,13 +45,6 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
       document.head.appendChild(link);
       links.push(link);
     };
-
-    // XR8 engine — only relevant for the 8thwall path, but caching them is harmless.
-    if (isMultipoint) {
-      addPreload("/assets/xr8/xr8.js", "script");
-      addPreload("/assets/xr8/xr-slam.js", "script");
-      addPreload("/assets/xr8/xrextras.js", "script");
-    }
 
     // Tracking file (.mind or .wtc)
     const trackingUrl = project.tracking_file_url || project.mind_file_url;
