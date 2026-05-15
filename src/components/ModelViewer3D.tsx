@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { Box } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 // Phase 3.3 — Lazy-load <model-viewer> below in a useEffect.
 
