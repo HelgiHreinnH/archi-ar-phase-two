@@ -393,12 +393,11 @@ const ARViewer = () => {
         );
       }
       return (
-        <ARDetection
+        <MultipointViewer
           key={resetKey}
           mode={project.mode}
           markers={markers}
           markerCount={markerCount}
-          trackingFormat={trackingFormat}
           onTargetFound={handleTargetFound}
           onTargetLost={handleTargetLost}
           onCancel={() => setViewState("landing")}
