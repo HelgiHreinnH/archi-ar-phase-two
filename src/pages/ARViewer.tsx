@@ -72,8 +72,7 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
-  const trackingFormat = project?.tracking_format || "mindar-mind";
-  const trackingFileUrl = project?.tracking_file_url || null;
+  // Multipoint always uses MindAR with a .mind file (8th Wall XR8 path removed)
 
   // Dynamic marker status state
   const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({});
