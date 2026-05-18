@@ -353,7 +353,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
       {/* Footer hint */}
       <footer className="relative z-10 px-4 py-3 border-t bg-card">
         <p className="text-center text-xs text-muted-foreground">
-          Drag to orbit · Pinch to zoom · Tap "View in AR" to place in your space
+          Drag to orbit · Pinch to zoom · AR launches automatically when ready
         </p>
       </footer>
     </div>
