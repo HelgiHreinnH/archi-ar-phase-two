@@ -137,6 +137,20 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
     };
   }, [mvReady, modelUrl, retryKey, usdzUrl, project.id]);
 
+  // Auto-launch native AR (Quick Look / Scene Viewer) 1.5s after model load.
+  // Removes the extra "View in AR" tap for the QR-scan client flow. The orbit
+  // viewer stays as a fallback if the user dismisses AR and returns.
+  useEffect(() => {
+    if (loadState !== "loaded") return;
+    const iosUsdz = (hasUsdz(usdzUrl) ? usdzUrl : null) || (hasUsdz(modelUrl) ? modelUrl : undefined);
+    if (isIOS() && !iosUsdz) return; // iOS-without-USDZ: keep warning banner, no auto-launch
+    const t = window.setTimeout(() => {
+      const el = mvRef.current as (HTMLElement & { activateAR?: () => void }) | null;
+      try { el?.activateAR?.(); } catch (err) { console.warn("[TabletopViewer] activateAR failed:", err); }
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [loadState, modelUrl, usdzUrl]);
+
   // Track A — release the model-viewer's internal Three.js renderer/textures
   // on unmount so navigating between experiences doesn't stack GPU memory.
   useEffect(() => {
@@ -339,7 +353,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
       {/* Footer hint */}
       <footer className="relative z-10 px-4 py-3 border-t bg-card">
         <p className="text-center text-xs text-muted-foreground">
-          Drag to orbit · Pinch to zoom · Tap "View in AR" to place in your space
+          Drag to orbit · Pinch to zoom · AR launches automatically when ready
         </p>
       </footer>
     </div>
