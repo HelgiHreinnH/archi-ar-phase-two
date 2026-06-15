@@ -77,10 +77,12 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
 
     setLoadState("loading");
     setErrorDetail(null);
+    setHint("preparing");
 
     const onLoad = () => {
       console.log("[TabletopViewer] model loaded");
       setLoadState("loaded");
+      setHint("aim");
     };
     const onError = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
@@ -91,6 +93,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
           : "Model failed to load."
       );
       setLoadState("error");
+      setHint(null);
     };
 
     el.addEventListener("load", onLoad);
