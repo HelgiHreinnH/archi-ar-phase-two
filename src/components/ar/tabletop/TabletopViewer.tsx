@@ -46,6 +46,10 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  // Floating hint state — guides user during the load → auto-launch gap.
+  // "preparing" while the GLB downloads, "aim" during the brief pre-launch
+  // window, hidden once the native AR session starts or on error.
+  const [hint, setHint] = useState<"preparing" | "aim" | null>("preparing");
   const mvRef = useRef<HTMLElement | null>(null);
   const blockedReportedRef = useRef(false);
   const launchReportedRef = useRef(false);
@@ -73,10 +77,12 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
 
     setLoadState("loading");
     setErrorDetail(null);
+    setHint("preparing");
 
     const onLoad = () => {
       console.log("[TabletopViewer] model loaded");
       setLoadState("loaded");
+      setHint("aim");
     };
     const onError = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
@@ -87,6 +93,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
           : "Model failed to load."
       );
       setLoadState("error");
+      setHint(null);
     };
 
     el.addEventListener("load", onLoad);
@@ -98,6 +105,8 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
     const onArStatus = (ev: Event) => {
       const status = (ev as CustomEvent).detail?.status;
       if (status !== "session-started") return;
+      // AR session is live — hide the floating hint overlay.
+      setHint(null);
       if (launchReportedRef.current || !project.id) return;
       launchReportedRef.current = true;
       const ext = modelUrl?.split("?")[0]?.split(".").pop()?.toLowerCase() ?? null;
@@ -123,6 +132,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
         if (prev === "loading") {
           console.warn("[TabletopViewer] load timeout after", LOAD_TIMEOUT_MS, "ms");
           setErrorDetail("The 3D model is taking too long to load. Check your connection.");
+          setHint(null);
           return "error";
         }
         return prev;
@@ -319,6 +329,31 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
         </model-viewer>
           );
         })()}
+
+        {/* Floating guidance hint — sits above the model-viewer to tell the
+            user what to do while the model is loading and during the brief
+            pre-launch window before native AR takes over. Auto-hides when
+            the AR session starts or on error. */}
+        {hint && loadState !== "error" && (
+          <div
+            className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-20 w-[min(92%,22rem)] animate-fade-in"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-3 px-4 py-3 rounded-full bg-foreground/90 text-background backdrop-blur shadow-lg">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
+              </span>
+              <p className="text-xs font-medium leading-tight">
+                {hint === "preparing"
+                  ? "Preparing your 3D model — hold tight…"
+                  : "Point your camera at the floor or a flat surface"}
+              </p>
+            </div>
+          </div>
+        )}
+
 
         {/* Error overlay — shown when load fails or times out */}
         {loadState === "error" && (
