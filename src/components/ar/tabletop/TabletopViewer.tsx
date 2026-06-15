@@ -330,6 +330,31 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
           );
         })()}
 
+        {/* Floating guidance hint — sits above the model-viewer to tell the
+            user what to do while the model is loading and during the brief
+            pre-launch window before native AR takes over. Auto-hides when
+            the AR session starts or on error. */}
+        {hint && loadState !== "error" && (
+          <div
+            className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-20 w-[min(92%,22rem)] animate-fade-in"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-3 px-4 py-3 rounded-full bg-foreground/90 text-background backdrop-blur shadow-lg">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
+              </span>
+              <p className="text-xs font-medium leading-tight">
+                {hint === "preparing"
+                  ? "Preparing your 3D model — hold tight…"
+                  : "Point your camera at the floor or a flat surface"}
+              </p>
+            </div>
+          </div>
+        )}
+
+
         {/* Error overlay — shown when load fails or times out */}
         {loadState === "error" && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/95 p-6 animate-fade-in">
