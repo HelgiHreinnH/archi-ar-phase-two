@@ -46,6 +46,10 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  // Floating hint state — guides user during the load → auto-launch gap.
+  // "preparing" while the GLB downloads, "aim" during the brief pre-launch
+  // window, hidden once the native AR session starts or on error.
+  const [hint, setHint] = useState<"preparing" | "aim" | null>("preparing");
   const mvRef = useRef<HTMLElement | null>(null);
   const blockedReportedRef = useRef(false);
   const launchReportedRef = useRef(false);
