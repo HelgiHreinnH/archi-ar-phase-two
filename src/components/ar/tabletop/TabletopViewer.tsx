@@ -105,6 +105,8 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
     const onArStatus = (ev: Event) => {
       const status = (ev as CustomEvent).detail?.status;
       if (status !== "session-started") return;
+      // AR session is live — hide the floating hint overlay.
+      setHint(null);
       if (launchReportedRef.current || !project.id) return;
       launchReportedRef.current = true;
       const ext = modelUrl?.split("?")[0]?.split(".").pop()?.toLowerCase() ?? null;
