@@ -132,6 +132,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
         if (prev === "loading") {
           console.warn("[TabletopViewer] load timeout after", LOAD_TIMEOUT_MS, "ms");
           setErrorDetail("The 3D model is taking too long to load. Check your connection.");
+          setHint(null);
           return "error";
         }
         return prev;
