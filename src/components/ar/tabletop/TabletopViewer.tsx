@@ -348,7 +348,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
               <p className="text-xs font-medium leading-tight">
                 {hint === "preparing"
                   ? "Preparing your 3D model — hold tight…"
-                  : "Point your camera at the QR code to load model"}
+                  : "AR is launching — point your camera at a flat surface"}
               </p>
             </div>
           </div>

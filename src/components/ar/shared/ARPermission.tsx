@@ -5,9 +5,12 @@ interface ARPermissionProps {
   onCancel: () => void;
   onRetry: () => void;
   errorMessage?: string | null;
+  /** Optional graceful-degradation path (e.g. tabletop → native device AR) */
+  onFallback?: () => void;
+  fallbackLabel?: string;
 }
 
-const ARPermission = ({ onCancel, onRetry, errorMessage }: ARPermissionProps) => {
+const ARPermission = ({ onCancel, onRetry, errorMessage, onFallback, fallbackLabel }: ARPermissionProps) => {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <div className="max-w-sm w-full text-center space-y-6">
@@ -20,13 +23,20 @@ const ARPermission = ({ onCancel, onRetry, errorMessage }: ARPermissionProps) =>
             {errorMessage || "Please enable camera permissions in your device settings to view this AR experience."}
           </p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" className="flex-1" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button className="flex-1" onClick={onRetry}>
-            Try Again
-          </Button>
+        <div className="space-y-3">
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button className="flex-1" onClick={onRetry}>
+              Try Again
+            </Button>
+          </div>
+          {onFallback && (
+            <Button variant="ghost" className="w-full text-muted-foreground" onClick={onFallback}>
+              {fallbackLabel ?? "Continue without camera tracking"}
+            </Button>
+          )}
         </div>
       </div>
     </div>

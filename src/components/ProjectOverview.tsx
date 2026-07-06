@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Download, MapPin, FileText, Image,
+  Download, MapPin, FileText,
   MoreVertical, Pencil, Trash2,
 } from "lucide-react";
 import {
@@ -125,35 +125,28 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
               <div className="space-y-1.5 pt-1 border-t">
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Downloads</span>
 
-                {mode === "tabletop" && (() => {
-                  const markerImageUrlsData = project.marker_image_urls as Record<string, string> | null;
-                  const arRefUrl = markerImageUrlsData?.tabletop;
-                  return arRefUrl ? (
-                    <div className="space-y-1">
-                      <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs h-7" asChild>
-                        <a href={arRefUrl} download={`ar_marker_${project.name.replace(/\s+/g, "_")}.png`} target="_blank" rel="noopener noreferrer">
-                          <Image className="h-3 w-3" />
-                          AR Reference Image
-                        </a>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start gap-2 text-xs h-7"
-                        onClick={async () => {
-                          try {
-                            await downloadTabletopPrintSheet(project.name, shareUrl!, arRefUrl);
-                          } catch {
-                            toast({ title: "PDF generation failed", variant: "destructive" });
-                          }
-                        }}
-                      >
-                        <FileText className="h-3 w-3" />
-                        Print Sheet (PDF)
-                      </Button>
-                    </div>
-                  ) : null;
-                })()}
+                {mode === "tabletop" && (
+                  <div className="space-y-1">
+                    {/* The printed QR is the AR anchor — the print sheet renders it
+                        at the exact physical size the tracking engine expects. */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start gap-2 text-xs h-7"
+                      onClick={async () => {
+                        try {
+                          await downloadTabletopPrintSheet(project.name, shareUrl!);
+                        } catch (err) {
+                          console.error("[ProjectOverview] print sheet failed:", err);
+                          toast({ title: "PDF generation failed", variant: "destructive" });
+                        }
+                      }}
+                    >
+                      <FileText className="h-3 w-3" />
+                      Print Sheet (PDF)
+                    </Button>
+                  </div>
+                )}
 
                 {mode === "multipoint" && markerData && markerData.length > 0 && (
                   <div className="space-y-1">

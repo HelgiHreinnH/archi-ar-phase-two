@@ -72,7 +72,10 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
-  // Multipoint always uses MindAR with a .mind file (8th Wall XR8 path removed)
+  // Both modes use MindAR image tracking (8th Wall XR8 path removed).
+  // Tabletop's single tracking target is the printed QR code itself; projects
+  // generated before QR anchoring have no .mind and fall back to model-viewer.
+  const projectHasMindFile = !!project?.mind_file_url;
 
   // Dynamic marker status state
   const [markers, setMarkers] = useState<Record<string, MarkerStatus>>({});
@@ -105,17 +108,20 @@ const ARViewer = () => {
       dlog("refetch failed (will continue with cached URLs):", e);
     }
 
-    // Tabletop: model-viewer has its own readiness flow + loading spinner,
-    // so flip straight there. Multipoint keeps a brief dwell to mask gyro
-    // permission + MindAR engine init.
-    if (!isMultipoint) {
-      dlog("launchAR → model-viewer (tabletop)");
+    // Tabletop WITHOUT a compiled tracking file (legacy projects generated
+    // before QR anchoring was restored): fall back to model-viewer's native
+    // SLAM placement — the model is user-placed, not QR-anchored.
+    if (!isMultipoint && !projectHasMindFile) {
+      dlog("launchAR → model-viewer (tabletop legacy fallback, no .mind)");
       setViewState("model-viewer");
       return;
     }
 
+    // Tabletop with .mind + all multipoint: MindAR image tracking. For
+    // tabletop the single target is the printed QR code — the model's centre
+    // locks onto it so it never floats freely in the room.
     setTimeout(async () => {
-      // Multi-point: request gyro permission, then launch detection
+      // Request gyro permission, then launch detection
       try {
         const DOE = DeviceOrientationEvent as any;
         if (typeof DOE.requestPermission === "function") {
@@ -125,10 +131,10 @@ const ARViewer = () => {
         // Silently ignore — gyro compensation will gracefully degrade
       }
       setMarkers(getInitialMarkers());
-      dlog("launchAR → detecting (multipoint)", { markerCount });
+      dlog("launchAR → detecting", { isMultipoint, markerCount });
       setViewState("detecting");
     }, 2000);
-  }, [isMultipoint, getInitialMarkers, refetch, markerCount]);
+  }, [isMultipoint, projectHasMindFile, getInitialMarkers, refetch, markerCount]);
 
   const handleTargetFound = useCallback((index: number) => {
     if (isMultipoint) {
@@ -305,6 +311,11 @@ const ARViewer = () => {
           onCancel={() => setViewState("landing")}
           onRetry={launchAR}
           errorMessage={arErrorMessage}
+          // Tabletop can degrade to native device AR (model-viewer) if the
+          // in-browser camera path fails — user-placed instead of QR-anchored,
+          // but better than a dead end.
+          onFallback={!isMultipoint ? () => setViewState("model-viewer") : undefined}
+          fallbackLabel={!isMultipoint ? "Use device AR instead" : undefined}
         />
       );
 

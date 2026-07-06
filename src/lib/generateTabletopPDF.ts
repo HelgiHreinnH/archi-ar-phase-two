@@ -1,21 +1,32 @@
 /**
  * Generates an A4 print sheet PDF for tabletop AR projects.
  *
+ * The QR code is BOTH the launch link and the AR anchor: the compiled .mind
+ * tracking target is built from this exact QR image, and the 3D model locks
+ * onto its centre in the AR view.
+ *
+ * CRITICAL — physical size: MindARScene assumes the printed tracking target is
+ * MARKER_SIZE_MM (150mm) wide. The QR on this sheet is laid out at exactly
+ * 150 × 150mm, and the sheet must be printed at 100% scale ("actual size")
+ * for the model's scale to be correct.
+ *
  * Layout (portrait A4):
  * - Header bar with project name
- * - Two columns: QR Code (left) | AR Reference Image (right)
- * - Step labels below each image
+ * - Centred 150mm QR code with cut guides
  * - Instructions section
  * - Footer branding
  */
 
 import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
+import { TABLETOP_QR_OPTIONS } from "@/hooks/useTabletopGeneration";
+
+/** Must match MARKER_SIZE_MM in MindARScene.tsx */
+const QR_PRINT_SIZE_MM = 150;
 
 export async function downloadTabletopPrintSheet(
   projectName: string,
-  shareUrl: string,
-  arReferenceImageUrl: string
+  shareUrl: string
 ): Promise<void> {
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -42,60 +53,47 @@ export async function downloadTabletopPrintSheet(
 
   pdf.setFontSize(7.5);
   pdf.setFont("helvetica", "normal");
-  pdf.text("TABLETOP AR EXPERIENCE — PRINT SHEET", pageW / 2, headerH / 2 + 8, { align: "center" });
+  pdf.text("TABLETOP AR EXPERIENCE — PRINT AT 100% / ACTUAL SIZE", pageW / 2, headerH / 2 + 8, { align: "center" });
 
-  // ── Two-column image area ──
-  const colGap = 8;
-  const colW = (contentW - colGap) / 2;
-  const imgY = headerH + 10;
-  const imgSize = colW; // square images
-
-  // Left column: QR Code
+  // ── Centred QR code at exact physical size ──
+  // Rendered with the same options used at generation time so the print
+  // matches the compiled .mind tracking target.
   const qrCanvas = document.createElement("canvas");
-  await QRCode.toCanvas(qrCanvas, shareUrl, {
-    width: 600,
-    margin: 2,
-    color: { dark: "#121212", light: "#ffffff" },
-  });
+  await QRCode.toCanvas(qrCanvas, shareUrl, TABLETOP_QR_OPTIONS);
   const qrDataUrl = qrCanvas.toDataURL("image/png");
 
-  // Card background for QR
-  pdf.setFillColor(...LIGHT_GREY);
-  pdf.roundedRect(margin, imgY, colW, imgSize + 22, 3, 3, "F");
-  pdf.addImage(qrDataUrl, "PNG", margin + 4, imgY + 4, colW - 8, imgSize - 8);
+  const qrX = (pageW - QR_PRINT_SIZE_MM) / 2;
+  const qrY = headerH + 14;
+  pdf.addImage(qrDataUrl, "PNG", qrX, qrY, QR_PRINT_SIZE_MM, QR_PRINT_SIZE_MM);
+
+  // Corner cut guides around the QR
+  pdf.setDrawColor(...MID_GREY);
+  pdf.setLineWidth(0.3);
+  const g = 6; // guide length
+  const o = 3; // offset from QR edge
+  const x0 = qrX - o, y0 = qrY - o, x1 = qrX + QR_PRINT_SIZE_MM + o, y1 = qrY + QR_PRINT_SIZE_MM + o;
+  // top-left
+  pdf.line(x0, y0 + g, x0, y0); pdf.line(x0, y0, x0 + g, y0);
+  // top-right
+  pdf.line(x1 - g, y0, x1, y0); pdf.line(x1, y0, x1, y0 + g);
+  // bottom-left
+  pdf.line(x0, y1 - g, x0, y1); pdf.line(x0, y1, x0 + g, y1);
+  // bottom-right
+  pdf.line(x1 - g, y1, x1, y1); pdf.line(x1, y1 - g, x1, y1);
 
   // Label below QR
+  const labelY = y1 + 7;
   pdf.setTextColor(...BLACK);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(9);
-  pdf.text("STEP 1 — SCAN TO LAUNCH", margin + colW / 2, imgY + imgSize + 2, { align: "center" });
+  pdf.text("SCAN TO LAUNCH — THE MODEL APPEARS ON THIS CODE", pageW / 2, labelY, { align: "center" });
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(7.5);
   pdf.setTextColor(...MID_GREY);
-  pdf.text("Scan with your phone camera", margin + colW / 2, imgY + imgSize + 8, { align: "center" });
-
-  // Right column: AR Reference Image
-  const rightX = margin + colW + colGap;
-
-  // Load the AR reference image
-  const arImg = await loadImageAsDataUrl(arReferenceImageUrl);
-
-  pdf.setFillColor(...LIGHT_GREY);
-  pdf.roundedRect(rightX, imgY, colW, imgSize + 22, 3, 3, "F");
-  pdf.addImage(arImg, "PNG", rightX + 4, imgY + 4, colW - 8, imgSize - 8);
-
-  // Label below AR image
-  pdf.setTextColor(...BLACK);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(9);
-  pdf.text("STEP 2 — POINT CAMERA HERE", rightX + colW / 2, imgY + imgSize + 2, { align: "center" });
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(7.5);
-  pdf.setTextColor(...MID_GREY);
-  pdf.text("Point your camera at this marker", rightX + colW / 2, imgY + imgSize + 8, { align: "center" });
+  pdf.text(`Printed size: ${QR_PRINT_SIZE_MM} × ${QR_PRINT_SIZE_MM} mm — do not scale`, pageW / 2, labelY + 5, { align: "center" });
 
   // ── Divider ──
-  const divY = imgY + imgSize + 28;
+  const divY = labelY + 11;
   pdf.setDrawColor(...LIGHT_GREY);
   pdf.setLineWidth(0.4);
   pdf.line(margin, divY, pageW - margin, divY);
@@ -108,11 +106,11 @@ export async function downloadTabletopPrintSheet(
   pdf.text("HOW TO USE", margin, instrY);
 
   const steps = [
-    "1.  Print both images on this sheet at full size.",
-    "2.  Place the AR Marker flat on the surface where you want the model to appear.",
-    "3.  Scan the QR Code with your phone camera to open the AR experience.",
-    "4.  Tap Launch AR, then point your phone camera at the AR Marker.",
-    "5.  The 3D model will appear anchored to the marker.",
+    "1.  Print this sheet at 100% scale (no 'fit to page').",
+    "2.  Place it flat on the table where the model should appear.",
+    "3.  Scan the QR code with a phone or tablet camera to open the experience.",
+    "4.  Tap Launch AR, then point the camera back at this QR code.",
+    "5.  The 3D model appears anchored to the centre of the code.",
   ];
 
   pdf.setFont("helvetica", "normal");
@@ -133,13 +131,13 @@ export async function downloadTabletopPrintSheet(
   pdf.setFontSize(7.5);
   pdf.setTextColor(...MID_GREY);
   pdf.text(
-    "TIP: For best tracking, print the AR Marker at A5 size or larger and place it on a flat, well-lit surface.",
+    "TIP: Use matte paper on a flat, well-lit surface. Keep the QR code fully visible while viewing.",
     margin + 4,
     tipY + 5.5
   );
   pdf.setFont("helvetica", "normal");
   pdf.text(
-    "Avoid glossy paper. Keep the marker fully visible and unobstructed during the AR session.",
+    "The model stays locked to the code — move around it to view the design from all sides.",
     margin + 4,
     tipY + 10
   );
@@ -160,18 +158,4 @@ export async function downloadTabletopPrintSheet(
   pdf.text("Generated by Archisparkle AR Platform", pageW / 2, pageH - 5, { align: "center" });
 
   pdf.save(`${projectName.replace(/\s+/g, "_")}_AR_PrintSheet.pdf`);
-}
-
-/**
- * Load a remote image URL as a base64 data URL (handles CORS via fetch).
- */
-async function loadImageAsDataUrl(url: string): Promise<string> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }

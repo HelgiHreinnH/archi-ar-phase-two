@@ -300,7 +300,7 @@ const MultipointViewer = ({
   let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
   let guideDescription = isMultipoint
     ? `Slowly scan the space to locate the ${totalMarkers} position markers. Hold steady when a marker is in view.`
-    : "Point your camera at the AR marker on the table. Hold steady when the marker is in view.";
+    : "Point your camera at the printed QR code on the table. Hold steady when the code is in view.";
 
   if (!arReady) {
     guideIcon = <Loader2 className="h-4 w-4 animate-spin" />;

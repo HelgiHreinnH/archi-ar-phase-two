@@ -114,7 +114,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
             <p className="text-sm text-muted-foreground leading-relaxed">
               {isMultipoint
                 ? "Point your camera at the colored markers placed in the space to see the 3D design appear at full scale."
-                : "View the 3D model with orbit controls, then tap 'View in AR' to place it on any surface using your device's built-in AR."}
+                : "Point your camera at the printed QR code on the table — the 3D model will appear anchored on top of it."}
             </p>
           </div>
           <Button size="lg" className="w-full gap-2" onClick={() => { prewarmCamera(); onLaunchAR(); }}>
