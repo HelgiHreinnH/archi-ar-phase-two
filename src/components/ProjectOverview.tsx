@@ -106,7 +106,7 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
                   <p className="font-medium truncate">{project.location}</p>
                 </div>
               )}
-              {mode === "tabletop" && (
+              {mode !== "multipoint" && (
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Scale</span>
@@ -125,7 +125,7 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
               <div className="space-y-1.5 pt-1 border-t">
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Downloads</span>
 
-                {mode === "tabletop" && (
+                {mode !== "multipoint" && (
                   <div className="space-y-1">
                     {/* The printed QR is the AR anchor — the print sheet renders it
                         at the exact physical size the tracking engine expects. */}
