@@ -32,7 +32,7 @@ interface GenerateExperienceProps {
   project: Project;
   hasModel: boolean;
   hasValidMarkers: boolean;
-  mode: "tabletop" | "multipoint";
+  mode: "tabletop" | "wall" | "multipoint";
   markerData: MarkerPoint[] | null;
   onGenerated: () => void;
 }

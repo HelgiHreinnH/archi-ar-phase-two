@@ -29,7 +29,7 @@ type Project = Tables<"projects">;
 
 interface StepDetailsProps {
   project: Project;
-  mode: "tabletop" | "multipoint";
+  mode: "tabletop" | "wall" | "multipoint";
   onSaved: () => void;
 }
 

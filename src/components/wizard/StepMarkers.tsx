@@ -7,7 +7,7 @@ type Project = Tables<"projects">;
 
 interface StepMarkersProps {
   project: Project;
-  mode: "tabletop" | "multipoint";
+  mode: "tabletop" | "wall" | "multipoint";
   markerData: MarkerPoint[] | null;
   onUpdate: () => void;
 }
