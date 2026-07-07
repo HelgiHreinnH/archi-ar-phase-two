@@ -13,6 +13,12 @@ const modeConfig = {
     borderColor: "border-l-blue-500",
     badgeBg: "bg-blue-100 text-blue-700",
   },
+  wall: {
+    icon: Grid3X3,
+    label: "Wall",
+    borderColor: "border-l-sky-500",
+    badgeBg: "bg-sky-100 text-sky-700",
+  },
   multipoint: {
     icon: MapPin,
     label: "Multi-Point",

@@ -18,6 +18,11 @@ const modeConfig = {
     label: "Tabletop",
     badgeBg: "bg-primary/10 text-primary",
   },
+  wall: {
+    icon: Grid3X3,
+    label: "Wall",
+    badgeBg: "bg-primary/10 text-primary",
+  },
   multipoint: {
     icon: MapPin,
     label: "Multi-Point",
