@@ -32,7 +32,7 @@ interface ProjectOverviewProps {
 }
 
 const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) => {
-  const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
+  const mode = (project.mode === "multipoint" ? "multipoint" : (project.mode === "wall" ? "wall" : "tabletop"));
   const markerData = normalizeMarkerData(project.marker_data);
   const shareUrl = project.share_link
     ? buildPublicExperienceUrl(project.share_link)

@@ -65,7 +65,7 @@ const ProjectDetail = () => {
     );
   }
 
-  const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
+  const mode = (project.mode === "multipoint" ? "multipoint" : (project.mode === "wall" ? "wall" : "tabletop"));
   const config = modeConfig[mode];
   const ModeIcon = config.icon;
   const isActive = project.status === "active";
