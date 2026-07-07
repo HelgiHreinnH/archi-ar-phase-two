@@ -6,6 +6,11 @@ import {
   createGyroListener,
 } from "@/lib/arGyro";
 import { teardownThree } from "@/lib/threeDispose";
+import { ModelLoadError } from "@/lib/modelLoadError";
+// Type-only import — erased at build, so it does not pull the npm three package
+// at runtime (the scene loads a self-hosted three.module.js). Used to type the
+// Fix 5/6 guidance helper without adding to the file's `any` surface.
+import type * as THREE from "three";
 
 interface MindARSceneProps {
   /** URL of the .mind compiled image target file */
@@ -38,6 +43,38 @@ interface MindARSceneProps {
   markerData?: import("@/lib/markerTypes").MarkerPoint[] | null;
   /** Pre-fetched GLB ArrayBuffer (Fix 8: prefetch during scanning) */
   prefetchedModel?: ArrayBuffer | null;
+  /**
+   * Fix 5 (Jul 2026): live guidance toward not-yet-found markers during the
+   * scanning phase. Positions are projected from the currently-visible
+   * reference anchor's pose. Emitted ~5×/s; empty array once none remain.
+   */
+  onScanGuidance?: (hints: ScanHint[]) => void;
+  /**
+   * Fix 6 (Jul 2026): raw camera-space positions of currently-visible anchors,
+   * emitted ~5×/s. Used by the architect placement validator to compare
+   * observed inter-marker distances against the Rhino coordinate definitions.
+   */
+  onAnchorSample?: (samples: AnchorSample[]) => void;
+}
+
+/** A single directional hint toward an undetected marker (Fix 5). */
+export interface ScanHint {
+  /** Marker index (1-based, matches MarkerPoint.index). */
+  index: number;
+  /** Normalized screen X in [0,1], left→right. */
+  x: number;
+  /** Normalized screen Y in [0,1], top→bottom. */
+  y: number;
+  /** True when the projected point falls within the viewport and in front of camera. */
+  onScreen: boolean;
+}
+
+/** Observed camera-space position of a visible anchor (Fix 6). */
+export interface AnchorSample {
+  index: number;
+  x: number;
+  y: number;
+  z: number;
 }
 
 // Phase 2.3 — Self-hosted Three.js. See XR8Scene.tsx for rationale.
@@ -52,7 +89,7 @@ const MINDAR_THREE_URL =
  * Physical size of the printed AR marker in millimetres.
  * 1 MindAR unit ≈ 1 marker width.
  */
-const MARKER_SIZE_MM = 150;
+export const MARKER_SIZE_MM = 150;
 
 /** Float height above marker plane for tabletop mode (in MindAR units). */
 const FLOAT_ABOVE_MARKER = 0.267;
@@ -79,8 +116,27 @@ const OCCLUSION_GRACE_MS = 500;
  */
 const SOFT_CORRECTION_ALPHA = 0.05;
 
+/**
+ * Multipoint finalize (Jul 2026): minimum number of simultaneously-visible
+ * anchors required before soft correction is allowed to move the locked model.
+ *
+ * With a single visible anchor, computeWorldTransform can only return a
+ * translation-only (1-marker) solution, which can *tug* a correctly-locked
+ * model toward one marker's noise. Requiring ≥2 anchors keeps at least a
+ * rotation constraint in the correction. When only 2 are visible (pair
+ * solution, no full plane) we further halve the blend so a partial solution
+ * nudges rather than yanks; a full 3-anchor Procrustes solution gets full alpha.
+ */
+const SOFT_CORRECTION_MIN_ANCHORS = 2;
+
 /** Bug 4 fix: Detection stall timeout in ms — auto-degrade after this. */
 const DETECTION_STALL_TIMEOUT_MS = 30_000;
+
+/** Fix 5/6: emit scan guidance + validator samples every N render frames (~5×/s @30fps). */
+const GUIDANCE_THROTTLE_FRAMES = 6;
+
+/** Fix 5/6: frames since an anchor's last update within which it still counts as "visible now". */
+const ANCHOR_VISIBLE_WINDOW = 4;
 
 /** GLB magic number: ASCII "glTF" = 0x676C5446 (little-endian: 0x46546C67) */
 const GLB_MAGIC = 0x46546C67;
@@ -120,6 +176,8 @@ const MindARScene = ({
   initialRotation = 0,
   markerData,
   prefetchedModel,
+  onScanGuidance,
+  onAnchorSample,
 }: MindARSceneProps) => {
   const isTabletop = mode === "tabletop";
   const floatAboveMarker = isTabletop ? FLOAT_ABOVE_MARKER : 0;
@@ -132,13 +190,17 @@ const MindARScene = ({
   const onTargetLostRef = useRef(onTargetLost);
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
+  const onScanGuidanceRef = useRef(onScanGuidance);
+  const onAnchorSampleRef = useRef(onAnchorSample);
 
   useEffect(() => {
     onTargetFoundRef.current = onTargetFound;
     onTargetLostRef.current = onTargetLost;
     onReadyRef.current = onReady;
     onErrorRef.current = onError;
-  }, [onTargetFound, onTargetLost, onReady, onError]);
+    onScanGuidanceRef.current = onScanGuidance;
+    onAnchorSampleRef.current = onAnchorSample;
+  }, [onTargetFound, onTargetLost, onReady, onError, onScanGuidance, onAnchorSample]);
 
   const startAR = useCallback(async () => {
     if (!containerRef.current) return;
@@ -234,6 +296,14 @@ const MindARScene = ({
 
       // ── Fix 4: Track which anchors are currently visible while locked
       const anchorVisibleWhileLocked: boolean[] = new Array(maxTrack).fill(false);
+
+      // ── Fix 5/6: Scanning-phase guidance + validator sampling state ──
+      // foundOnce[i]     — anchor i has fired onTargetFound at least once
+      // lastPoseFrame[i] — render-loop frame index of anchor i's last update
+      // frameCount       — monotonic render-loop counter (drives visibility + throttle)
+      const foundOnce: boolean[] = new Array(maxTrack).fill(false);
+      const lastPoseFrame: number[] = new Array(maxTrack).fill(-999);
+      let frameCount = 0;
 
       /**
        * Fix 3: Check if an anchor's recent pose history has low enough variance.
@@ -352,6 +422,7 @@ const MindARScene = ({
 
               if (anchorState === "tracking") {
                 stableFrameCounts[0]++;
+                lastPoseFrame[0] = frameCount;
                 recordPose(0, anchor.group.matrix);
                 anchorPoseMatrices[0] = anchor.group.matrix.clone();
 
@@ -385,6 +456,7 @@ const MindARScene = ({
 
             // ── Fix 2: onTargetFound — DON'T reset when locked ──────
             anchor.onTargetFound = () => {
+              foundOnce[0] = true;
               if (anchorState === "locked") {
                 // Mark anchor as visible for soft correction (Fix 4)
                 anchorVisibleWhileLocked[0] = true;
@@ -414,15 +486,27 @@ const MindARScene = ({
             };
 
           } catch (loadError) {
+            // Multipoint finalize (Jul 2026): a GLB load failure used to be
+            // swallowed here — anchors kept tracking but no model ever appeared,
+            // leaving the client at a silent dead-end. Surface a typed error so
+            // ARViewer can route to the ModelUnavailableRecovery flow (which
+            // re-signs the URL and retries) instead of failing invisibly.
             console.warn("Failed to load GLB model:", loadError);
             anchor.onTargetFound = () => onTargetFoundRef.current?.(i);
             anchor.onTargetLost = () => onTargetLostRef.current?.(i);
+            onErrorRef.current?.(
+              new ModelLoadError(
+                "The 3D model failed to load. The link may have expired.",
+                loadError
+              )
+            );
           }
         } else {
           // Anchors 1+ — multi-point tracking-only
           anchor.onTargetUpdate = () => {
             if (anchorState === "tracking") {
               stableFrameCounts[i]++;
+              lastPoseFrame[i] = frameCount;
               recordPose(i, anchor.group.matrix);
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
             }
@@ -434,6 +518,7 @@ const MindARScene = ({
           };
 
           anchor.onTargetFound = () => {
+            foundOnce[i] = true;
             if (anchorState === "locked") {
               anchorVisibleWhileLocked[i] = true;
             }
@@ -549,7 +634,15 @@ const MindARScene = ({
             matrix: new Float32Array(anchorPoseMatrices[idx].elements),
           }));
 
-        if (visibleAnchors.length === 0) return;
+        // Multipoint finalize (Jul 2026): require ≥2 visible anchors so a lone
+        // marker's translation-only solution can't drag a good lock off-target.
+        if (visibleAnchors.length < SOFT_CORRECTION_MIN_ANCHORS) return;
+
+        // Scale the blend by how well-constrained the correction is:
+        // 3+ anchors → full Procrustes (full alpha); 2 anchors → half.
+        const alpha = visibleAnchors.length >= 3
+          ? SOFT_CORRECTION_ALPHA
+          : SOFT_CORRECTION_ALPHA * 0.5;
 
         const corrected = computeWorldTransform(visibleAnchors, markerData!, MARKER_SIZE_MM);
         if (!corrected) return;
@@ -568,12 +661,91 @@ const MindARScene = ({
         const corrScl = new T.Vector3();
         correctedMat.decompose(corrPos, corrQuat, corrScl);
 
-        // Blend position and rotation toward corrected
-        lockedPos.lerp(corrPos, SOFT_CORRECTION_ALPHA);
-        lockedQuat.slerp(corrQuat, SOFT_CORRECTION_ALPHA);
+        // Blend position and rotation toward corrected (alpha scaled by anchor count)
+        lockedPos.lerp(corrPos, alpha);
+        lockedQuat.slerp(corrQuat, alpha);
 
         // Recompose into lockedMatrix (this updates the reference for gyro loop)
         lockedMatrix.compose(lockedPos, lockedQuat, lockedScl);
+      }
+
+      // ── Fix 5/6: scanning-phase guidance + validator sampling ─────
+      // An anchor counts as "visible now" if it updated within the last few
+      // frames and we hold a pose matrix for it.
+      function isAnchorVisibleNow(idx: number): boolean {
+        return frameCount - lastPoseFrame[idx] <= ANCHOR_VISIBLE_WINDOW && !!anchorPoseMatrices[idx];
+      }
+
+      function emitGuidanceAndSamples(T: typeof THREE, cam: THREE.Camera) {
+        if (!markerData) return;
+
+        // ── Fix 6: raw camera-space anchor positions for the placement validator ──
+        if (onAnchorSampleRef.current) {
+          const samples: AnchorSample[] = [];
+          for (let idx = 0; idx < maxTrack; idx++) {
+            if (!isAnchorVisibleNow(idx)) continue;
+            const m = anchorPoseMatrices[idx];
+            samples.push({
+              index: markerData[idx]?.index ?? (idx + 1),
+              x: m.elements[12],
+              y: m.elements[13],
+              z: m.elements[14],
+            });
+          }
+          onAnchorSampleRef.current(samples);
+        }
+
+        // ── Fix 5: directional hints toward not-yet-found markers ──
+        if (!onScanGuidanceRef.current) return;
+
+        // Reference anchor = currently-visible anchor with the most stable frames.
+        let refIdx = -1;
+        for (let idx = 0; idx < maxTrack; idx++) {
+          if (!isAnchorVisibleNow(idx)) continue;
+          if (refIdx === -1 || stableFrameCounts[idx] > stableFrameCounts[refIdx]) refIdx = idx;
+        }
+        if (refIdx === -1) { onScanGuidanceRef.current([]); return; }
+
+        const refMarker = markerData[refIdx];
+        const refM = anchorPoseMatrices[refIdx];
+        if (!refMarker || !refM) { onScanGuidanceRef.current([]); return; }
+
+        const hints: ScanHint[] = [];
+        for (let idx = 0; idx < maxTrack; idx++) {
+          if (idx === refIdx || foundOnce[idx]) continue; // only guide toward unfound markers
+          const tm = markerData[idx];
+          if (!tm) continue;
+
+          // Rhino delta → marker-plane units. Coplanar assumption: markers lie
+          // flat with Rhino Z as the plane normal, so Rhino XY maps to the marker
+          // plane. Adequate for edge-arrow *direction* even when markers sit on
+          // different surfaces — the arrow points roughly the right way.
+          const dx = (tm.x - refMarker.x) / MARKER_SIZE_MM;
+          const dy = (tm.y - refMarker.y) / MARKER_SIZE_MM;
+          const dz = (tm.z - refMarker.z) / MARKER_SIZE_MM;
+
+          const world = new T.Vector3(dx, dy, dz).applyMatrix4(refM);
+          // Three cameras look down -z in view space; z<0 means in front.
+          const camSpace = world.clone().applyMatrix4(cam.matrixWorldInverse);
+          const inFront = camSpace.z < 0;
+
+          let x: number, y: number, onScreen: boolean;
+          if (inFront) {
+            const ndc = world.clone().project(cam); // [-1,1]
+            x = ndc.x * 0.5 + 0.5;
+            y = 1 - (ndc.y * 0.5 + 0.5);
+            onScreen = x >= 0 && x <= 1 && y >= 0 && y <= 1;
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+          } else {
+            // Behind the camera: keep the left/right sense, park low to say "turn around".
+            x = camSpace.x >= 0 ? 0.9 : 0.1;
+            y = 0.85;
+            onScreen = false;
+          }
+          hints.push({ index: tm.index, x, y, onScreen });
+        }
+        onScanGuidanceRef.current(hints);
       }
 
       // Start MindAR
@@ -632,6 +804,18 @@ const MindARScene = ({
 
       // ── Render loop with gyro compensation ────────────────────────
       renderer.setAnimationLoop(() => {
+        frameCount++;
+
+        // Fix 5/6: during scanning, emit guidance toward unfound markers and
+        // raw anchor samples for the validator. Best-effort — never break render.
+        if (
+          anchorState === "tracking" &&
+          frameCount % GUIDANCE_THROTTLE_FRAMES === 0 &&
+          (onScanGuidanceRef.current || onAnchorSampleRef.current)
+        ) {
+          try { emitGuidanceAndSamples(ThreeLib, camera); } catch { /* guidance is non-critical */ }
+        }
+
         if (
           anchorState === "locked" &&
           modelRef &&

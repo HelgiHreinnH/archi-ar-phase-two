@@ -11,6 +11,7 @@ import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRec
 import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
 import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
 import { MindARSRIError } from "@/lib/sriError";
+import { ModelLoadError } from "@/lib/modelLoadError";
 
 type Project = Tables<"projects">;
 type ViewerState = "landing" | "briefing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer";
@@ -163,11 +164,22 @@ const ARViewer = () => {
 
   const [arErrorMessage, setArErrorMessage] = useState<string | null>(null);
   const [sriErrorUrl, setSriErrorUrl] = useState<string | null>(null);
+  // Runtime GLB load failure inside the AR scene (distinct from a signing
+  // failure). Drives the ModelUnavailableRecovery flow — see handleARError.
+  const [modelRuntimeError, setModelRuntimeError] = useState<string | null>(null);
 
   const handleARError = useCallback((err?: Error) => {
     if (err instanceof MindARSRIError) {
       setSriErrorUrl(err.url);
       setViewState("sri-error");
+      return;
+    }
+    if (err instanceof ModelLoadError) {
+      // The model itself failed to load at runtime — re-signing + a fresh scene
+      // mount usually clears it, so route to the guided recovery flow rather
+      // than the "camera denied" screen.
+      dlog("model runtime load failure — surfacing recovery UI", err.message);
+      setModelRuntimeError(err.message || "The 3D model failed to load.");
       return;
     }
     setArErrorMessage(err?.message || "Camera access was denied.");
@@ -246,6 +258,30 @@ const ARViewer = () => {
           </p>
         </div>
       </div>
+    );
+  }
+
+  // The model loaded-URL was fine, but the GLB failed to load at runtime inside
+  // the AR scene (expired signed URL by the time the scene fetched it, network
+  // drop, corrupt bytes). Surface the same guided recovery flow — retry busts
+  // the cache, re-signs, and remounts the AR scene fresh.
+  if (modelRuntimeError) {
+    return (
+      <ModelUnavailableRecovery
+        shareId={shareId ?? ""}
+        projectName={project.name}
+        errorDetail={modelRuntimeError}
+        onRetry={async () => {
+          dlog("model runtime recovery → retry (bust cache, re-sign, remount)");
+          setModelRuntimeError(null);
+          if (sessionCacheKey && typeof sessionStorage !== "undefined") {
+            try { sessionStorage.removeItem(sessionCacheKey); } catch { /* ignore */ }
+          }
+          try { await refetch(); } catch { /* surfaced via query state */ }
+          setResetKey((k) => k + 1);
+          setViewState("detecting");
+        }}
+      />
     );
   }
 

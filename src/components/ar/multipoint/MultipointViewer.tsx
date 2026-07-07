@@ -3,7 +3,7 @@ import { ChevronDown, MapPin, Target, Check, Loader2, Info, Camera, RotateCcw } 
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
-import MindARScene from "./MindARScene";
+import MindARScene, { type ScanHint } from "./MindARScene";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
 
@@ -54,6 +54,10 @@ const MultipointViewer = ({
   const [isActive, setIsActive] = useState(false);
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
+
+  // Fix 5 (Jul 2026): live directional hints toward not-yet-found markers,
+  // projected from the currently-visible reference anchor inside MindARScene.
+  const [scanHints, setScanHints] = useState<ScanHint[]>([]);
 
   // ── Prefetch GLB *and* tracking file in parallel, with Phase 4 IDB cache ──
   const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
@@ -341,6 +345,7 @@ const MultipointViewer = ({
         initialRotation={initialRotation}
         markerData={markerData}
         prefetchedModel={prefetchedModel}
+        onScanGuidance={setScanHints}
         onTargetFound={onTargetFound}
         onTargetLost={onTargetLost}
         onReady={() => setArReady(true)}
@@ -349,6 +354,42 @@ const MultipointViewer = ({
           onError?.(err);
         }}
       />
+
+      {/* ── Fix 5 · Directional scan arrows toward undetected markers ── */}
+      {isMultipoint && !isActive && arReady && scanHints.length > 0 && (
+        <div className="pointer-events-none absolute inset-0 z-[5]">
+          {scanHints.map((h) => {
+            const color = getMarkerColor(h.index);
+            // Keep chips clear of the top/bottom guide cards.
+            const top = Math.max(20, Math.min(76, h.y * 100));
+            const left = Math.max(6, Math.min(94, h.x * 100));
+            return (
+              <div
+                key={h.index}
+                className="absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ease-out"
+                style={{ left: `${left}%`, top: `${top}%` }}
+              >
+                <div
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full bg-black/55 backdrop-blur-sm border border-white/25 pl-1 pr-2.5 py-1 shadow-lg",
+                    h.onScreen && "animate-pulse"
+                  )}
+                >
+                  <span
+                    className="h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                    style={{ backgroundColor: color.bg }}
+                  >
+                    {h.index}
+                  </span>
+                  <span className="text-[10px] font-medium text-white/90 whitespace-nowrap">
+                    {h.onScreen ? color.name : `${color.name} — this way`}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── DETECTION PHASE UI ── */}
       {!isActive && (
