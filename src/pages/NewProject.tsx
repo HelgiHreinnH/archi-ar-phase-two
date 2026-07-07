@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, ArrowRight, Grid3X3, MapPin } from "lucide-react";
+import { ArrowLeft, ArrowRight, Grid3X3, MapPin, LayoutPanelTop } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
-type Mode = "tabletop" | "multipoint";
+type Mode = "tabletop" | "wall" | "multipoint";
 
 const NewProject = () => {
   const navigate = useNavigate();
@@ -53,7 +53,7 @@ const NewProject = () => {
       </div>
 
       {/* Mode Selection */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <button
           type="button"
           onClick={() => setMode("tabletop")}
@@ -70,9 +70,30 @@ const NewProject = () => {
             <span className="font-display font-semibold">Tabletop</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            Single QR code on a table. Perfect for client presentations and design reviews at scale.
+            QR code laid flat on a table. Model anchors on top for design reviews at scale.
           </p>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setMode("wall")}
+          className={`relative rounded-xl border-2 p-5 text-left transition-all ${
+            mode === "wall"
+              ? "border-primary bg-primary/5 shadow-sm"
+              : "border-border hover:border-primary/30"
+          }`}
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <div className={`rounded-lg p-2 ${mode === "wall" ? "bg-primary/10" : "bg-muted"}`}>
+              <LayoutPanelTop className={`h-5 w-5 ${mode === "wall" ? "text-primary" : "text-muted-foreground"}`} />
+            </div>
+            <span className="font-display font-semibold">Wall</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            QR code mounted on a wall. Model anchors vertically — perfect for art, panels, or wall-mounted design.
+          </p>
+        </button>
+
 
         <button
           type="button"
