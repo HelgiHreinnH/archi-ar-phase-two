@@ -13,7 +13,7 @@ interface StepMarkersProps {
 }
 
 const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) => {
-  if (mode === "tabletop") {
+  if (mode !== "multipoint") {
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
