@@ -7,13 +7,13 @@ type Project = Tables<"projects">;
 
 interface StepMarkersProps {
   project: Project;
-  mode: "tabletop" | "multipoint";
+  mode: "tabletop" | "wall" | "multipoint";
   markerData: MarkerPoint[] | null;
   onUpdate: () => void;
 }
 
 const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) => {
-  if (mode === "tabletop") {
+  if (mode !== "multipoint") {
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
