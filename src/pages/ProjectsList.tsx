@@ -19,6 +19,12 @@ const modeConfig = {
     borderColor: "border-l-blue-500",
     badgeBg: "bg-blue-100 text-blue-700",
   },
+  wall: {
+    icon: Grid3X3,
+    label: "Wall",
+    borderColor: "border-l-sky-500",
+    badgeBg: "bg-sky-100 text-sky-700",
+  },
   multipoint: {
     icon: MapPin,
     label: "Multi-Point",
@@ -82,7 +88,7 @@ const ProjectsList = () => {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => {
-            const mode = (project as any).mode === "tabletop" ? "tabletop" : "multipoint";
+            const mode = ((project as any).mode === "multipoint" ? "multipoint" : ((project as any).mode === "wall" ? "wall" : "tabletop"));
             const config = modeConfig[mode];
             const ModeIcon = config.icon;
 

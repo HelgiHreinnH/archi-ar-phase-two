@@ -71,7 +71,7 @@ const ARViewer = () => {
 
   // Parse marker data once project loads
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
-  const isMultipoint = project?.mode !== "tabletop";
+  const isMultipoint = project?.mode !== "tabletop" && project?.mode !== "wall";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
   // Both modes use MindAR image tracking (8th Wall XR8 path removed).
   // Tabletop's single tracking target is the printed QR code itself; projects

@@ -9,7 +9,7 @@ type Project = Tables<"projects">;
 
 interface StepMarkersProps {
   project: Project;
-  mode: "tabletop" | "multipoint";
+  mode: "tabletop" | "wall" | "multipoint";
   markerData: MarkerPoint[] | null;
   onUpdate: () => void;
 }
@@ -19,7 +19,8 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
   const [validating, setValidating] = useState(false);
   const canValidate = !!project.mind_file_url && (markerData?.length ?? 0) >= 3;
 
-  if (mode === "tabletop") {
+  // Wall mode (added on main) takes the same single-QR path as tabletop.
+  if (mode !== "multipoint") {
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">

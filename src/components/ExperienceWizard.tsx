@@ -21,10 +21,11 @@ interface ExperienceWizardProps {
 const STEP_LABELS = ["Details", "3D Model", "Markers", "Generate"];
 
 const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) => {
-  const mode = (project.mode === "tabletop" ? "tabletop" : "multipoint") as "tabletop" | "multipoint";
+  const rawMode = project.mode;
+  const mode = (rawMode === "multipoint" ? "multipoint" : rawMode === "wall" ? "wall" : "tabletop") as "tabletop" | "wall" | "multipoint";
   const markerData = normalizeMarkerData(project.marker_data);
   const hasModel = !!project.model_url;
-  const hasValidMarkers = mode === "tabletop" || (
+  const hasValidMarkers = mode !== "multipoint" || (
     !!markerData && markerData.length >= 3 &&
     markerData.some((m) => m.x !== 0 || m.y !== 0 || m.z !== 0)
   );

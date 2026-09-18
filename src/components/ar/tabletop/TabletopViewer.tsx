@@ -27,6 +27,8 @@ interface TabletopViewerProps {
     name: string;
     description?: string | null;
     scale?: string | null;
+    /** "tabletop" (floor) or "wall" (vertical surface) — controls ar-placement. */
+    mode?: string | null;
   };
   onBack: () => void;
 }
@@ -41,6 +43,12 @@ interface TabletopViewerProps {
 const LOAD_TIMEOUT_MS = 25_000;
 
 const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerProps) => {
+  // Wall mode = QR mounted vertically → model anchors to the wall plane.
+  // Tabletop mode = QR on a horizontal surface → model anchors to the floor plane.
+  // The Z-up (tabletop) vs X/Y-plane (wall) distinction is expressed to the OS
+  // native AR runtime via the ar-placement attribute below.
+  const isWall = project.mode === "wall";
+  const arPlacement: "floor" | "wall" = isWall ? "wall" : "floor";
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
@@ -257,7 +265,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
           {...(iosBlocked ? {} : { ar: true })}
           ar-modes="webxr scene-viewer quick-look"
           ar-scale="auto"
-          ar-placement="floor"
+          ar-placement={arPlacement}
           camera-controls
           auto-rotate
           shadow-intensity="1"
@@ -348,7 +356,7 @@ const TabletopViewer = ({ modelUrl, usdzUrl, project, onBack }: TabletopViewerPr
               <p className="text-xs font-medium leading-tight">
                 {hint === "preparing"
                   ? "Preparing your 3D model — hold tight…"
-                  : "AR is launching — point your camera at a flat surface"}
+                  : `Point your camera at the QR code on the ${isWall ? "wall" : "table"} to load model`}
               </p>
             </div>
           </div>

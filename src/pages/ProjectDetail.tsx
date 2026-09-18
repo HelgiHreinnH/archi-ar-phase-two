@@ -18,6 +18,11 @@ const modeConfig = {
     label: "Tabletop",
     badgeBg: "bg-primary/10 text-primary",
   },
+  wall: {
+    icon: Grid3X3,
+    label: "Wall",
+    badgeBg: "bg-primary/10 text-primary",
+  },
   multipoint: {
     icon: MapPin,
     label: "Multi-Point",
@@ -65,7 +70,7 @@ const ProjectDetail = () => {
     );
   }
 
-  const mode = project.mode === "tabletop" ? "tabletop" : "multipoint";
+  const mode = (project.mode === "multipoint" ? "multipoint" : (project.mode === "wall" ? "wall" : "tabletop"));
   const config = modeConfig[mode];
   const ModeIcon = config.icon;
   const isActive = project.status === "active";

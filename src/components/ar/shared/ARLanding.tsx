@@ -24,7 +24,9 @@ interface ARLandingProps {
 }
 
 const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
-  const isMultipoint = project.mode !== "tabletop";
+  const isWall = project.mode === "wall";
+  const isMultipoint = project.mode !== "tabletop" && project.mode !== "wall";
+  const modeLabel = isMultipoint ? "Multi-Point" : isWall ? "Wall" : "Tabletop";
 
   // ── Preload heavy AR assets during landing-page dwell ──
   // The user typically reads the landing page for 2–4s. Use that time to
@@ -87,7 +89,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
             <div className="flex items-center gap-2">
               <h1 className="font-display font-bold text-lg truncate">{project.name}</h1>
               <Badge variant="secondary" className="text-[10px] shrink-0">
-                {isMultipoint ? "Multi-Point" : "Tabletop"}
+                {modeLabel}
               </Badge>
             </div>
             {project.client_name && (
@@ -114,7 +116,9 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
             <p className="text-sm text-muted-foreground leading-relaxed">
               {isMultipoint
                 ? "Point your camera at the colored markers placed in the space to see the 3D design appear at full scale."
-                : "Point your camera at the printed QR code on the table — the 3D model will appear anchored on top of it."}
+                : isWall
+                  ? "Point your camera at the printed QR code on the wall — the 3D model will appear anchored on top of it."
+                  : "Point your camera at the printed QR code on the table — the 3D model will appear anchored on top of it."}
             </p>
           </div>
           <Button size="lg" className="w-full gap-2" onClick={() => { prewarmCamera(); onLaunchAR(); }}>
@@ -127,7 +131,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
         <div className="rounded-lg border bg-card p-4 space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Mode</span>
-            <span className="font-medium">{isMultipoint ? "Multi-Point" : "Tabletop"}</span>
+            <span className="font-medium">{modeLabel}</span>
           </div>
           {isMultipoint && (() => {
             // Audit B-4 (May 2026): replace hardcoded A/B/C with N indexed circles

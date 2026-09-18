@@ -29,7 +29,7 @@ type Project = Tables<"projects">;
 
 interface StepDetailsProps {
   project: Project;
-  mode: "tabletop" | "multipoint";
+  mode: "tabletop" | "wall" | "multipoint";
   onSaved: () => void;
 }
 
@@ -54,7 +54,7 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
           client_name: form.client_name || null,
           location: form.location || null,
           description: form.description || null,
-          ...(mode === "tabletop" && {
+          ...(mode !== "multipoint" && {
             scale: form.scale,
             qr_size: form.qr_size,
             initial_rotation: form.initial_rotation,
@@ -107,7 +107,7 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
         />
       </div>
 
-      {mode === "tabletop" && (
+      {mode !== "multipoint" && (
         <div className="rounded-lg border bg-muted/30 p-4 space-y-5">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Grid3X3 className="h-4 w-4 text-primary" />
