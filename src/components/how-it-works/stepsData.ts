@@ -102,7 +102,7 @@ export const multipointSteps: Step[] = [
     title: "Create an Experience",
     shortTitle: "Create Experience",
     description:
-      'Start by creating a new experience and select "Multi-Point" mode. Add a name, client details, description, and property address.',
+      'Start by creating a new experience and select "Spatial" mode. Add a name, client details, description, and property address.',
     tips: [
       "Use clear naming like 'Lindgren Living Room — Concept A' so you can find it later",
       "The client name and address help when managing presentations across multiple properties",

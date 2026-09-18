@@ -25,7 +25,7 @@ const modeConfig = {
   },
   multipoint: {
     icon: MapPin,
-    label: "Multi-Point",
+    label: "Spatial",
     badgeBg: "bg-primary/10 text-primary",
   },
 } as const;

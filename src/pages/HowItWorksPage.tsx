@@ -83,7 +83,7 @@ const HowItWorksPage = () => {
             )}>
               <Triangle className="h-5 w-5" />
             </div>
-            <h3 className="font-display font-semibold text-lg">Multi-Point</h3>
+            <h3 className="font-display font-semibold text-lg">Spatial</h3>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
             Overlay a 1:1 scale design in the actual room using printed markers for precise spatial tracking.

@@ -172,7 +172,10 @@ const MultipointViewer = ({
     return () => ac.abort();
   }, [modelUrl, imageTargetSrc, modelCacheKey, trackingCacheKey]);
 
-  const isMultipoint = mode !== "tabletop";
+  // Wall takes the same single-QR path as tabletop (mirrors ARViewer).
+  const isMultipoint = mode !== "tabletop" && mode !== "wall";
+  // Where the printed QR lives, so guidance names the right surface.
+  const qrSurface = mode === "wall" ? "wall" : "table";
   const markerKeys = Object.keys(markers);
   const detectedCount = Object.values(markers).filter((s) => s !== "searching").length;
   const totalMarkers = markerCount ?? (isMultipoint ? markerKeys.length : 1);
@@ -301,10 +304,12 @@ const MultipointViewer = ({
   const hasSpatialHint = !!(anchorColor && markerData?.find((m) => m.index === recentDetections[0]) && markerData?.find((m) => m.index === nextUndetected));
 
   let guideIcon = <MapPin className="h-4 w-4" />;
-  let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
+  let guideTitle = arReady
+    ? (isMultipoint ? "Point camera at markers" : "Point camera at the QR code")
+    : "Starting camera…";
   let guideDescription = isMultipoint
     ? `Slowly scan the space to locate the ${totalMarkers} position markers. Hold steady when a marker is in view.`
-    : "Point your camera at the printed QR code on the table. Hold steady when the code is in view.";
+    : `Point your camera at the printed QR code on the ${qrSurface}. The QR is the placement marker — your model will sit on it.`;
 
   if (!arReady) {
     guideIcon = <Loader2 className="h-4 w-4 animate-spin" />;
@@ -322,7 +327,9 @@ const MultipointViewer = ({
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
     guideTitle = "Model locked";
-    guideDescription = "All markers detected. Your AR experience is active.";
+    guideDescription = isMultipoint
+      ? "All markers detected. Your AR experience is active."
+      : `QR code locked. Your model is placed on the ${qrSurface} — move around to view it.`;
   }
 
 
@@ -437,9 +444,13 @@ const MultipointViewer = ({
             )}>
               <p className="text-xs text-muted-foreground mb-3 font-medium">
                 {allDetected ? (
-                  <span className="text-green-600">✓ All markers locked</span>
-                ) : (
+                  <span className="text-green-600">
+                    {isMultipoint ? "✓ All markers locked" : "✓ QR code locked"}
+                  </span>
+                ) : isMultipoint ? (
                   `${detectedCount > 0 ? `${detectedCount} of ${totalMarkers} detected` : "Looking for markers…"}`
+                ) : (
+                  "Looking for the QR code…"
                 )}
               </p>
 
