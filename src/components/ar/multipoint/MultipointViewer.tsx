@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import MindARScene, { type ScanHint } from "./MindARScene";
+import LaunchRing, { type LaunchRingState } from "./LaunchRing";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
 
@@ -359,6 +360,20 @@ const MultipointViewer = ({
   }
 
 
+  // ── Launch ring (B1/B2/B3) — real download progress over the live camera ──
+  // The model is "pending" until the prefetched buffer is in hand; if the
+  // prefetch failed, MindARScene loads from the URL and we stop showing a %.
+  const modelPending = !prefetchedModel && !prefetchFailed;
+  const launchState: LaunchRingState | null = isActive
+    ? null
+    : modelPending
+      ? (detectedCount > 0 ? "found-loading" : "loading")
+      : (detectedCount === 0 ? "loaded" : null);
+  const aimTitle = isMultipoint ? "Scan for markers" : "Aim at the QR code";
+  const aimBody = isMultipoint
+    ? `Slowly scan the space for any of the ${totalMarkers} position markers. Hold steady when one is in view.`
+    : `The printed QR on the ${qrSurface} is the placement marker — your model will sit on it.`;
+
   // Build sorted marker entries for display
   const markerEntries = Object.entries(markers).sort(([a], [b]) => {
     const na = parseInt(a), nb = parseInt(b);
@@ -388,6 +403,17 @@ const MultipointViewer = ({
           onError?.(err);
         }}
       />
+
+      {/* ── Launch ring · B1 loading / B2 aim / B3 found while loading ── */}
+      {launchState && (
+        <LaunchRing
+          state={launchState}
+          progress={prefetchProgress}
+          cameraReady={arReady}
+          aimTitle={aimTitle}
+          aimBody={aimBody}
+        />
+      )}
 
       {/* ── Fix 5 · Directional scan arrows toward undetected markers ── */}
       {isMultipoint && !isActive && arReady && scanHints.length > 0 && (
@@ -448,15 +474,6 @@ const MultipointViewer = ({
               </div>
               {guideExpanded && (
                 <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{guideDescription}</p>
-              )}
-              {/* Phase 1.4 — real GLB download progress */}
-              {prefetchProgress != null && prefetchProgress < 100 && !prefetchedModel && (
-                <div className="mt-3 space-y-1.5">
-                  <Progress value={prefetchProgress} className="h-1.5" />
-                  <p className="text-[10px] text-muted-foreground">
-                    Downloading 3D model… {prefetchProgress}%
-                  </p>
-                </div>
               )}
             </button>
           </div>
