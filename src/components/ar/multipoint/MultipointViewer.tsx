@@ -3,7 +3,7 @@ import { ChevronDown, MapPin, Target, Check, Loader2, Info, Camera, RotateCcw } 
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
-import MindARScene from "./MindARScene";
+import MindARScene, { type ScanHint } from "./MindARScene";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
 
@@ -55,10 +55,20 @@ const MultipointViewer = ({
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
 
+  // Fix 5 (Jul 2026): live directional hints toward not-yet-found markers,
+  // projected from the currently-visible reference anchor inside MindARScene.
+  const [scanHints, setScanHints] = useState<ScanHint[]>([]);
+
   // ── Prefetch GLB *and* tracking file in parallel, with Phase 4 IDB cache ──
   const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
   const [prefetchProgress, setPrefetchProgress] = useState<number | null>(null);
-  const prefetchStarted = useRef(false);
+  // Two guards, not one. The camera-first flow mounts this viewer before the
+  // signed model URL exists, so the tracking file and the GLB now start at
+  // different moments. A single `prefetchStarted` flag latched on the tracking
+  // run and then short-circuited the effect when `modelUrl` arrived, so the GLB
+  // was never prefetched at all.
+  const trackingPrefetchStarted = useRef(false);
+  const modelPrefetchStarted = useRef(false);
 
   // Phase 4.1 — Stable cache invalidation token. We prefer project.updated_at
   // (changes on republish) and fall back to a daily bucket so the cache still
@@ -68,14 +78,13 @@ const MultipointViewer = ({
   const trackingCacheKey = shareId ? buildAssetKey(shareId, "tracking", cacheToken) : null;
 
   useEffect(() => {
-    if (prefetchStarted.current) return;
     if (!modelUrl && !imageTargetSrc) return;
-    prefetchStarted.current = true;
 
     const ac = new AbortController();
 
     // Tracking file (.mind/.wtc): try IDB first, then network warm.
-    if (imageTargetSrc) {
+    if (imageTargetSrc && !trackingPrefetchStarted.current) {
+      trackingPrefetchStarted.current = true;
       (async () => {
         if (trackingCacheKey) {
           const cached = await getCachedAsset(trackingCacheKey);
@@ -94,7 +103,10 @@ const MultipointViewer = ({
     }
 
     // GLB: stream from network with progress, OR pull from IDB instantly.
-    if (modelUrl) {
+    // May start later than the tracking file — the URL is re-signed behind the
+    // live camera — so it carries its own guard.
+    if (modelUrl && !modelPrefetchStarted.current) {
+      modelPrefetchStarted.current = true;
       (async () => {
         try {
           if (modelCacheKey) {
@@ -168,7 +180,10 @@ const MultipointViewer = ({
     return () => ac.abort();
   }, [modelUrl, imageTargetSrc, modelCacheKey, trackingCacheKey]);
 
-  const isMultipoint = mode !== "tabletop";
+  // Wall takes the same single-QR path as tabletop (mirrors ARViewer).
+  const isMultipoint = mode !== "tabletop" && mode !== "wall";
+  // Where the printed QR lives, so guidance names the right surface.
+  const qrSurface = mode === "wall" ? "wall" : "table";
   const markerKeys = Object.keys(markers);
   const detectedCount = Object.values(markers).filter((s) => s !== "searching").length;
   const totalMarkers = markerCount ?? (isMultipoint ? markerKeys.length : 1);
@@ -297,10 +312,12 @@ const MultipointViewer = ({
   const hasSpatialHint = !!(anchorColor && markerData?.find((m) => m.index === recentDetections[0]) && markerData?.find((m) => m.index === nextUndetected));
 
   let guideIcon = <MapPin className="h-4 w-4" />;
-  let guideTitle = arReady ? "Point camera at markers" : "Starting camera…";
+  let guideTitle = arReady
+    ? (isMultipoint ? "Point camera at markers" : "Point camera at the QR code")
+    : "Starting camera…";
   let guideDescription = isMultipoint
     ? `Slowly scan the space to locate the ${totalMarkers} position markers. Hold steady when a marker is in view.`
-    : "Point your camera at the printed QR code on the table. Hold steady when the code is in view.";
+    : `Point your camera at the printed QR code on the ${qrSurface}. The QR is the placement marker — your model will sit on it.`;
 
   if (!arReady) {
     guideIcon = <Loader2 className="h-4 w-4 animate-spin" />;
@@ -318,7 +335,9 @@ const MultipointViewer = ({
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
     guideTitle = "Model locked";
-    guideDescription = "All markers detected. Your AR experience is active.";
+    guideDescription = isMultipoint
+      ? "All markers detected. Your AR experience is active."
+      : `QR code locked. Your model is placed on the ${qrSurface} — move around to view it.`;
   }
 
 
@@ -341,6 +360,7 @@ const MultipointViewer = ({
         initialRotation={initialRotation}
         markerData={markerData}
         prefetchedModel={prefetchedModel}
+        onScanGuidance={setScanHints}
         onTargetFound={onTargetFound}
         onTargetLost={onTargetLost}
         onReady={() => setArReady(true)}
@@ -349,6 +369,42 @@ const MultipointViewer = ({
           onError?.(err);
         }}
       />
+
+      {/* ── Fix 5 · Directional scan arrows toward undetected markers ── */}
+      {isMultipoint && !isActive && arReady && scanHints.length > 0 && (
+        <div className="pointer-events-none absolute inset-0 z-[5]">
+          {scanHints.map((h) => {
+            const color = getMarkerColor(h.index);
+            // Keep chips clear of the top/bottom guide cards.
+            const top = Math.max(20, Math.min(76, h.y * 100));
+            const left = Math.max(6, Math.min(94, h.x * 100));
+            return (
+              <div
+                key={h.index}
+                className="absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ease-out"
+                style={{ left: `${left}%`, top: `${top}%` }}
+              >
+                <div
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full bg-black/55 backdrop-blur-sm border border-white/25 pl-1 pr-2.5 py-1 shadow-lg",
+                    h.onScreen && "animate-pulse"
+                  )}
+                >
+                  <span
+                    className="h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                    style={{ backgroundColor: color.bg }}
+                  >
+                    {h.index}
+                  </span>
+                  <span className="text-[10px] font-medium text-white/90 whitespace-nowrap">
+                    {h.onScreen ? color.name : `${color.name} — this way`}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── DETECTION PHASE UI ── */}
       {!isActive && (
@@ -396,9 +452,13 @@ const MultipointViewer = ({
             )}>
               <p className="text-xs text-muted-foreground mb-3 font-medium">
                 {allDetected ? (
-                  <span className="text-green-600">✓ All markers locked</span>
-                ) : (
+                  <span className="text-green-600">
+                    {isMultipoint ? "✓ All markers locked" : "✓ QR code locked"}
+                  </span>
+                ) : isMultipoint ? (
                   `${detectedCount > 0 ? `${detectedCount} of ${totalMarkers} detected` : "Looking for markers…"}`
+                ) : (
+                  "Looking for the QR code…"
                 )}
               </p>
 

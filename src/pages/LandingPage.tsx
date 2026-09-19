@@ -36,7 +36,7 @@ const steps = [
     icon: FolderPlus,
     title: "Create an Experience",
     description:
-      "Choose Tabletop or Multi-Point mode, add your client details, and configure the scale and settings for your presentation.",
+      "Choose Tabletop, Wall or Spatial mode, add your client details, and configure the scale and settings for your presentation.",
   },
   {
     icon: Upload,
@@ -201,7 +201,7 @@ const LandingPage = () => {
               <div className="aspect-[4/3] overflow-hidden">
                 <img
                   src={multipointImg}
-                  alt="Multi-Point AR mode showing 1:1 scale design overlay in a real room"
+                  alt="Spatial AR mode showing 1:1 scale design overlay in a real room"
                   loading="lazy"
                   width={640}
                   height={640}
@@ -213,7 +213,7 @@ const LandingPage = () => {
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-warm/10">
                     <Triangle className="h-5 w-5 text-warm" />
                   </div>
-                  <h3 className="font-display text-xl font-semibold">Multi-Point Mode</h3>
+                  <h3 className="font-display text-xl font-semibold">Spatial Mode</h3>
                 </div>
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   Overlay a full-scale design in the actual room using printed color-coded markers.

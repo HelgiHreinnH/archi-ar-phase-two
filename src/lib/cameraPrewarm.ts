@@ -1,9 +1,11 @@
 /**
  * Phase 2.1 — Camera pre-warm.
  *
- * Holds a singleton MediaStream that can be acquired during the AR landing
- * page (while the user reads the briefing) so that the actual AR engine init
- * doesn't pay the 1–2s `getUserMedia` cost.
+ * Holds a singleton MediaStream that can be acquired while the user is still on
+ * the AR landing page, so that AR engine init doesn't pay the 1–2s
+ * `getUserMedia` cost. This matters more since the briefing screen was removed:
+ * the tap now goes straight to the camera, so there is no longer a couple of
+ * seconds of holding screen to hide that cost behind.
  *
  * Notes:
  *  - We only acquire when a previous grant likely exists (Permissions API

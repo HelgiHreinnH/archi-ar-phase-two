@@ -1,6 +1,8 @@
+import { useState } from "react";
 import MarkerCoordinateEditor from "@/components/MarkerCoordinateEditor";
+import MarkerPlacementValidator from "@/components/ar/multipoint/MarkerPlacementValidator";
 import { type MarkerPoint } from "@/lib/markerTypes";
-import { Grid3X3, CheckCircle2 } from "lucide-react";
+import { Grid3X3, CheckCircle2, ScanLine } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Project = Tables<"projects">;
@@ -13,6 +15,11 @@ interface StepMarkersProps {
 }
 
 const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) => {
+  // Fix 6: architect placement validator overlay (multipoint only).
+  const [validating, setValidating] = useState(false);
+  const canValidate = !!project.mind_file_url && (markerData?.length ?? 0) >= 3;
+
+  // Wall mode (added on main) takes the same single-QR path as tabletop.
   if (mode !== "multipoint") {
     return (
       <div className="space-y-4">
@@ -77,6 +84,40 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
         markerData={markerData}
         onUpdate={onUpdate}
       />
+
+      {/* Fix 6 · Architect placement validator — verify printed markers match Rhino coords */}
+      <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <ScanLine className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold">Verify physical placement</h3>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          After printing and placing your markers, scan them here to confirm the real spacing
+          matches your Rhino coordinates. Catches placement errors before a client ever sees the model.
+        </p>
+        <button
+          type="button"
+          disabled={!canValidate}
+          onClick={() => setValidating(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium px-4 py-2 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          <ScanLine className="h-4 w-4" />
+          Validate placement in AR
+        </button>
+        {!canValidate && (
+          <p className="text-[11px] text-muted-foreground/70">
+            Generate the experience (with at least 3 markers) to enable placement checking.
+          </p>
+        )}
+      </div>
+
+      {validating && markerData && (
+        <MarkerPlacementValidator
+          project={project}
+          markerData={markerData}
+          onClose={() => setValidating(false)}
+        />
+      )}
     </div>
   );
 };

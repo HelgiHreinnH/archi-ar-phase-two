@@ -26,7 +26,7 @@ interface ARLandingProps {
 const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
   const isWall = project.mode === "wall";
   const isMultipoint = project.mode !== "tabletop" && project.mode !== "wall";
-  const modeLabel = isMultipoint ? "Multi-Point" : isWall ? "Wall" : "Tabletop";
+  const modeLabel = isMultipoint ? "Spatial" : isWall ? "Wall" : "Tabletop";
 
   // ── Preload heavy AR assets during landing-page dwell ──
   // The user typically reads the landing page for 2–4s. Use that time to

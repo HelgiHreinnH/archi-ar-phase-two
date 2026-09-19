@@ -117,7 +117,7 @@ const NewProject = () => {
             <div className={`rounded-lg p-2 ${!MULTIPOINT_DISABLED && mode === "multipoint" ? "bg-primary/10" : "bg-muted"}`}>
               <MapPin className={`h-5 w-5 ${!MULTIPOINT_DISABLED && mode === "multipoint" ? "text-primary" : "text-muted-foreground"}`} />
             </div>
-            <span className="font-display font-semibold">Multi-Point</span>
+            <span className="font-display font-semibold">Spatial</span>
           </div>
           <p className="text-sm text-muted-foreground">
             Three markers placed in the room. Full-scale spatial visualization at 1:1 in the actual space.
