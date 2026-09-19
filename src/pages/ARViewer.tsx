@@ -14,7 +14,10 @@ import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
 
 type Project = Tables<"projects">;
-type ViewerState = "landing" | "briefing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer";
+// "briefing" is deliberately absent. It was a 2-second branded holding screen
+// between the tap and the camera; it bought nothing and delayed the gyro
+// permission call out of its user-activation window. See launchAR.
+type ViewerState = "landing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
@@ -94,48 +97,60 @@ const ARViewer = () => {
     return m;
   }, [isMultipoint, markerData]);
 
-  // Launch AR — refresh signed URLs first (they're 2h-lived, but a stale tab could still bite)
-  const launchAR = useCallback(async () => {
-    setViewState("briefing");
-    dlog("launchAR — refetching signed URLs");
+  // Launch AR. One tap, straight into the camera — no briefing screen, no
+  // artificial delay, nothing awaited before the viewer mounts. `getUserMedia`
+  // needs a user gesture, so one tap is the floor; everything above that floor
+  // was ours to remove.
+  const launchAR = useCallback(() => {
+    dlog("launchAR — going straight to camera");
 
+    // iOS 13+ requires DeviceOrientationEvent.requestPermission() to be called
+    // inside the user-activation window of the tap. The old code ran it inside
+    // a 2s setTimeout, i.e. well outside that window, so on iOS the gyro prompt
+    // could be refused without ever appearing. Fire it synchronously, first,
+    // before anything that could yield — and do not await it, or the camera
+    // waits on a dialog.
     try {
-      // Bust the sessionStorage cache so we get fresh signed URLs at launch
-      if (sessionCacheKey && typeof sessionStorage !== "undefined") {
-        try { sessionStorage.removeItem(sessionCacheKey); } catch { /* ignore */ }
+      const DOE = DeviceOrientationEvent as unknown as {
+        requestPermission?: () => Promise<PermissionState>;
+      };
+      if (typeof DOE.requestPermission === "function") {
+        void DOE.requestPermission().catch(() => {
+          // Declined or unavailable — gyro compensation degrades gracefully.
+        });
       }
-      await refetch();
-    } catch (e) {
-      dlog("refetch failed (will continue with cached URLs):", e);
+    } catch {
+      // Not an iOS device, or the API is absent entirely.
     }
 
     // Tabletop WITHOUT a compiled tracking file (legacy projects generated
     // before QR anchoring was restored): fall back to model-viewer's native
-    // SLAM placement — the model is user-placed, not QR-anchored.
+    // SLAM placement — the model is user-placed, not QR-anchored. This path
+    // genuinely needs the model up front, so it keeps its loading gate below.
     if (!isMultipoint && !projectHasMindFile) {
       dlog("launchAR → model-viewer (tabletop legacy fallback, no .mind)");
       setViewState("model-viewer");
       return;
     }
 
-    // Tabletop with .mind + all multipoint: MindAR image tracking. For
-    // tabletop the single target is the printed QR code — the model's centre
+    // Tabletop with .mind + wall + spatial: MindAR image tracking. For tabletop
+    // and wall the single target is the printed QR code — the model's centre
     // locks onto it so it never floats freely in the room.
-    setTimeout(async () => {
-      // Request gyro permission, then launch detection
-      try {
-        const DOE = DeviceOrientationEvent as any;
-        if (typeof DOE.requestPermission === "function") {
-          await DOE.requestPermission();
-        }
-      } catch {
-        // Silently ignore — gyro compensation will gracefully degrade
-      }
-      setMarkers(getInitialMarkers());
-      dlog("launchAR → detecting", { isMultipoint, markerCount });
-      setViewState("detecting");
-    }, 2000);
-  }, [isMultipoint, projectHasMindFile, getInitialMarkers, refetch, markerCount]);
+    setMarkers(getInitialMarkers());
+    dlog("launchAR → detecting", { isMultipoint, markerCount });
+    setViewState("detecting");
+
+    // Re-sign the URLs *behind* the live camera rather than in front of it.
+    // Fire-and-forget: react-query keeps the previous data while refetching, so
+    // the viewer never loses a URL it already had, and picks up the fresh one
+    // when it lands.
+    if (sessionCacheKey && typeof sessionStorage !== "undefined") {
+      try { sessionStorage.removeItem(sessionCacheKey); } catch { /* ignore */ }
+    }
+    void refetch().catch((e) => {
+      dlog("refetch failed (continuing with cached URLs):", e);
+    });
+  }, [isMultipoint, projectHasMindFile, getInitialMarkers, refetch, markerCount, sessionCacheKey]);
 
   const handleTargetFound = useCallback((index: number) => {
     if (isMultipoint) {
@@ -326,20 +341,6 @@ const ARViewer = () => {
   switch (viewState) {
     case "landing":
       return <ARLanding project={project} onLaunchAR={launchAR} />;
-
-    case "briefing":
-      return (
-        <div className="fixed inset-0 bg-background flex items-center justify-center p-6">
-          <div className="text-center space-y-4 max-w-sm animate-fade-in">
-            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-            <h2 className="font-display text-xl font-bold">{project.name}</h2>
-            {project.client_name && (
-              <p className="text-sm text-muted-foreground">for {project.client_name}</p>
-            )}
-            <p className="text-xs text-muted-foreground">Preparing your AR experience…</p>
-          </div>
-        </div>
-      );
 
     case "permission-denied":
       return (

@@ -62,7 +62,13 @@ const MultipointViewer = ({
   // ── Prefetch GLB *and* tracking file in parallel, with Phase 4 IDB cache ──
   const [prefetchedModel, setPrefetchedModel] = useState<ArrayBuffer | null>(null);
   const [prefetchProgress, setPrefetchProgress] = useState<number | null>(null);
-  const prefetchStarted = useRef(false);
+  // Two guards, not one. The camera-first flow mounts this viewer before the
+  // signed model URL exists, so the tracking file and the GLB now start at
+  // different moments. A single `prefetchStarted` flag latched on the tracking
+  // run and then short-circuited the effect when `modelUrl` arrived, so the GLB
+  // was never prefetched at all.
+  const trackingPrefetchStarted = useRef(false);
+  const modelPrefetchStarted = useRef(false);
 
   // Phase 4.1 — Stable cache invalidation token. We prefer project.updated_at
   // (changes on republish) and fall back to a daily bucket so the cache still
@@ -72,14 +78,13 @@ const MultipointViewer = ({
   const trackingCacheKey = shareId ? buildAssetKey(shareId, "tracking", cacheToken) : null;
 
   useEffect(() => {
-    if (prefetchStarted.current) return;
     if (!modelUrl && !imageTargetSrc) return;
-    prefetchStarted.current = true;
 
     const ac = new AbortController();
 
     // Tracking file (.mind/.wtc): try IDB first, then network warm.
-    if (imageTargetSrc) {
+    if (imageTargetSrc && !trackingPrefetchStarted.current) {
+      trackingPrefetchStarted.current = true;
       (async () => {
         if (trackingCacheKey) {
           const cached = await getCachedAsset(trackingCacheKey);
@@ -98,7 +103,10 @@ const MultipointViewer = ({
     }
 
     // GLB: stream from network with progress, OR pull from IDB instantly.
-    if (modelUrl) {
+    // May start later than the tracking file — the URL is re-signed behind the
+    // live camera — so it carries its own guard.
+    if (modelUrl && !modelPrefetchStarted.current) {
+      modelPrefetchStarted.current = true;
       (async () => {
         try {
           if (modelCacheKey) {
