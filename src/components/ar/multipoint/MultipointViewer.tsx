@@ -69,6 +69,12 @@ const MultipointViewer = ({
   // was never prefetched at all.
   const trackingPrefetchStarted = useRef(false);
   const modelPrefetchStarted = useRef(false);
+  // Set once the GLB buffer is in hand (or the prefetch has given up), so an
+  // effect re-run only restarts a download that was actually cut short.
+  const modelPrefetchSettled = useRef(false);
+  // The prefetch failed outright: MindARScene should stop waiting for a buffer
+  // and load straight from the URL instead.
+  const [prefetchFailed, setPrefetchFailed] = useState(false);
 
   // Phase 4.1 — Stable cache invalidation token. We prefer project.updated_at
   // (changes on republish) and fall back to a daily bucket so the cache still
@@ -112,6 +118,7 @@ const MultipointViewer = ({
           if (modelCacheKey) {
             const cached = await getCachedAsset(modelCacheKey);
             if (cached) {
+              modelPrefetchSettled.current = true;
               setPrefetchProgress(100);
               setPrefetchedModel(cached);
               console.log(
@@ -129,6 +136,7 @@ const MultipointViewer = ({
 
           if (!res.body || typeof res.body.getReader !== "function") {
             const buffer = await res.arrayBuffer();
+            modelPrefetchSettled.current = true;
             setPrefetchProgress(100);
             setPrefetchedModel(buffer);
             if (modelCacheKey) await setCachedAsset(modelCacheKey, buffer);
@@ -162,6 +170,7 @@ const MultipointViewer = ({
             buffer.set(c, offset);
             offset += c.length;
           }
+          modelPrefetchSettled.current = true;
           setPrefetchProgress(100);
           setPrefetchedModel(buffer.buffer);
           if (modelCacheKey) {
@@ -173,11 +182,20 @@ const MultipointViewer = ({
         } catch (err) {
           if ((err as Error).name === "AbortError") return;
           console.warn("[ARDetection] GLB prefetch failed, will fall back to URL loading:", err);
+          modelPrefetchSettled.current = true;
+          setPrefetchFailed(true);
         }
       })();
     }
 
-    return () => ac.abort();
+    return () => {
+      ac.abort();
+      // launchAR re-signs the model URL behind the live camera, which re-runs
+      // this effect and aborts an in-flight GLB download. Clear the guard so
+      // the re-run restarts it against the fresh URL rather than leaving the
+      // scene waiting on a buffer that will never arrive.
+      if (!modelPrefetchSettled.current) modelPrefetchStarted.current = false;
+    };
   }, [modelUrl, imageTargetSrc, modelCacheKey, trackingCacheKey]);
 
   // Wall takes the same single-QR path as tabletop (mirrors ARViewer).
@@ -360,6 +378,7 @@ const MultipointViewer = ({
         initialRotation={initialRotation}
         markerData={markerData}
         prefetchedModel={prefetchedModel}
+        awaitPrefetch={!!modelUrl && !prefetchedModel && !prefetchFailed}
         onScanGuidance={setScanHints}
         onTargetFound={onTargetFound}
         onTargetLost={onTargetLost}
