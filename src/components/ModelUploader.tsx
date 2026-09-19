@@ -5,12 +5,17 @@ import { Upload, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
+import { isGlbFile, optimizeGlbTextures } from "@/lib/glbFile";
 import type { MarkerPoint } from "@/lib/markerTypes";
 
 const MAX_FILE_SIZE_MB = 250;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const ACCEPTED_EXTENSIONS = [".glb", ".usdz"];
-const ACCEPTED_MIME_TYPES = ["model/gltf-binary", "model/vnd.usdz+zip", "application/octet-stream"];
+// GLB only: every AR mode renders through MindAR + Three.js, which loads GLB
+// on iOS and Android alike. USDZ is no longer accepted (3–10× heavier, and
+// Three.js can't render it).
+const ACCEPTED_EXTENSIONS = [".glb"];
+/** Above this, warn that phones may load slowly / run out of memory. */
+const SIZE_WARNING_MB = 40;
 
 interface ModelUploaderProps {
   projectId: string;
@@ -21,7 +26,9 @@ interface ModelUploaderProps {
 function validateFile(file: File): string | null {
   const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
   if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-    return `Invalid file type. Please upload a GLB or USDZ file.`;
+    return ext === ".usdz"
+      ? "USDZ is no longer supported. Export your model as GLB (Rhino: File → Export → .glb, with “Z to glTF Y” on)."
+      : "Invalid file type. Please upload a GLB file.";
   }
   if (file.size > MAX_FILE_SIZE_BYTES) {
     return `oversized`;
@@ -29,10 +36,19 @@ function validateFile(file: File): string | null {
   return null;
 }
 
+function warnIfHeavy(bytes: number | undefined) {
+  if (!bytes || bytes < SIZE_WARNING_MB * 1024 * 1024) return;
+  toast({
+    title: `Large model (${(bytes / (1024 * 1024)).toFixed(0)} MB)`,
+    description: "It may load slowly on phones. Consider decimating geometry or removing hidden objects before export.",
+  });
+}
+
 const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: ModelUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -42,8 +58,8 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
   const abortRef = useRef<AbortController | null>(null);
   const lastFileRef = useRef<File | null>(null);
 
-  const handleUpload = useCallback(async (file: File) => {
-    const validation = validateFile(file);
+  const handleUpload = useCallback(async (selected: File) => {
+    const validation = validateFile(selected);
     if (validation === "oversized") {
       setOversized(true);
       setError(null);
@@ -57,6 +73,33 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
 
     setError(null);
     setOversized(false);
+
+    // Content check: a renamed USDZ/zip must never reach storage.
+    if (!(await isGlbFile(selected))) {
+      setError("This file isn't a valid GLB (binary glTF 2.0). Re-export it as .glb and try again.");
+      return;
+    }
+
+    // Shrink oversized textures in the browser before upload (≤2048 px,
+    // JPEG for opaque maps). Geometry is Draco-compressed server-side after.
+    let file = selected;
+    setIsPreparing(true);
+    try {
+      const res = await optimizeGlbTextures(selected);
+      if (res.changed) {
+        file = res.file;
+        const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+        toast({
+          title: "Textures optimized",
+          description: `${res.texturesProcessed} texture${res.texturesProcessed === 1 ? "" : "s"} resized · ${mb(res.originalSize)} MB → ${mb(res.optimizedSize)} MB`,
+        });
+      }
+    } catch (texErr) {
+      console.warn("[ModelUploader] Texture optimization skipped:", texErr);
+    } finally {
+      setIsPreparing(false);
+    }
+
     setIsUploading(true);
     setProgress(0);
     setUploadedBytes(0);
@@ -124,8 +167,8 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
         }
       }
 
-      // Phase 5.2 — Server-side GLB optimization. Skip USDZ; never block.
-      if (file.name.toLowerCase().endsWith(".glb")) {
+      // Phase 5.2 — Server-side GLB (Draco) optimization. Never blocks.
+      {
         setIsOptimizing(true);
         try {
           const { data, error: optErr } = await supabase.functions.invoke("optimize-model", {
@@ -140,8 +183,10 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
               description: `${before} MB → ${after} MB (${data.ratio}× smaller)`,
             });
             onUploadComplete(data.optimizedPath);
+            warnIfHeavy(data.optimizedSize);
           } else if (data?.skipped) {
-            // No-gain or non-glb — silently keep original
+            // No gain — keep original
+            warnIfHeavy(file.size);
           } else {
             toast({
               title: "Optimization skipped",
@@ -184,7 +229,15 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
 
   return (
     <div className="space-y-3">
-      {isOptimizing ? (
+      {isPreparing ? (
+        <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
+          <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
+          <p className="text-sm font-medium">Preparing model…</p>
+          <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+            Checking the file and resizing large textures for phones.
+          </p>
+        </div>
+      ) : isOptimizing ? (
         <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
           <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
           <p className="text-sm font-medium">Optimizing model…</p>
@@ -225,7 +278,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
             Drag & drop or click to upload
           </p>
           <p className="text-xs text-muted-foreground">
-            GLB or USDZ · Max {MAX_FILE_SIZE_MB} MB
+            GLB · Max {MAX_FILE_SIZE_MB} MB · works on iPhone & Android
           </p>
         </div>
       )}
@@ -244,7 +297,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
       <input
         ref={fileInputRef}
         type="file"
-        accept=".glb,.usdz"
+        accept=".glb,model/gltf-binary"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];

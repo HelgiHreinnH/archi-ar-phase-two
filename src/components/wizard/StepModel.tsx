@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ModelUploader from "@/components/ModelUploader";
 import ModelPreview from "@/components/ModelPreview";
-import UsdzCompanionUploader from "@/components/UsdzCompanionUploader";
+import { AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
 
@@ -16,19 +16,25 @@ interface StepModelProps {
 const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => {
   const [showUploader, setShowUploader] = useState(false);
 
-  // USDZ companion is only meaningful for the tabletop path, which goes through
-  // <model-viewer> + iOS Quick Look. Multipoint uses XR8 and renders GLB
-  // directly, so iOS works there regardless of USDZ.
-  const isTabletop = project.mode === "tabletop";
-  const primaryIsGlb = project.model_url?.toLowerCase().endsWith(".glb");
-  const showUsdzCompanion =
-    isTabletop && !!project.model_url && !!primaryIsGlb && !showUploader;
+  // GLB is the only supported format. Older projects may still point at a
+  // USDZ — MindAR/Three.js can't render it, so ask the owner to replace it.
+  const isLegacyUsdz = !!project.model_url?.toLowerCase().split("?")[0].endsWith(".usdz");
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Upload a 3D model file (GLB or USDZ) for your AR experience.
+        Upload your 3D model as a GLB file. The same file works on iPhone and Android.
       </p>
+
+      {isLegacyUsdz && !showUploader && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+          <p>
+            This project uses a USDZ model, which is no longer supported. Replace it with a
+            GLB export to use it in AR.
+          </p>
+        </div>
+      )}
 
       {project.model_url && !showUploader ? (
         <ModelPreview
@@ -51,13 +57,6 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
         />
       )}
 
-      {showUsdzCompanion && (
-        <UsdzCompanionUploader
-          projectId={project.id}
-          usdzUrl={project.usdz_model_url}
-          onChange={onUpdate}
-        />
-      )}
     </div>
   );
 };

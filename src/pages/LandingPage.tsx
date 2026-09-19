@@ -129,7 +129,7 @@ const LandingPage = () => {
                 </a>
               </div>
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
-                {["No app install required", "iOS & Android", "GLB & USDZ support"].map((item) => (
+                {["No app install required", "iOS & Android", "One GLB for every phone"].map((item) => (
                   <span key={item} className="flex items-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4 text-primary" />
                     {item}

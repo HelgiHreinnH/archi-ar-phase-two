@@ -93,11 +93,11 @@ const GenerateExperience = ({
   // ── Checklist ──
   const checks: CheckItem[] = isTabletop
     ? [
-        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
+        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB model above" },
         { label: "Scale configured", passed: !!project.scale, hint: "Set the model scale" },
       ]
     : [
-        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB or USDZ model above" },
+        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB model above" },
         { label: `Marker coordinates set (${markerData?.length ?? 0} points)`, passed: hasValidMarkers, hint: "Enter coordinates for at least 3 points" },
         { label: "Spacing quality sufficient", passed: hasValidMarkers, hint: "Ensure points form a valid configuration" },
       ];

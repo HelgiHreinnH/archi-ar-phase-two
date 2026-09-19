@@ -82,15 +82,16 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     };
   }, []);
 
-  // USDZ cannot be rendered in browser — model-viewer only speaks GLB/GLTF.
+  // Legacy USDZ uploads can't render in the browser (or in MindAR AR) —
+  // prompt the owner to replace them with a GLB.
   // Show a clear placeholder instead of a broken spinner.
   if (isUsdz) {
     return (
       <div className={`flex flex-col items-center justify-center gap-2 bg-muted/50 border rounded-lg p-4 ${className}`}>
         <Box className="h-8 w-8 text-muted-foreground/50" />
-        <p className="text-xs font-medium text-muted-foreground">USDZ · AR on iPhone</p>
+        <p className="text-xs font-medium text-muted-foreground">USDZ · no longer supported</p>
         <p className="text-[10px] text-muted-foreground/60 text-center">
-          3D preview not available in browser — viewable on iPhone / iPad via Quick Look
+          Replace this model with a GLB export to preview it and use it in AR
         </p>
       </div>
     );

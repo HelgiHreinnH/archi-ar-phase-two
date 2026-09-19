@@ -47,10 +47,10 @@ export const tabletopSteps: Step[] = [
     title: "Upload Your 3D Model",
     shortTitle: "Upload Model",
     description:
-      "Open your experience and upload a GLB or USDZ file (up to 250 MB). You'll see a real-time progress bar during upload.",
+      "Open your experience and upload a GLB file (up to 250 MB). Large textures are resized automatically and geometry is compressed after upload, so the same file runs on iPhone and Android.",
     tips: [
       "GLB with Draco compression gives the best file size for web-based AR",
-      "USDZ works best for iOS AR Quick Look previews",
+      "One GLB works on every phone — no separate iPhone (USDZ) file needed",
       "If your file exceeds 250 MB, try lowering material textures to 2K or simplifying furniture geometry",
     ],
   },

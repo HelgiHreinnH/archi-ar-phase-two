@@ -24,7 +24,9 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   const rawMode = project.mode;
   const mode = (rawMode === "multipoint" ? "multipoint" : rawMode === "wall" ? "wall" : "tabletop") as "tabletop" | "wall" | "multipoint";
   const markerData = normalizeMarkerData(project.marker_data);
-  const hasModel = !!project.model_url;
+  // GLB only — a legacy USDZ model can't be rendered by MindAR/Three.js, so it
+  // doesn't count as "uploaded" until it's replaced.
+  const hasModel = !!project.model_url && !project.model_url.toLowerCase().split("?")[0].endsWith(".usdz");
   const hasValidMarkers = mode !== "multipoint" || (
     !!markerData && markerData.length >= 3 &&
     markerData.some((m) => m.x !== 0 || m.y !== 0 || m.z !== 0)
