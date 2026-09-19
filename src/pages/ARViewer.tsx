@@ -428,16 +428,10 @@ const ARViewer = () => {
       );
 
     case "detecting":
-      if (!isModelReady) {
-        return (
-          <div className="fixed inset-0 bg-black flex items-center justify-center">
-            <div className="text-center space-y-3">
-              <Loader2 className="h-8 w-8 animate-spin text-white/70 mx-auto" />
-              <p className="text-white/50 text-sm">Preparing AR model…</p>
-            </div>
-          </div>
-        );
-      }
+      // No model gate here: the camera and tracking start immediately and the
+      // model attaches to the live scene whenever its URL/buffer lands
+      // (MindARScene Effect B). Only the model-viewer path above needs the
+      // model before it can render anything.
       return (
         <MultipointViewer
           key={resetKey}
