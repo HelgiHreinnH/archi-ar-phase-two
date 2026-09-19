@@ -135,7 +135,7 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
                       className="w-full justify-start gap-2 text-xs h-7"
                       onClick={async () => {
                         try {
-                          await downloadTabletopPrintSheet(project.name, shareUrl!);
+                          await downloadTabletopPrintSheet(project.name, shareUrl!, mode === "wall" ? "wall" : "table");
                         } catch (err) {
                           console.error("[ProjectOverview] print sheet failed:", err);
                           toast({ title: "PDF generation failed", variant: "destructive" });

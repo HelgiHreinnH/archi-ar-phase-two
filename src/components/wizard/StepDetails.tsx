@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Grid3X3, Compass } from "lucide-react";
+import { Compass, Check, Loader2 } from "lucide-react";
+import { MODE_COPY, type ExperienceMode } from "@/lib/modeCopy";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
@@ -27,13 +28,23 @@ const ROTATION_PRESETS = [
 
 type Project = Tables<"projects">;
 
-interface StepDetailsProps {
-  project: Project;
-  mode: "tabletop" | "wall" | "multipoint";
-  onSaved: () => void;
+export interface StepDetailsHandle {
+  /** Persist the current form. Resolves true on success. */
+  save: () => Promise<boolean>;
 }
 
-const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
+interface StepDetailsProps {
+  project: Project;
+  mode: ExperienceMode;
+  /** Called after every successful save so the parent can refetch. */
+  onUpdate: () => void;
+}
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+const AUTOSAVE_DELAY_MS = 800;
+
+const StepDetails = forwardRef<StepDetailsHandle, StepDetailsProps>(({ project, mode, onUpdate }, ref) => {
   const [form, setForm] = useState({
     client_name: project.client_name || "",
     location: project.location || "",
@@ -42,46 +53,67 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
     qr_size: project.qr_size || "medium",
     initial_rotation: project.initial_rotation || 0,
   });
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>("idle");
+  const formRef = useRef(form);
+  formRef.current = form;
+  const dirtyRef = useRef(false);
 
-  // Expose save function via custom event for the wizard's Continue button
+  const isWall = mode === "wall";
+  const copy = MODE_COPY[mode];
+  const ModeIcon = copy.icon;
+
+  const save = useCallback(async (): Promise<boolean> => {
+    const f = formRef.current;
+    dirtyRef.current = false;
+    setStatus("saving");
+    const { error } = await supabase
+      .from("projects")
+      .update({
+        client_name: f.client_name || null,
+        location: f.location || null,
+        description: f.description || null,
+        ...(mode !== "multipoint" && {
+          scale: f.scale,
+          qr_size: f.qr_size,
+          initial_rotation: f.initial_rotation,
+        }),
+      })
+      .eq("id", project.id);
+
+    if (error) {
+      dirtyRef.current = true;
+      setStatus("error");
+      toast({ title: "Error saving details", variant: "destructive" });
+      return false;
+    }
+    setStatus("saved");
+    onUpdate();
+    return true;
+  }, [project.id, mode, onUpdate]);
+
+  // Autosave shortly after the user stops editing, so nothing is lost when
+  // they scroll on without pressing the section CTA.
   useEffect(() => {
-    const handler = async () => {
-      setSaving(true);
-      const { error } = await supabase
-        .from("projects")
-        .update({
-          client_name: form.client_name || null,
-          location: form.location || null,
-          description: form.description || null,
-          ...(mode !== "multipoint" && {
-            scale: form.scale,
-            qr_size: form.qr_size,
-            initial_rotation: form.initial_rotation,
-          }),
-        })
-        .eq("id", project.id);
+    if (!dirtyRef.current) return;
+    const t = setTimeout(() => { void save(); }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [form, save]);
 
-      setSaving(false);
-      if (error) {
-        toast({ title: "Error saving details", variant: "destructive" });
-      } else {
-        onSaved();
-      }
-    };
+  useImperativeHandle(ref, () => ({ save }), [save]);
 
-    window.addEventListener("wizard-save-details", handler);
-    return () => window.removeEventListener("wizard-save-details", handler);
-  }, [form, project.id, mode, onSaved]);
+  const update = (patch: Partial<typeof form>) => {
+    dirtyRef.current = true;
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
 
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="client">Client Name</Label>
+        <Label htmlFor="client">Client name</Label>
         <Input
           id="client"
           value={form.client_name}
-          onChange={(e) => setForm({ ...form, client_name: e.target.value })}
+          onChange={(e) => update({ client_name: e.target.value })}
           placeholder="Lindgren Family"
         />
       </div>
@@ -91,7 +123,7 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
         <Input
           id="location"
           value={form.location}
-          onChange={(e) => setForm({ ...form, location: e.target.value })}
+          onChange={(e) => update({ location: e.target.value })}
           placeholder="Strandvägen 7, Stockholm"
         />
       </div>
@@ -101,8 +133,8 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
         <Textarea
           id="description"
           value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-          placeholder="Full interior redesign of living and dining area..."
+          onChange={(e) => update({ description: e.target.value })}
+          placeholder="Full interior redesign of living and dining area…"
           rows={3}
         />
       </div>
@@ -110,17 +142,17 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
       {mode !== "multipoint" && (
         <div className="rounded-lg border bg-muted/30 p-4 space-y-5">
           <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Grid3X3 className="h-4 w-4 text-primary" />
-            Tabletop Configuration
+            <ModeIcon className="h-4 w-4 text-primary" />
+            {copy.label} configuration
           </h3>
 
           {/* Scale */}
           <div className="space-y-2">
-            <Label>Presentation Scale</Label>
+            <Label>Presentation scale</Label>
             <p className="text-xs text-muted-foreground">
-              How large the model appears on the table
+              How large the model appears on the {copy.surface}
             </p>
-            <Select value={form.scale} onValueChange={(v) => setForm({ ...form, scale: v })}>
+            <Select value={form.scale} onValueChange={(v) => update({ scale: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {SCALE_PRESETS.map((preset) => (
@@ -135,46 +167,63 @@ const StepDetails = ({ project, mode, onSaved }: StepDetailsProps) => {
 
           {/* QR Size */}
           <div className="space-y-2">
-            <Label>QR Marker Size</Label>
-            <Select value={form.qr_size} onValueChange={(v) => setForm({ ...form, qr_size: v })}>
+            <Label>QR marker size</Label>
+            <Select value={form.qr_size} onValueChange={(v) => update({ qr_size: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="small">Small (10×10 cm)</SelectItem>
-                <SelectItem value="medium">Medium (15×15 cm)</SelectItem>
-                <SelectItem value="large">Large (20×20 cm)</SelectItem>
+                <SelectItem value="small">Small (10 × 10 cm)</SelectItem>
+                <SelectItem value="medium">Medium (15 × 15 cm)</SelectItem>
+                <SelectItem value="large">Large (20 × 20 cm)</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* Rotation — compass buttons */}
+          {/* Rotation — compass on a table; plain degrees on a wall, where
+              north/east/south/west has no meaning. */}
           <div className="space-y-2">
             <Label className="flex items-center gap-1.5">
               <Compass className="h-3.5 w-3.5" />
-              Initial Rotation
+              Initial rotation
             </Label>
             <p className="text-xs text-muted-foreground">
-              Which direction should the model face when it loads?
+              {isWall
+                ? "Rotate the model in 90° steps for how it should sit on the wall when it loads."
+                : "Which direction should the model face when it loads?"}
             </p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {ROTATION_PRESETS.map((preset) => (
                 <Button
                   key={preset.value}
                   type="button"
                   variant={form.initial_rotation === preset.value ? "default" : "outline"}
                   size="sm"
-                  className="flex-1 font-mono gap-1"
-                  onClick={() => setForm({ ...form, initial_rotation: preset.value })}
+                  className="font-mono gap-1 px-0"
+                  onClick={() => update({ initial_rotation: preset.value })}
                 >
-                  <span>{preset.icon}</span>
-                  <span>{preset.label}</span>
+                  {isWall ? (
+                    <span>{preset.value}°</span>
+                  ) : (
+                    <>
+                      <span>{preset.icon}</span>
+                      <span>{preset.label}</span>
+                    </>
+                  )}
                 </Button>
               ))}
             </div>
           </div>
         </div>
       )}
+
+      <p className="h-4 text-[11px] text-muted-foreground flex items-center gap-1" aria-live="polite">
+        {status === "saving" && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>)}
+        {status === "saved" && (<><Check className="h-3 w-3 text-green-600" /> Changes saved</>)}
+        {status === "error" && <span className="text-destructive">Not saved — check your connection</span>}
+      </p>
     </div>
   );
-};
+});
+
+StepDetails.displayName = "StepDetails";
 
 export default StepDetails;

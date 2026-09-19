@@ -4,31 +4,15 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, MapPin, Grid3X3 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import ExperienceWizard from "@/components/ExperienceWizard";
 import ProjectOverview from "@/components/ProjectOverview";
+import { MODE_COPY, toExperienceMode } from "@/lib/modeCopy";
 
 type Project = Tables<"projects">;
 
-const modeConfig = {
-  tabletop: {
-    icon: Grid3X3,
-    label: "Tabletop",
-    badgeBg: "bg-primary/10 text-primary",
-  },
-  wall: {
-    icon: Grid3X3,
-    label: "Wall",
-    badgeBg: "bg-primary/10 text-primary",
-  },
-  multipoint: {
-    icon: MapPin,
-    label: "Spatial",
-    badgeBg: "bg-primary/10 text-primary",
-  },
-} as const;
 
 const ProjectDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -70,8 +54,8 @@ const ProjectDetail = () => {
     );
   }
 
-  const mode = (project.mode === "multipoint" ? "multipoint" : (project.mode === "wall" ? "wall" : "tabletop"));
-  const config = modeConfig[mode];
+  const mode = toExperienceMode(project.mode);
+  const config = MODE_COPY[mode];
   const ModeIcon = config.icon;
   const isActive = project.status === "active";
   const showOverview = isActive && !editing;
@@ -93,7 +77,7 @@ const ProjectDetail = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-3 animate-fade-in">
+    <div className={`${showOverview ? "max-w-5xl" : "max-w-6xl"} mx-auto space-y-3 animate-fade-in`}>
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard/experiences")}>
@@ -102,7 +86,7 @@ const ProjectDetail = () => {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <h1 className="font-display text-2xl font-bold">{project.name}</h1>
-            <Badge className={`text-xs gap-1 ${config.badgeBg} border-0`}>
+            <Badge className="text-xs gap-1 bg-primary/10 text-primary border-0 hover:bg-primary/10">
               <ModeIcon className="h-3 w-3" />
               {config.label}
             </Badge>

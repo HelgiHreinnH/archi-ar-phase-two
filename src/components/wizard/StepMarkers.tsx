@@ -2,14 +2,16 @@ import { useState } from "react";
 import MarkerCoordinateEditor from "@/components/MarkerCoordinateEditor";
 import MarkerPlacementValidator from "@/components/ar/multipoint/MarkerPlacementValidator";
 import { type MarkerPoint } from "@/lib/markerTypes";
-import { Grid3X3, CheckCircle2, ScanLine } from "lucide-react";
+import { CheckCircle2, ScanLine, Printer } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MODE_COPY, type ExperienceMode } from "@/lib/modeCopy";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Project = Tables<"projects">;
 
 interface StepMarkersProps {
   project: Project;
-  mode: "tabletop" | "wall" | "multipoint";
+  mode: ExperienceMode;
   markerData: MarkerPoint[] | null;
   onUpdate: () => void;
 }
@@ -19,43 +21,90 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
   const [validating, setValidating] = useState(false);
   const canValidate = !!project.mind_file_url && (markerData?.length ?? 0) >= 3;
 
-  // Wall mode (added on main) takes the same single-QR path as tabletop.
+  // Tabletop and Wall share the single-QR path; only the surface differs.
+  // Renders two grid items (2 + 1 columns) inside the flow grid.
   if (mode !== "multipoint") {
+    const copy = MODE_COPY[mode];
+    const ModeIcon = copy.icon;
+    const isWall = mode === "wall";
+    const placeSteps = isWall
+      ? [
+          "Download the print sheet once the experience is generated.",
+          "Print at 100% (actual size) — the QR code must measure exactly 150 × 150 mm.",
+          "Mount it flat against the wall where the model should appear.",
+          "Scan it, tap Launch AR Camera, then point the camera back at the code.",
+        ]
+      : [
+          "Download the print sheet once the experience is generated.",
+          "Print at 100% (actual size) — the QR code must measure exactly 150 × 150 mm.",
+          "Place it flat on the table where the model should appear.",
+          "Scan it, tap Launch AR Camera, then point the camera back at the code.",
+        ];
+
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Your tabletop experience uses a single QR marker. Review your settings below.
-        </p>
-        <div className="rounded-lg border bg-muted/30 p-5 space-y-3">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Grid3X3 className="h-4 w-4 text-primary" />
-            Tabletop Settings
-          </h3>
-          <div className="grid gap-4 sm:grid-cols-3 text-sm">
-            <div>
-              <span className="text-muted-foreground block text-xs">Scale</span>
-              <span className="font-mono font-medium">{project.scale || "1:20"}</span>
+      <>
+        <Card className="flow-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ModeIcon className="h-4 w-4 text-primary" />
+              {copy.label} settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {isWall
+                ? "Your wall experience uses a single QR code mounted on the wall. The model loads anchored to the wall, at the centre of the code."
+                : "Your tabletop experience uses a single QR code laid flat on the table. The model loads anchored on top of it."}
+            </p>
+            <div className="grid gap-4 grid-cols-3 rounded-lg border bg-muted/30 p-4 text-sm">
+              <div>
+                <span className="text-muted-foreground block text-xs">Scale</span>
+                <span className="font-mono font-medium">{project.scale || "1:1"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs">QR size</span>
+                <span className="font-medium capitalize">{project.qr_size || "medium"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-xs">Rotation</span>
+                <span className="font-mono font-medium">{project.initial_rotation || 0}°</span>
+              </div>
             </div>
-            <div>
-              <span className="text-muted-foreground block text-xs">QR Size</span>
-              <span className="font-medium capitalize">{project.qr_size || "medium"}</span>
+            <div className="flex items-center gap-2 text-sm text-primary">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>{copy.label} mode — no additional marker setup needed</span>
             </div>
-            <div>
-              <span className="text-muted-foreground block text-xs">Rotation</span>
-              <span className="font-mono font-medium">{project.initial_rotation || 0}°</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-primary">
-          <CheckCircle2 className="h-4 w-4" />
-          <span>Tabletop mode — no additional marker setup needed</span>
-        </div>
-      </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Printer className="h-4 w-4 text-primary" />
+              Print &amp; place
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ol className="space-y-2.5 text-sm">
+              {placeSteps.map((text, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span className="h-5 w-5 shrink-0 rounded-full bg-primary/10 text-primary text-[11px] font-semibold flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <span className="text-muted-foreground leading-snug">{text}</span>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      </>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <>
+    <Card className="flow-span-2">
+    <CardContent className="pt-6 space-y-4">
       <p className="text-sm text-muted-foreground">
         Set the XYZ coordinates for each reference marker. Together they define the coordinate frame the AR model is placed within — no marker is the origin.
       </p>
@@ -85,8 +134,12 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
         onUpdate={onUpdate}
       />
 
+    </CardContent>
+    </Card>
+
       {/* Fix 6 · Architect placement validator — verify printed markers match Rhino coords */}
-      <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+      <Card>
+      <CardContent className="pt-6 space-y-2">
         <div className="flex items-center gap-2">
           <ScanLine className="h-4 w-4 text-primary" />
           <h3 className="text-sm font-semibold">Verify physical placement</h3>
@@ -109,7 +162,8 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
             Generate the experience (with at least 3 markers) to enable placement checking.
           </p>
         )}
-      </div>
+      </CardContent>
+      </Card>
 
       {validating && markerData && (
         <MarkerPlacementValidator
@@ -118,7 +172,7 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
           onClose={() => setValidating(false)}
         />
       )}
-    </div>
+    </>
   );
 };
 

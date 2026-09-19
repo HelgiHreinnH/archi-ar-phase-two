@@ -265,7 +265,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
         </div>
       ) : (
         <div
-          className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
+          className={`border-2 border-dashed rounded-lg p-6 min-h-[220px] flex flex-col items-center justify-center text-center transition-colors cursor-pointer ${
             isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
           }`}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -273,7 +273,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
         >
-          <Upload className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+          <Upload className="h-8 w-8 text-muted-foreground/40 mb-2" />
           <p className="text-sm text-muted-foreground mb-1">
             Drag & drop or click to upload
           </p>

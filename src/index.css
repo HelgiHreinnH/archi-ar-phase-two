@@ -138,3 +138,32 @@
     background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--marker-blue)));
   }
 }
+/* ── Upload flow: 3-column grid that adapts to the space actually available ──
+   Uses a container query (not a viewport breakpoint) so the layout responds to
+   the sidebar being open or collapsed on desktop and tablet. Below ~720px of
+   content width the boxes stack into a single column. */
+@layer components {
+  .flow-container {
+    container-type: inline-size;
+  }
+  .flow-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @container (min-width: 720px) {
+    .flow-grid {
+      gap: 1.25rem;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .flow-span-2 {
+      grid-column: span 2 / span 2;
+    }
+    .flow-span-3 {
+      grid-column: 1 / -1;
+    }
+  }
+  .flow-span-3 {
+    grid-column: 1 / -1;
+  }
+}

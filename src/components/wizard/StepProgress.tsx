@@ -7,65 +7,64 @@ interface Step {
 
 interface StepProgressProps {
   steps: Step[];
+  /** Section currently in view. */
   currentStep: number;
+  /** Highest section index the user has unlocked. */
+  maxReachable: number;
   onStepClick: (index: number) => void;
 }
 
-const StepProgress = ({ steps, currentStep, onStepClick }: StepProgressProps) => {
+const StepProgress = ({ steps, currentStep, maxReachable, onStepClick }: StepProgressProps) => {
   return (
-    <div className="flex items-center justify-center gap-0 w-full max-w-xl mx-auto py-2">
+    <nav aria-label="Upload progress" className="flex items-center justify-center w-full max-w-xl mx-auto">
       {steps.map((step, i) => {
         const isCompleted = step.completed;
         const isCurrent = i === currentStep;
-        const isClickable = isCompleted || i <= currentStep;
+        const isClickable = i <= maxReachable;
 
         return (
           <div key={i} className="flex items-center flex-1 last:flex-none">
-            {/* Step circle + label */}
             <button
               type="button"
               disabled={!isClickable}
               onClick={() => isClickable && onStepClick(i)}
-              className={`flex flex-col items-center gap-1.5 group ${
-                isClickable ? "cursor-pointer" : "cursor-default"
+              aria-current={isCurrent ? "step" : undefined}
+              className={`flex items-center gap-2 group rounded-full py-1 pl-1 pr-3 transition-colors ${
+                isClickable ? "cursor-pointer hover:bg-muted" : "cursor-default"
               }`}
             >
-              <div
-                className={`h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold transition-all ${
+              <span
+                className={`h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-semibold transition-all duration-300 ${
                   isCompleted
                     ? "bg-primary text-primary-foreground"
                     : isCurrent
                     ? "border-2 border-primary bg-primary/10 text-primary"
                     : "border-2 border-border bg-muted text-muted-foreground"
-                } ${isClickable ? "group-hover:scale-110" : ""}`}
+                } ${isCurrent ? "ring-4 ring-primary/15" : ""}`}
               >
-                {isCompleted ? <Check className="h-4 w-4" /> : i + 1}
-              </div>
+                {isCompleted ? <Check className="h-3.5 w-3.5" /> : i + 1}
+              </span>
               <span
-                className={`text-xs font-medium whitespace-nowrap ${
-                  isCurrent
-                    ? "text-primary"
-                    : isCompleted
-                    ? "text-foreground"
-                    : "text-muted-foreground"
+                className={`hidden sm:inline text-xs font-medium whitespace-nowrap transition-colors ${
+                  isCurrent ? "text-primary" : isCompleted ? "text-foreground" : "text-muted-foreground"
                 }`}
               >
                 {step.label}
               </span>
             </button>
 
-            {/* Connector line */}
             {i < steps.length - 1 && (
-              <div
-                className={`flex-1 h-0.5 mx-2 mt-[-1.25rem] ${
-                  step.completed ? "bg-primary" : "bg-border"
-                }`}
-              />
+              <div className="flex-1 h-0.5 mx-1 rounded-full bg-border overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-500 ease-out"
+                  style={{ width: step.completed ? "100%" : "0%" }}
+                />
+              </div>
             )}
           </div>
         );
       })}
-    </div>
+    </nav>
   );
 };
 

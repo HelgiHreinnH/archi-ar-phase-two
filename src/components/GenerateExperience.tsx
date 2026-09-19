@@ -174,7 +174,7 @@ const GenerateExperience = ({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="font-display flex items-center gap-2">
+        <CardTitle className="text-base flex items-center gap-2">
           <Rocket className="h-5 w-5 text-primary" />
           Generate AR Experience
         </CardTitle>
@@ -313,10 +313,12 @@ const GenerateExperience = ({
               </Button>
             )}
 
-            {/* Tabletop: QR code only — no markers needed */}
+            {/* Tabletop / Wall: single QR code — no markers needed */}
             {isTabletop && (
               <p className="text-xs text-muted-foreground">
-                Print and display the QR code — users scan it to launch the 3D experience with native AR placement.
+                {mode === "wall"
+                  ? "Print the QR code at exactly 150 × 150 mm and mount it flat on the wall — the model loads anchored to it. The Print Sheet (PDF) on the overview is already at the correct size."
+                  : "Print the QR code at exactly 150 × 150 mm and lay it flat on the table — the model loads anchored to it. The Print Sheet (PDF) on the overview is already at the correct size."}
               </p>
             )}
 

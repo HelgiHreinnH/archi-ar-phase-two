@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import ModelUploader from "@/components/ModelUploader";
 import ModelPreview from "@/components/ModelPreview";
 import { AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
+
+const ModelViewer3D = lazy(() => import("@/components/ModelViewer3D"));
 
 type Project = Tables<"projects">;
 
@@ -19,6 +21,7 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
   // GLB is the only supported format. Older projects may still point at a
   // USDZ — MindAR/Three.js can't render it, so ask the owner to replace it.
   const isLegacyUsdz = !!project.model_url?.toLowerCase().split("?")[0].endsWith(".usdz");
+  const showPreview = !!project.model_url && !isLegacyUsdz && !showUploader;
 
   return (
     <div className="space-y-4">
@@ -34,6 +37,16 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
             GLB export to use it in AR.
           </p>
         </div>
+      )}
+
+      {showPreview && (
+        <Suspense fallback={<div className="aspect-video w-full rounded-lg bg-muted animate-pulse" />}>
+          <ModelViewer3D
+            key={project.model_url}
+            modelUrl={project.model_url!}
+            className="aspect-video w-full rounded-lg animate-in fade-in duration-500"
+          />
+        </Suspense>
       )}
 
       {project.model_url && !showUploader ? (
@@ -56,7 +69,6 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
           onMarkersDetected={onMarkersDetected}
         />
       )}
-
     </div>
   );
 };
