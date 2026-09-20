@@ -5,6 +5,7 @@ import { ArrowDown, Box, Loader2, Lock } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, normalizeMarkerData } from "@/lib/markerTypes";
 import { supabase } from "@/integrations/supabase/client";
+import { preloadMindCompiler } from "@/lib/compileMindFile";
 import { MODE_COPY, toExperienceMode, type ExperienceMode } from "@/lib/modeCopy";
 import StepProgress from "@/components/wizard/StepProgress";
 import StepDetails, { type StepDetailsHandle } from "@/components/wizard/StepDetails";
@@ -153,6 +154,10 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   }, []);
 
   const [unlocked, setUnlocked] = useState(initialUnlocked);
+
+  // Warm the MindAR compiler while the architect fills in details/uploads, so
+  // "Generate" starts compiling immediately instead of downloading ~2 MB first.
+  useEffect(() => { preloadMindCompiler(); }, []);
   const [activeSection, setActiveSection] = useState(0);
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
   const [savingDetails, setSavingDetails] = useState(false);

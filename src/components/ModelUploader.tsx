@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Upload, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
@@ -21,6 +21,8 @@ interface ModelUploaderProps {
   projectId: string;
   onUploadComplete: (modelUrl: string) => void;
   onMarkersDetected?: (markers: MarkerPoint[]) => void;
+  /** Storage path of the model this upload replaces — removed after success. */
+  previousModelPath?: string | null;
 }
 
 function validateFile(file: File): string | null {
@@ -44,10 +46,9 @@ function warnIfHeavy(bytes: number | undefined) {
   });
 }
 
-const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: ModelUploaderProps) => {
+const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previousModelPath }: ModelUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [isOptimizing, setIsOptimizing] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
@@ -57,6 +58,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastFileRef = useRef<File | null>(null);
+
+  // Warm the (lazy) geometry compressor while the architect picks a file.
+  useEffect(() => { void import("@/lib/compressGlbGeometry").catch(() => {}); }, []);
 
   const handleUpload = useCallback(async (selected: File) => {
     const validation = validateFile(selected);
@@ -80,22 +84,49 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
       return;
     }
 
-    // Shrink oversized textures in the browser before upload (≤2048 px,
-    // JPEG for opaque maps). Geometry is Draco-compressed server-side after.
+    const t0 = performance.now();
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
     let file = selected;
+    let geometryCompressed = false;
+    let markersPromise: Promise<MarkerPoint[] | null> = Promise.resolve(null);
+
+    // ── Prepare in the browser, BEFORE upload ──
+    // Everything heavy happens locally so the upload is small and nothing
+    // waits on a server round trip afterwards:
+    //   1. markers read from the untouched original (textures skipped)
+    //   2. textures resized to ≤2048 px
+    //   3. geometry compressed (meshopt) — typically 5–10× smaller
     setIsPreparing(true);
     try {
-      const res = await optimizeGlbTextures(selected);
-      if (res.changed) {
-        file = res.file;
-        const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+      if (onMarkersDetected) {
+        markersPromise = parseGlbMarkers(selected).catch(() => null);
+      }
+
+      try {
+        const tex = await optimizeGlbTextures(file);
+        if (tex.changed) file = tex.file;
+      } catch (texErr) {
+        console.warn("[ModelUploader] Texture optimization skipped:", texErr);
+      }
+
+      try {
+        const { compressGlbGeometry } = await import("@/lib/compressGlbGeometry");
+        const geo = await compressGlbGeometry(file);
+        if (geo.changed) {
+          file = geo.file;
+          geometryCompressed = true;
+        }
+      } catch (geoErr) {
+        console.warn("[ModelUploader] Geometry compression skipped:", geoErr);
+      }
+
+      if (file !== selected) {
         toast({
-          title: "Textures optimized",
-          description: `${res.texturesProcessed} texture${res.texturesProcessed === 1 ? "" : "s"} resized · ${mb(res.originalSize)} MB → ${mb(res.optimizedSize)} MB`,
+          title: "Model optimized",
+          description: `${mb(selected.size)} MB → ${mb(file.size)} MB — ready for phones`,
         });
       }
-    } catch (texErr) {
-      console.warn("[ModelUploader] Texture optimization skipped:", texErr);
+      console.log(`[ModelUploader] prepared in ${Math.round(performance.now() - t0)} ms: ${mb(selected.size)} → ${mb(file.size)} MB`);
     } finally {
       setIsPreparing(false);
     }
@@ -105,7 +136,10 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
     setUploadedBytes(0);
     setTotalBytes(file.size);
 
-    const filePath = `${projectId}/${file.name}`;
+    // Unique folder per upload: the file is cached as immutable, so re-using a
+    // path (same file name re-uploaded) could serve the previous model.
+    const uploadId = Date.now().toString(36);
+    const filePath = `${projectId}/${uploadId}/${file.name}`;
     abortRef.current = new AbortController();
 
     try {
@@ -120,8 +154,8 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
         xhr.open("POST", url, true);
         xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`);
         xhr.setRequestHeader("x-upsert", "true");
-        // Track A — long-lived CDN cache. Storage paths include projectId+filename
-        // so any republish writes to a new path; we never need to invalidate.
+        xhr.setRequestHeader("content-type", "model/gltf-binary");
+        // Long-lived CDN cache is safe: every upload gets a fresh path.
         xhr.setRequestHeader("cache-control", "public, max-age=31536000, immutable");
 
         xhr.upload.onprogress = (e) => {
@@ -151,58 +185,32 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
 
       if (dbError) throw dbError;
 
+      console.log(`[ModelUploader] uploaded in ${Math.round(performance.now() - t0)} ms total`);
       toast({ title: "Model uploaded successfully" });
       onUploadComplete(filePath);
+      warnIfHeavy(file.size);
 
-      // Try to auto-detect marker positions from GLB files
-      if (onMarkersDetected) {
-        try {
-          const markers = await parseGlbMarkers(file);
-          if (markers) {
-            onMarkersDetected(markers);
-            toast({ title: "Marker positions detected", description: `Found ${markers.length} marker points in your model.` });
-          }
-        } catch {
-          // Silently ignore — user can enter markers manually
-        }
+      // Remove the file this upload replaced (best effort, same project only).
+      if (previousModelPath && previousModelPath !== filePath && previousModelPath.startsWith(`${projectId}/`)) {
+        void supabase.storage.from("project-models").remove([previousModelPath]).catch(() => {});
       }
 
-      // Phase 5.2 — Server-side GLB (Draco) optimization. Never blocks.
-      {
-        setIsOptimizing(true);
-        try {
-          const { data, error: optErr } = await supabase.functions.invoke("optimize-model", {
-            body: { projectId, inputPath: filePath },
-          });
-          if (optErr) throw optErr;
-          if (data?.ok && data.optimizedPath) {
-            const before = (data.originalSize / (1024 * 1024)).toFixed(1);
-            const after = (data.optimizedSize / (1024 * 1024)).toFixed(1);
-            toast({
-              title: "Model optimized",
-              description: `${before} MB → ${after} MB (${data.ratio}× smaller)`,
-            });
-            onUploadComplete(data.optimizedPath);
-            warnIfHeavy(data.optimizedSize);
-          } else if (data?.skipped) {
-            // No gain — keep original
-            warnIfHeavy(file.size);
-          } else {
-            toast({
-              title: "Optimization skipped",
-              description: "Using original model — performance may be slower.",
-              variant: "destructive",
-            });
-          }
-        } catch (optErr) {
-          console.warn("[ModelUploader] Optimization failed:", optErr);
-          toast({
-            title: "Optimization skipped",
-            description: "Using original model — performance may be slower.",
-          });
-        } finally {
-          setIsOptimizing(false);
-        }
+      const markers = await markersPromise;
+      if (markers && onMarkersDetected) {
+        onMarkersDetected(markers);
+        toast({ title: "Marker positions detected", description: `Found ${markers.length} marker points in your model.` });
+      }
+
+      // Fallback only: if in-browser compression couldn't run (e.g. the file
+      // was already Draco-compressed or the browser failed), let the server
+      // try — in the background, never blocking the architect.
+      if (!geometryCompressed) {
+        void supabase.functions
+          .invoke("optimize-model", { body: { projectId, inputPath: filePath } })
+          .then(({ data }) => {
+            if (data?.ok && data.optimizedPath) onUploadComplete(data.optimizedPath);
+          })
+          .catch((optErr) => console.warn("[ModelUploader] Server optimization failed:", optErr));
       }
     } catch (err: any) {
       if (err?.message !== "Network error during upload" || !abortRef.current?.signal.aborted) {
@@ -212,7 +220,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
       setIsUploading(false);
       abortRef.current = null;
     }
-  }, [projectId, onUploadComplete]);
+  }, [projectId, onUploadComplete, onMarkersDetected, previousModelPath]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -232,17 +240,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected }: Model
       {isPreparing ? (
         <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
           <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
-          <p className="text-sm font-medium">Preparing model…</p>
-          <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-            Checking the file and resizing large textures for phones.
-          </p>
-        </div>
-      ) : isOptimizing ? (
-        <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
-          <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
           <p className="text-sm font-medium">Optimizing model…</p>
           <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-            Compressing geometry for faster AR loading. This usually takes 15–60 seconds.
+            Compressing geometry and textures on your computer so the upload is small. Usually a few seconds.
           </p>
         </div>
       ) : isUploading ? (

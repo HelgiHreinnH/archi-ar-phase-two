@@ -139,14 +139,24 @@ function isRepackable(json: GltfJson, bin: Uint8Array | null): bin is Uint8Array
   return (json.bufferViews ?? []).every((bv: any) => (bv.buffer ?? 0) === 0);
 }
 
-async function hasAlpha(bitmap: ImageBitmap): Promise<boolean> {
-  const c = document.createElement("canvas");
-  c.width = bitmap.width;
-  c.height = bitmap.height;
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return true;
-  ctx.drawImage(bitmap, 0, 0);
-  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+/**
+ * PNG colour type from the IHDR chunk (byte 25). Types 0 (grey) and 2 (RGB)
+ * carry no alpha channel unless a tRNS chunk is present.
+ */
+function pngMayHaveAlpha(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < 26) return true;
+  const colorType = bytes[25];
+  if (colorType === 4 || colorType === 6) return true;
+  // Look for a tRNS chunk before the image data (cheap: header region only).
+  const head = new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(bytes.byteLength, 4096)));
+  const idat = head.indexOf("IDAT");
+  const trns = head.indexOf("tRNS");
+  return trns !== -1 && (idat === -1 || trns < idat);
+}
+
+/** Scan the (already downscaled) canvas for any non-opaque pixel. */
+function canvasHasAlpha(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
+  const data = ctx.getImageData(0, 0, w, h).data;
   for (let i = 3; i < data.length; i += 4) if (data[i] < 255) return true;
   return false;
 }
@@ -195,17 +205,22 @@ export async function optimizeGlbTextures(file: File, maxSize = MAX_TEXTURE_SIZE
       const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
       const w = Math.max(1, Math.round(bitmap.width * scale));
       const h = Math.max(1, Math.round(bitmap.height * scale));
-      // Opaque PNGs (the usual Rhino export) become JPEG; PNGs with real alpha stay PNG.
-      const outMime = mime === "image/jpeg" || !(await hasAlpha(bitmap)) ? "image/jpeg" : "image/png";
-      if (scale === 1 && outMime === mime) continue; // nothing to gain
+      const mayHaveAlpha = mime === "image/png" && pngMayHaveAlpha(src);
+      // Opaque JPEGs that are already small enough: nothing to gain.
+      if (scale === 1 && !mayHaveAlpha && mime === "image/jpeg") continue;
 
       const canvas = document.createElement("canvas");
       canvas.width = w;
       canvas.height = h;
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: mayHaveAlpha });
       if (!ctx) continue;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(bitmap, 0, 0, w, h);
+
+      // Opaque maps (the usual Rhino export) become JPEG; real alpha stays PNG.
+      // The alpha scan runs on the downscaled canvas, never the full-res image.
+      const outMime = mayHaveAlpha && canvasHasAlpha(ctx, w, h) ? "image/png" : "image/jpeg";
+      if (scale === 1 && outMime === mime) continue;
       const bytes = await canvasToBytes(canvas, outMime, outMime === "image/jpeg" ? JPEG_QUALITY : undefined);
       if (bytes.byteLength >= src.byteLength) continue;
 

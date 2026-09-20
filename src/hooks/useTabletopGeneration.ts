@@ -87,16 +87,17 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
       // ── Upload QR + .mind ──
       setStep("uploading");
       const qrPath = `${projectPath}/qr_code.png`;
-      const { error: qrUploadErr } = await supabase.storage
-        .from("project-assets")
-        .upload(qrPath, qrBlob, { contentType: "image/png", upsert: true });
-      if (qrUploadErr) throw qrUploadErr;
-
       const mindPath = `${projectPath}/targets.mind`;
-      const { error: mindUploadErr } = await supabase.storage
-        .from("project-assets")
-        .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true });
-      if (mindUploadErr) throw mindUploadErr;
+      const [qrUpload, mindUpload] = await Promise.all([
+        supabase.storage
+          .from("project-assets")
+          .upload(qrPath, qrBlob, { contentType: "image/png", upsert: true }),
+        supabase.storage
+          .from("project-assets")
+          .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true }),
+      ]);
+      if (qrUpload.error) throw qrUpload.error;
+      if (mindUpload.error) throw mindUpload.error;
 
       // ── Verify .mind reachability before activating (same gate as multipoint) ──
       const { data: signedMind, error: signErr } = await supabase.storage

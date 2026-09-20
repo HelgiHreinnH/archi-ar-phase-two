@@ -44,7 +44,32 @@ import { MindARSRIError, isLikelySRIFailure, sriBypassEnabled } from "./sriError
  * Load the MindAR compiler via an ES module script tag.
  * The CDN file sets `window.MINDAR.IMAGE = { Controller, Compiler, UI }`.
  */
+let compilerLoad: Promise<void> | null = null;
+
 function loadCompilerScript(): Promise<void> {
+  // Memoised: preloading and compiling share one script load.
+  if (!compilerLoad) {
+    compilerLoad = injectCompilerScript().catch((err) => {
+      compilerLoad = null; // allow a retry after a failure
+      throw err;
+    });
+  }
+  return compilerLoad;
+}
+
+/**
+ * Warm the MindAR compiler (~2 MB incl. TensorFlow.js) in the background as
+ * soon as the project wizard opens, so pressing "Generate" doesn't start
+ * with a multi-second download. Safe to call repeatedly; never throws.
+ */
+export function preloadMindCompiler(): void {
+  if (typeof window === "undefined") return;
+  const start = () => { void loadCompilerScript().then(() => waitForCompiler()).catch(() => {}); };
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
+  if (ric) ric(start); else setTimeout(start, 1500);
+}
+
+function injectCompilerScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (window.__MINDAR_COMPILER_LOADED && window.MINDAR?.IMAGE?.Compiler) {
       resolve();

@@ -67,6 +67,7 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
             setShowUploader(false);
           }}
           onMarkersDetected={onMarkersDetected}
+          previousModelPath={project.model_url}
         />
       )}
     </div>

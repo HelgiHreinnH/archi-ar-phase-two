@@ -79,23 +79,25 @@ export function useMultipointGeneration(
       // ── Upload marker images + .mind ──
       setStep("uploading");
       const markerImageUrls: Record<string, string> = {};
+      const mindPath = `${projectPath}/targets.mind`;
 
-      for (const marker of generatedMarkers) {
+      // Upload all marker images and the .mind file in parallel.
+      const uploads = generatedMarkers.map(async (marker) => {
         const filePath = `${projectPath}/markers/marker_${marker.index}.png`;
         const { error: uploadErr } = await supabase.storage
           .from("project-assets")
           .upload(filePath, marker.blob, { contentType: "image/png", upsert: true });
         if (uploadErr) throw uploadErr;
-
         // Store bare path — signed URLs are generated on retrieval
         markerImageUrls[String(marker.index)] = filePath;
-      }
-
-      const mindPath = `${projectPath}/targets.mind`;
-      const { error: mindUploadErr } = await supabase.storage
-        .from("project-assets")
-        .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true });
-      if (mindUploadErr) throw mindUploadErr;
+      });
+      uploads.push(
+        supabase.storage
+          .from("project-assets")
+          .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true })
+          .then(({ error: mindUploadErr }) => { if (mindUploadErr) throw mindUploadErr; }),
+      );
+      await Promise.all(uploads);
 
       // ── Verify .mind reachability before activating ──
       const { data: signedMind, error: signErr } = await supabase.storage

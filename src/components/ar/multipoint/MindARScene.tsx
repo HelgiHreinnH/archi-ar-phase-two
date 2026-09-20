@@ -87,6 +87,8 @@ export interface AnchorSample {
 const THREE_ESM_URL = "/assets/three/three.module.js";
 const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
 const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
+// Models uploaded since Sep 2026 are meshopt-compressed in the browser.
+const MESHOPT_DECODER_URL = "/assets/three/jsm/libs/meshopt_decoder.module.js";
 const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 const MINDAR_THREE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
@@ -861,6 +863,8 @@ const MindARScene = ({
         dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
         dracoLoader.setWorkerLimit(2);
         loader.setDRACOLoader(dracoLoader);
+        const { MeshoptDecoder } = await import(/* @vite-ignore */ MESHOPT_DECODER_URL);
+        loader.setMeshoptDecoder(MeshoptDecoder);
 
         const loadFromUrl = (url: string) =>
           new Promise<any>((resolve, reject) => {

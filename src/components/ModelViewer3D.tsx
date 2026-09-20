@@ -1,68 +1,96 @@
-import { useEffect, useState, useRef } from "react";
-import { Box } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Box, RotateCcw } from "lucide-react";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { supabase } from "@/integrations/supabase/client";
-// Phase 3.3 — Lazy-load <model-viewer> below in a useEffect.
+
+/**
+ * Lightweight GLB preview (desktop + iOS/macOS Safari + Android).
+ *
+ * Replaces Google's <model-viewer> (~1 MB, bundles its own three.js and pulls
+ * decoders from gstatic) with the three.js we already ship: GLTFLoader +
+ * self-hosted Draco decoder + Meshopt decoder, orbit controls, neutral room
+ * lighting for PBR materials. Renders on demand only (idle = no GPU work),
+ * pauses when scrolled off-screen, caps pixel ratio at 2 for iOS memory, and
+ * disposes everything on unmount.
+ */
 
 interface ModelViewer3DProps {
-  modelUrl: string; // storage path e.g. "userId/file.glb"
+  modelUrl: string; // storage path e.g. "projectId/abc123/file.glb"
   className?: string;
 }
 
-// Track A — bump TTL from 10min to 24h so internal navigation reuses the same
-// signed URL and the Supabase Storage edge can actually cache the GLB. The
-// path always includes projectId+filename so republishes get a fresh path.
-const SIGNED_URL_TTL_SEC = 60 * 60 * 24;
-const SIGNED_URL_CACHE_MS = (SIGNED_URL_TTL_SEC - 60) * 1000; // refresh 1min before expiry
+const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 
-interface CachedSigned { url: string; at: number }
+// Signed URLs are reused within the session so the browser can cache the GLB.
+// Model paths are unique per upload, so a cached URL never points at a stale model.
+const SIGNED_URL_TTL_SEC = 60 * 60 * 24;
+const SIGNED_URL_CACHE_MS = (SIGNED_URL_TTL_SEC - 60) * 1000;
 
 function readCache(path: string): string | null {
-  if (typeof sessionStorage === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(`archi-mv3d::${path}`);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedSigned;
+    const parsed = JSON.parse(raw) as { url: string; at: number };
     if (Date.now() - parsed.at < SIGNED_URL_CACHE_MS) return parsed.url;
   } catch { /* ignore */ }
   return null;
 }
 
 function writeCache(path: string, url: string) {
-  if (typeof sessionStorage === "undefined") return;
   try {
-    sessionStorage.setItem(`archi-mv3d::${path}`, JSON.stringify({ url, at: Date.now() } satisfies CachedSigned));
+    sessionStorage.setItem(`archi-mv3d::${path}`, JSON.stringify({ url, at: Date.now() }));
   } catch { /* quota — ignore */ }
 }
 
+function disposeObject(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry?.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      if (!m) continue;
+      for (const value of Object.values(m)) {
+        if (value instanceof THREE.Texture) value.dispose();
+      }
+      m.dispose();
+    }
+  });
+}
+
+type LoadState = "signing" | "loading" | "ready" | "error";
+
 const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
+  const isUsdz = modelUrl.toLowerCase().split("?")[0].endsWith(".usdz");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const resetRef = useRef<() => void>(() => {});
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-  const [mvReady, setMvReady] = useState(typeof window !== "undefined" && !!customElements.get("model-viewer"));
-  const isUsdz = modelUrl.toLowerCase().endsWith(".usdz");
-  const mvRef = useRef<HTMLElement | null>(null);
+  const [state, setState] = useState<LoadState>("signing");
+  const [progress, setProgress] = useState(0);
 
-  useEffect(() => {
-    if (isUsdz) return; // USDZ can't render in WebGL — skip loading model-viewer module
-    if (mvReady) return;
-    let cancelled = false;
-    import("@google/model-viewer").then(() => { if (!cancelled) setMvReady(true); });
-    return () => { cancelled = true; };
-  }, [mvReady, isUsdz]);
-
+  // ── Resolve a signed URL for the private bucket ──
   useEffect(() => {
     if (isUsdz) return;
-    setError(false);
+    setState("signing");
     const cached = readCache(modelUrl);
-    if (cached) { setSignedUrl(cached); return; }
+    if (cached) {
+      setSignedUrl(cached);
+      return;
+    }
     setSignedUrl(null);
     let cancelled = false;
     supabase.storage
       .from("project-models")
       .createSignedUrl(modelUrl, SIGNED_URL_TTL_SEC)
-      .then(({ data, error: err }) => {
+      .then(({ data, error }) => {
         if (cancelled) return;
-        if (err || !data?.signedUrl) {
-          setError(true);
+        if (error || !data?.signedUrl) {
+          setState("error");
         } else {
           writeCache(modelUrl, data.signedUrl);
           setSignedUrl(data.signedUrl);
@@ -71,20 +99,147 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     return () => { cancelled = true; };
   }, [modelUrl, isUsdz]);
 
-  // Track A — Three.js dispose on unmount. <model-viewer> internally creates
-  // a renderer + scene per element; clearing the src and removing the node
-  // is what actually triggers its disposeScene path.
+  // ── Three.js scene ──
   useEffect(() => {
-    return () => {
-      const el = mvRef.current as (HTMLElement & { src?: string }) | null;
-      if (!el) return;
-      try { el.removeAttribute("src"); } catch { /* noop */ }
+    const container = containerRef.current;
+    if (!container || !signedUrl) return;
+
+    setState("loading");
+    setProgress(0);
+    let disposed = false;
+    let frame = 0;
+    let visible = true;
+    let autoRotate = true;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.9;
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    renderer.domElement.style.touchAction = "none";
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = envTexture;
+    pmrem.dispose();
+
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.autoRotateSpeed = 0.6;
+
+    // Render loop runs only while something moves (damping / auto-rotate).
+    const tick = () => {
+      frame = 0;
+      if (disposed || !visible) return;
+      controls.autoRotate = autoRotate;
+      const moved = controls.update();
+      renderer.render(scene, camera);
+      if (moved || autoRotate) frame = requestAnimationFrame(tick);
     };
-  }, []);
+    const wake = () => {
+      if (!frame && !disposed) frame = requestAnimationFrame(tick);
+    };
+
+    const stopAutoRotate = () => { autoRotate = false; };
+    controls.addEventListener("start", stopAutoRotate);
+    controls.addEventListener("change", wake);
+
+    const resize = () => {
+      const w = container.clientWidth || 1;
+      const h = container.clientHeight || 1;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      wake();
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(container);
+    resize();
+
+    const io = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      if (visible) wake();
+    });
+    io.observe(container);
+
+    const draco = new DRACOLoader();
+    draco.setDecoderPath(DRACO_DECODER_PATH);
+    draco.setWorkerLimit(2);
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(draco);
+    loader.setMeshoptDecoder(MeshoptDecoder);
+
+    let model: THREE.Object3D | null = null;
+
+    loader.load(
+      signedUrl,
+      (gltf) => {
+        if (disposed) {
+          disposeObject(gltf.scene);
+          return;
+        }
+        model = gltf.scene;
+        scene.add(model);
+
+        // Frame the model: orbit around its centre, distance from its size.
+        const box = new THREE.Box3().setFromObject(model);
+        const sphere = box.getBoundingSphere(new THREE.Sphere());
+        const radius = Math.max(sphere.radius, 1e-3);
+        const dist = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.05;
+        const dir = new THREE.Vector3(1, 0.75, 1.2).normalize();
+
+        camera.near = Math.max(radius / 1000, 0.001);
+        camera.far = radius * 100;
+        camera.updateProjectionMatrix();
+        controls.minDistance = radius * 0.2;
+        controls.maxDistance = radius * 10;
+
+        resetRef.current = () => {
+          controls.target.copy(sphere.center);
+          camera.position.copy(sphere.center).addScaledVector(dir, dist);
+          controls.update();
+          autoRotate = true;
+          wake();
+        };
+        resetRef.current();
+        setState("ready");
+      },
+      (e) => {
+        if (e.lengthComputable && e.total > 0) setProgress(Math.round((e.loaded / e.total) * 100));
+      },
+      (err) => {
+        console.error("[ModelViewer3D] Failed to load model:", err);
+        if (!disposed) setState("error");
+      },
+    );
+
+    return () => {
+      disposed = true;
+      if (frame) cancelAnimationFrame(frame);
+      ro.disconnect();
+      io.disconnect();
+      controls.removeEventListener("start", stopAutoRotate);
+      controls.removeEventListener("change", wake);
+      controls.dispose();
+      if (model) disposeObject(model);
+      envTexture.dispose();
+      draco.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss();
+      renderer.domElement.remove();
+      resetRef.current = () => {};
+    };
+  }, [signedUrl]);
 
   // Legacy USDZ uploads can't render in the browser (or in MindAR AR) —
   // prompt the owner to replace them with a GLB.
-  // Show a clear placeholder instead of a broken spinner.
   if (isUsdz) {
     return (
       <div className={`flex flex-col items-center justify-center gap-2 bg-muted/50 border rounded-lg p-4 ${className}`}>
@@ -97,39 +252,38 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     );
   }
 
-  if (error) {
-    return (
-      <div className={`flex items-center justify-center bg-muted rounded-lg ${className}`}>
-        <p className="text-xs text-muted-foreground">Could not load model preview</p>
-      </div>
-    );
-  }
-
-  if (!signedUrl || !mvReady) {
-    return (
-      <div className={`flex items-center justify-center bg-muted rounded-lg animate-pulse ${className}`}>
-        <p className="text-xs text-muted-foreground">Loading model…</p>
-      </div>
-    );
-  }
-
   return (
-    <div className={`rounded-lg overflow-hidden bg-muted/50 border ${className}`}>
-      <model-viewer
-        ref={mvRef as React.MutableRefObject<any>}
-        src={signedUrl}
-        ios-src={isUsdz ? signedUrl : undefined}
-        alt="3D model preview"
-        auto-rotate=""
-        camera-controls=""
-        shadow-intensity="1"
-        exposure="0.8"
-        camera-orbit="45deg 55deg 105%"
-        field-of-view="45deg"
-        interaction-prompt="none"
-        loading="eager"
-        style={{ width: "100%", height: "100%", minHeight: "inherit" }}
-      />
+    <div className={`relative rounded-lg overflow-hidden bg-muted/50 border ${className}`}>
+      <div ref={containerRef} className="absolute inset-0" aria-label="3D model preview" role="img" />
+
+      {(state === "signing" || state === "loading") && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/60">
+          <p className="text-xs text-muted-foreground">
+            {progress > 0 ? `Loading model… ${progress}%` : "Loading model…"}
+          </p>
+          <div className="h-1 w-32 overflow-hidden rounded-full bg-border">
+            <div className="h-full bg-primary transition-[width] duration-200" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      )}
+
+      {state === "error" && (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted">
+          <p className="text-xs text-muted-foreground">Could not load model preview</p>
+        </div>
+      )}
+
+      {state === "ready" && (
+        <button
+          type="button"
+          onClick={() => resetRef.current()}
+          className="absolute bottom-2 right-2 rounded-md bg-background/80 p-1.5 text-muted-foreground backdrop-blur hover:text-foreground"
+          aria-label="Reset view"
+          title="Reset view"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 };
