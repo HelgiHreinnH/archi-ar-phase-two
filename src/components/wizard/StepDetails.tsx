@@ -4,7 +4,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Compass, Check, Loader2 } from "lucide-react";
+import { Compass, Check, Loader2, FileText } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MODE_COPY, type ExperienceMode } from "@/lib/modeCopy";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -106,8 +107,26 @@ const StepDetails = forwardRef<StepDetailsHandle, StepDetailsProps>(({ project, 
     setForm((prev) => ({ ...prev, ...patch }));
   };
 
+  const saveStatus = (
+    <p className="h-4 text-[11px] text-muted-foreground flex items-center gap-1" aria-live="polite">
+      {status === "saving" && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>)}
+      {status === "saved" && (<><Check className="h-3 w-3 text-green-600" /> Changes saved</>)}
+      {status === "error" && <span className="text-destructive">Not saved — check your connection</span>}
+    </p>
+  );
+
+  // Renders grid items: Details (1 column, beside the 3D model) and, for
+  // Tabletop/Wall, the configuration as a full-width row underneath.
   return (
-    <div className="space-y-5">
+    <>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="h-4 w-4 text-primary" />
+          Details
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
       <div className="space-y-2">
         <Label htmlFor="client">Client name</Label>
         <Input
@@ -139,12 +158,19 @@ const StepDetails = forwardRef<StepDetailsHandle, StepDetailsProps>(({ project, 
         />
       </div>
 
+      {saveStatus}
+      </CardContent>
+    </Card>
+
       {mode !== "multipoint" && (
-        <div className="rounded-lg border bg-muted/30 p-4 space-y-5">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <ModeIcon className="h-4 w-4 text-primary" />
-            {copy.label} configuration
-          </h3>
+        <Card className="flow-span-3">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ModeIcon className="h-4 w-4 text-primary" />
+              {copy.label} configuration
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 sm:grid-cols-3">
 
           {/* Scale */}
           <div className="space-y-2">
@@ -212,15 +238,10 @@ const StepDetails = forwardRef<StepDetailsHandle, StepDetailsProps>(({ project, 
               ))}
             </div>
           </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
-
-      <p className="h-4 text-[11px] text-muted-foreground flex items-center gap-1" aria-live="polite">
-        {status === "saving" && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>)}
-        {status === "saved" && (<><Check className="h-3 w-3 text-green-600" /> Changes saved</>)}
-        {status === "error" && <span className="text-destructive">Not saved — check your connection</span>}
-      </p>
-    </div>
+    </>
   );
 });
 

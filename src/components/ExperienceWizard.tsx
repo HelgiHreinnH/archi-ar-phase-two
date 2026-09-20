@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowDown, Box, FileText, Loader2, Lock } from "lucide-react";
+import { ArrowDown, Box, Loader2, Lock } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, normalizeMarkerData } from "@/lib/markerTypes";
 import { supabase } from "@/integrations/supabase/client";
@@ -266,17 +266,7 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
             />
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4 text-primary" />
-              Details
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
-          </CardContent>
-        </Card>
+        <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
       </FlowSection>
 
       {/* 2 · Markers */}
