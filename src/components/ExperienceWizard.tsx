@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowDown, Box, Loader2, Lock } from "lucide-react";
+import { ArrowDown, Box, Loader2, AlertCircle } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, normalizeMarkerData } from "@/lib/markerTypes";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,6 +25,53 @@ const SECTION_LABELS = ["3D Model & Details", "Markers", "Generate"];
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** Space kept clear above a section for the sticky progress bar (px). */
+const SECTION_SCROLL_OFFSET = 76;
+
+/** Nearest scrolling ancestor, or null when the window itself scrolls. */
+function getScrollParent(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement;
+  while (node && node !== document.body) {
+    const { overflowY } = getComputedStyle(node);
+    if (/(auto|scroll)/.test(overflowY) && node.scrollHeight > node.clientHeight) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/**
+ * Eased scroll that brings `el` to the top of the viewport (below the sticky
+ * progress bar). Duration scales gently with distance so a one-screen hop and
+ * a jump back to the top both feel deliberate. Jumps when reduced motion is on.
+ */
+function animateScrollTo(el: HTMLElement, onDone?: () => void) {
+  const parent = getScrollParent(el);
+  const getY = () => (parent ? parent.scrollTop : window.scrollY);
+  const setY = (y: number) => (parent ? (parent.scrollTop = y) : window.scrollTo(0, y));
+  const parentTop = parent ? parent.getBoundingClientRect().top : 0;
+  const start = getY();
+  const target = Math.max(0, start + el.getBoundingClientRect().top - parentTop - SECTION_SCROLL_OFFSET);
+  const distance = target - start;
+
+  if (prefersReducedMotion() || Math.abs(distance) < 2) {
+    setY(target);
+    onDone?.();
+    return;
+  }
+
+  const duration = Math.min(1100, Math.max(650, Math.abs(distance) * 0.6));
+  const t0 = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - t0) / duration);
+    setY(start + distance * easeInOutCubic(t));
+    if (t < 1) requestAnimationFrame(step);
+    else onDone?.();
+  };
+  requestAnimationFrame(step);
+}
 
 // ── Mode banner — states up front what kind of experience is being built ──
 const MODE_BANNER: Record<ExperienceMode, { title: string; body: string }> = {
@@ -57,80 +105,100 @@ const ModeBanner = ({ mode }: { mode: ExperienceMode }) => {
   );
 };
 
-// ── One vertical section of the upload flow ──
+// ── One full-screen section of the upload flow ──
 interface FlowSectionProps {
   index: number;
   title: string;
   description: string;
-  locked: boolean;
   sectionRef: (el: HTMLElement | null) => void;
   children: ReactNode;
   cta?: ReactNode;
 }
 
-const FlowSection = ({ index, title, description, locked, sectionRef, children, cta }: FlowSectionProps) => (
+const FlowSection = ({ index, title, description, sectionRef, children, cta }: FlowSectionProps) => (
   <section
     ref={sectionRef}
     data-section={index}
     aria-labelledby={`flow-section-${index}`}
-    className={`scroll-mt-24 ${index > 0 ? "border-t pt-10" : ""}`}
+    style={{ scrollMarginTop: SECTION_SCROLL_OFFSET }}
+    // Each section fills the viewport (minus the sticky progress bar), with
+    // its CTA pinned to the bottom centre. Taller content simply grows.
+    className="min-h-[calc(100dvh-5.5rem)] flex flex-col pt-6 pb-10"
   >
-    <header className="flex items-start gap-3 mb-5">
-      <span
-        className={`mt-0.5 h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-semibold ${
-          locked ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground"
-        }`}
-      >
-        {index + 1}
-      </span>
-      <div>
-        <h2 id={`flow-section-${index}`} className={`text-lg font-semibold ${locked ? "text-muted-foreground" : ""}`}>
-          {title}
-        </h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
-      </div>
-    </header>
+    <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-700 ease-out">
+      <header className="flex items-start gap-3 mb-6">
+        <span className="mt-0.5 h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold bg-primary text-primary-foreground">
+          {index + 1}
+        </span>
+        <div>
+          <h2
+            id={`flow-section-${index}`}
+            tabIndex={-1}
+            className="text-xl font-semibold outline-none"
+          >
+            {title}
+          </h2>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+      </header>
 
-    {locked ? (
-      <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed p-8 text-sm text-muted-foreground">
-        <Lock className="h-4 w-4" />
-        Complete the section above to continue
-      </div>
-    ) : (
-      <div className="animate-in fade-in slide-in-from-bottom-6 duration-700 ease-out">
-        <div className="flow-grid">{children}</div>
-        {cta && <div className="flex flex-col items-center gap-2 pt-8">{cta}</div>}
-      </div>
-    )}
+      <div className="flow-grid">{children}</div>
+
+      {cta && <div className="mt-auto flex flex-col items-center gap-2 pt-10">{cta}</div>}
+    </div>
   </section>
 );
 
 interface NextButtonProps {
   label: string;
   onClick: () => void;
-  disabled?: boolean;
+  /** When set, the step isn't complete yet: the button stays clickable and explains what's missing. */
+  blockedReason?: string;
   busy?: boolean;
-  hint?: string;
 }
 
-const NextButton = ({ label, onClick, disabled, busy, hint }: NextButtonProps) => (
-  <>
-    <Button
-      size="lg"
-      onClick={onClick}
-      disabled={disabled || busy}
-      className="group rounded-full px-8 gap-2 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
-    >
-      {label}
-      {busy ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <ArrowDown className="h-4 w-4 transition-transform duration-300 group-hover:translate-y-0.5" />
+const NextButton = ({ label, onClick, blockedReason, busy }: NextButtonProps) => {
+  const [nudge, setNudge] = useState(0);
+  const handleClick = () => {
+    if (blockedReason) {
+      setNudge((n) => n + 1);
+      toast({ title: blockedReason });
+      return;
+    }
+    onClick();
+  };
+  return (
+    <>
+      <Button
+        size="lg"
+        onClick={handleClick}
+        disabled={busy}
+        aria-disabled={!!blockedReason}
+        className={`group rounded-full px-8 gap-2 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 ${
+          blockedReason ? "opacity-70" : ""
+        }`}
+      >
+        {label}
+        {busy ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <ArrowDown className="h-4 w-4 transition-transform duration-300 group-hover:translate-y-0.5" />
+        )}
+      </Button>
+      {blockedReason && (
+        <p
+          key={nudge}
+          className={`text-xs flex items-center gap-1 ${
+            nudge > 0 ? "text-amber-600 animate-in fade-in slide-in-from-top-1 duration-300" : "text-muted-foreground"
+          }`}
+        >
+          {nudge > 0 && <AlertCircle className="h-3.5 w-3.5" />}
+          {blockedReason}
+        </p>
       )}
-    </Button>
-    {disabled && hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-  </>
-);
+    </>
+  );
+};
 
 // ── The single-page upload flow ──
 const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) => {
@@ -160,7 +228,6 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   useEffect(() => { preloadMindCompiler(); }, []);
   const [activeSection, setActiveSection] = useState(0);
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
-  const [savingDetails, setSavingDetails] = useState(false);
   const sectionEls = useRef<(HTMLElement | null)[]>([]);
   const detailsRef = useRef<StepDetailsHandle>(null);
 
@@ -176,8 +243,11 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     const el = sectionEls.current[pendingScroll];
     setPendingScroll(null);
     if (!el) return;
+    // Wait a frame so a just-unlocked section is laid out before measuring.
     requestAnimationFrame(() => {
-      el.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+      animateScrollTo(el, () => {
+        el.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
+      });
     });
   }, [pendingScroll, unlocked]);
 
@@ -202,11 +272,11 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     setPendingScroll(index);
   }, []);
 
-  const handleModelSectionNext = useCallback(async () => {
-    setSavingDetails(true);
-    const ok = (await detailsRef.current?.save()) ?? true;
-    setSavingDetails(false);
-    if (ok) goTo(1);
+  const handleModelSectionNext = useCallback(() => {
+    // Details are optional and autosave: flush any pending edit in the
+    // background and move on straight away, so the CTA never waits on the network.
+    void detailsRef.current?.save().catch((err) => console.warn("[ExperienceWizard] details save failed:", err));
+    goTo(1);
   }, [goTo]);
 
   const handleMarkersDetected = useCallback(async (markers: MarkerPoint[]) => {
@@ -224,8 +294,8 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   const surface = MODE_COPY[mode].surface;
 
   return (
-    <div className="flow-container space-y-8 pb-24">
-      <div className="sticky top-2 z-30 rounded-full border bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75 shadow-sm px-3 py-1.5">
+    <div className="flow-container pb-10">
+      <div className="sticky top-2 z-30 rounded-full border bg-card shadow-sm px-3 py-1.5">
         <StepProgress
           steps={steps}
           currentStep={activeSection}
@@ -243,15 +313,12 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
             ? "Upload the model that will hang on the wall, and describe the project."
             : "Upload your model and describe the project."
         }
-        locked={false}
         sectionRef={setSectionRef(0)}
         cta={
           <NextButton
             label="Continue to markers"
             onClick={handleModelSectionNext}
-            disabled={!hasModel}
-            busy={savingDetails}
-            hint="Upload a GLB model to continue"
+            blockedReason={hasModel ? undefined : "Upload a GLB model to continue"}
           />
         }
       >
@@ -274,7 +341,8 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
         <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
       </FlowSection>
 
-      {/* 2 · Markers */}
+      {/* 2 · Markers — rendered once reached */}
+      {unlocked >= 1 && (
       <FlowSection
         index={1}
         title="Markers"
@@ -283,14 +351,12 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
             ? "Set where each printed marker sits in the room."
             : `Review how the QR code on the ${surface} anchors your model.`
         }
-        locked={unlocked < 1}
         sectionRef={setSectionRef(1)}
         cta={
           <NextButton
             label="Continue to generate"
             onClick={() => goTo(2)}
-            disabled={!hasValidMarkers}
-            hint="Enter coordinates for at least 3 markers to continue"
+            blockedReason={hasValidMarkers ? undefined : "Enter coordinates for at least 3 markers to continue"}
           />
         }
       >
@@ -301,13 +367,14 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
           onUpdate={onProjectUpdate}
         />
       </FlowSection>
+      )}
 
-      {/* 3 · Generate */}
+      {/* 3 · Generate — rendered once reached */}
+      {unlocked >= 2 && (
       <FlowSection
         index={2}
         title="Generate"
         description="Check the list and generate your AR experience."
-        locked={unlocked < 2}
         sectionRef={setSectionRef(2)}
       >
         <StepGenerate
@@ -319,6 +386,7 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
           onGenerated={onProjectUpdate}
         />
       </FlowSection>
+      )}
     </div>
   );
 };
