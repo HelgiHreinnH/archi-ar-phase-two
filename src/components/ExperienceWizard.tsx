@@ -121,11 +121,12 @@ const FlowSection = ({ index, title, description, sectionRef, children, cta }: F
     data-section={index}
     aria-labelledby={`flow-section-${index}`}
     style={{ scrollMarginTop: SECTION_SCROLL_OFFSET }}
-    // Each section fills the viewport (minus the sticky progress bar), with
-    // its CTA pinned to the bottom centre. Taller content simply grows.
+    // Each section fills the viewport (minus the sticky progress bar). Heading,
+    // boxes and CTA sit together as one group, centred vertically, so spare
+    // height splits evenly above and below. Taller content simply grows.
     className="min-h-[calc(100dvh-5.5rem)] flex flex-col pt-6 pb-10"
   >
-    <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-700 ease-out">
+    <div className="flex-1 flex flex-col justify-center animate-in fade-in slide-in-from-bottom-8 duration-700 ease-out">
       <header className="flex items-start gap-3 mb-6">
         <span className="mt-0.5 h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold bg-primary text-primary-foreground">
           {index + 1}
@@ -144,7 +145,7 @@ const FlowSection = ({ index, title, description, sectionRef, children, cta }: F
 
       <div className="flow-grid">{children}</div>
 
-      {cta && <div className="mt-auto flex flex-col items-center gap-2 pt-10">{cta}</div>}
+      {cta && <div className="flex flex-col items-center gap-2 pt-8">{cta}</div>}
     </div>
   </section>
 );
@@ -295,13 +296,16 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
 
   return (
     <div className="flow-container pb-10">
-      <div className="sticky top-2 z-30 rounded-full border bg-card shadow-sm px-3 py-1.5">
+      {/* Solid strip behind the pill so content never peeks through above it. */}
+      <div className="sticky top-0 z-30 bg-background pt-2 pb-1">
+      <div className="rounded-full border bg-card shadow-sm px-3 py-1.5">
         <StepProgress
           steps={steps}
           currentStep={activeSection}
           maxReachable={unlocked}
           onStepClick={(i) => setPendingScroll(i)}
         />
+      </div>
       </div>
 
       {/* 1 · 3D model (2 columns) + details (1 column) */}
