@@ -18,7 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { type MarkerPoint, getMarkerColor, normalizeMarkerData } from "@/lib/markerTypes";
 // Track A — lazy-load the 3D preview so the dashboard route doesn't pull in
 // model-viewer (~400KB) and three.js until ProjectOverview actually mounts.
-const ModelViewer3D = lazy(() => import("@/components/ModelViewer3D"));
+const ModelStill = lazy(() => import("@/components/ModelStill"));
 import SharePopover from "@/components/SharePopover";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
@@ -49,7 +49,7 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
       <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
         {project.model_url && (
           <Suspense fallback={<div className="aspect-video w-full rounded-lg bg-muted animate-pulse" />}>
-            <ModelViewer3D modelUrl={project.model_url} className="aspect-video w-full rounded-lg" />
+            <ModelStill projectId={project.id} modelUrl={project.model_url} className="aspect-video w-full rounded-lg" />
           </Suspense>
         )}
 

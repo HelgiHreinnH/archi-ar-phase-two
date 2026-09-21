@@ -7,6 +7,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { supabase } from "@/integrations/supabase/client";
+import { parseGlb, stripTextures } from "@/lib/glbFile";
 
 /**
  * Lightweight GLB preview (desktop + iOS/macOS Safari + Android).
@@ -65,6 +66,54 @@ function disposeObject(root: THREE.Object3D) {
 
 type LoadState = "signing" | "loading" | "ready" | "error";
 
+/**
+ * Above this many textures, the preview drops them and shows an untextured
+ * (clay) render instead. Decoded textures are what exhaust GPU memory: a model
+ * with dozens of 2K maps needs hundreds of MB and can take the tab down. The
+ * AR view still uses the full model — this cap is for the dashboard preview.
+ */
+const PREVIEW_TEXTURE_LIMIT = 12;
+
+/** Download the GLB with progress, and strip textures when there are too many. */
+async function fetchModel(
+  url: string,
+  onProgress: (pct: number) => void,
+): Promise<{ buffer: ArrayBuffer; textured: boolean }> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const total = Number(res.headers.get("content-length") ?? 0);
+
+  let buffer: ArrayBuffer;
+  if (res.body && total > 0) {
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.byteLength;
+      onProgress(Math.round((received / total) * 100));
+    }
+    const merged = new Uint8Array(received);
+    let at = 0;
+    for (const c of chunks) { merged.set(c, at); at += c.byteLength; }
+    buffer = merged.buffer;
+  } else {
+    buffer = await res.arrayBuffer();
+  }
+
+  let textureCount = 0;
+  try {
+    textureCount = parseGlb(buffer).json.images?.length ?? 0;
+  } catch { /* let the loader report a malformed file */ }
+
+  if (textureCount > PREVIEW_TEXTURE_LIMIT) {
+    return { buffer: stripTextures(buffer, { keepMaterials: true }), textured: false };
+  }
+  return { buffer, textured: true };
+}
+
 const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const isUsdz = modelUrl.toLowerCase().split("?")[0].endsWith(".usdz");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -72,6 +121,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("signing");
   const [progress, setProgress] = useState(0);
+  const [textured, setTextured] = useState(true);
 
   // ── Resolve a signed URL for the private bucket ──
   useEffect(() => {
@@ -178,47 +228,54 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
 
     let model: THREE.Object3D | null = null;
 
-    loader.load(
-      signedUrl,
-      (gltf) => {
-        if (disposed) {
-          disposeObject(gltf.scene);
-          return;
-        }
-        model = gltf.scene;
-        scene.add(model);
+    const onLoaded = (gltf: { scene: THREE.Object3D }) => {
+      if (disposed) {
+        disposeObject(gltf.scene);
+        return;
+      }
+      model = gltf.scene;
+      scene.add(model);
 
-        // Frame the model: orbit around its centre, distance from its size.
-        const box = new THREE.Box3().setFromObject(model);
-        const sphere = box.getBoundingSphere(new THREE.Sphere());
-        const radius = Math.max(sphere.radius, 1e-3);
-        const dist = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.05;
-        const dir = new THREE.Vector3(1, 0.75, 1.2).normalize();
+      // Frame the model: orbit around its centre, distance from its size.
+      const box = new THREE.Box3().setFromObject(model);
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const radius = Math.max(sphere.radius, 1e-3);
+      const dist = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.05;
+      const dir = new THREE.Vector3(1, 0.75, 1.2).normalize();
 
-        camera.near = Math.max(radius / 1000, 0.001);
-        camera.far = radius * 100;
-        camera.updateProjectionMatrix();
-        controls.minDistance = radius * 0.2;
-        controls.maxDistance = radius * 10;
+      camera.near = Math.max(radius / 1000, 0.001);
+      camera.far = radius * 100;
+      camera.updateProjectionMatrix();
+      controls.minDistance = radius * 0.2;
+      controls.maxDistance = radius * 10;
 
-        resetRef.current = () => {
-          controls.target.copy(sphere.center);
-          camera.position.copy(sphere.center).addScaledVector(dir, dist);
-          controls.update();
-          autoRotate = true;
-          wake();
-        };
-        resetRef.current();
-        setState("ready");
-      },
-      (e) => {
-        if (e.lengthComputable && e.total > 0) setProgress(Math.round((e.loaded / e.total) * 100));
-      },
-      (err) => {
+      resetRef.current = () => {
+        controls.target.copy(sphere.center);
+        camera.position.copy(sphere.center).addScaledVector(dir, dist);
+        controls.update();
+        autoRotate = true;
+        wake();
+      };
+      resetRef.current();
+      setState("ready");
+    };
+
+    (async () => {
+      try {
+        const { buffer, textured } = await fetchModel(signedUrl, (pct) => {
+          if (!disposed) setProgress(pct);
+        });
+        if (disposed) return;
+        setTextured(textured);
+        const gltf = await new Promise<{ scene: THREE.Object3D }>((resolve, reject) =>
+          loader.parse(buffer, "", resolve as (g: unknown) => void, reject),
+        );
+        onLoaded(gltf);
+      } catch (err) {
         console.error("[ModelViewer3D] Failed to load model:", err);
         if (!disposed) setState("error");
-      },
-    );
+      }
+    })();
 
     return () => {
       disposed = true;
@@ -271,6 +328,12 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
         <div className="absolute inset-0 flex items-center justify-center bg-muted">
           <p className="text-xs text-muted-foreground">Could not load model preview</p>
         </div>
+      )}
+
+      {state === "ready" && !textured && (
+        <p className="absolute left-2 top-2 rounded bg-background/85 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur">
+          Untextured preview — large model
+        </p>
       )}
 
       {state === "ready" && (

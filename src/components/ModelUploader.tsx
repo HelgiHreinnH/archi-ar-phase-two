@@ -6,6 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
 import { isGlbFile, optimizeGlbTextures } from "@/lib/glbFile";
+import { thumbnailPath } from "@/lib/thumbnailPath";
 import type { MarkerPoint } from "@/lib/markerTypes";
 
 const MAX_FILE_SIZE_MB = 250;
@@ -194,6 +195,26 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
       if (previousModelPath && previousModelPath !== filePath && previousModelPath.startsWith(`${projectId}/`)) {
         void supabase.storage.from("project-models").remove([previousModelPath]).catch(() => {});
       }
+
+      // Project image: rendered once here (textures stripped) so the dashboard
+      // never has to spin up WebGL on a heavy model just to show a preview.
+      void (async () => {
+        try {
+          const { renderGlbThumbnail } = await import("@/lib/renderGlbThumbnail");
+          const blob = await renderGlbThumbnail(file);
+          if (!blob) return;
+          await supabase.storage
+            .from("project-assets")
+            .upload(thumbnailPath(projectId), blob, {
+              contentType: "image/jpeg",
+              upsert: true,
+              cacheControl: "60",
+            });
+          onUploadComplete(filePath);
+        } catch (thumbErr) {
+          console.warn("[ModelUploader] Thumbnail skipped:", thumbErr);
+        }
+      })();
 
       const markers = await markersPromise;
       if (markers && onMarkersDetected) {

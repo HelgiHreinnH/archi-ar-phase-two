@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { MarkerPoint } from "@/lib/markerTypes";
-import { parseGlb, repackGlb } from "@/lib/glbFile";
+import { stripTextures } from "@/lib/glbFile";
 
 const MAX_MARKERS = 20;
 
@@ -48,33 +48,6 @@ function getObjectPosition(obj: THREE.Object3D): THREE.Vector3 {
 }
 
 /**
- * Markers only need node names + geometry, so drop images/textures/materials
- * before parsing. Decoding textures was the slow part of this parse (seconds
- * on large texture-heavy models) and blocked the UI during upload.
- */
-function stripAppearance(buffer: ArrayBuffer): ArrayBuffer {
-  try {
-    const { json, bin } = parseGlb(buffer);
-    if (!json.images?.length && !json.materials?.length) return buffer;
-    const lean = { ...json };
-    delete lean.images;
-    delete lean.textures;
-    delete lean.samplers;
-    delete lean.materials;
-    lean.meshes = (json.meshes ?? []).map((m: { primitives?: Record<string, unknown>[] }) => ({
-      ...m,
-      primitives: (m.primitives ?? []).map((p) => {
-        const { material: _material, ...rest } = p;
-        return rest;
-      }),
-    }));
-    return repackGlb(lean, bin ?? new Uint8Array(), new Map());
-  } catch {
-    return buffer; // fall back to a full parse
-  }
-}
-
-/**
  * Parses a GLB file and looks for objects named marker_1 through marker_20
  * (case-insensitive, spaces/hyphens normalised to underscores).
  * Also supports legacy marker_A/B/C names (remapped to 1/2/3).
@@ -90,7 +63,9 @@ export async function parseGlbMarkers(file: File): Promise<MarkerPoint[] | null>
   const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
   if (ext !== ".glb") return null;
 
-  const buffer = stripAppearance(await file.arrayBuffer());
+  // Markers only need node names + geometry; decoding textures here used to
+  // block the UI for seconds on texture-heavy models.
+  const buffer = stripTextures(await file.arrayBuffer());
   const loader = new GLTFLoader();
 
   return new Promise((resolve) => {

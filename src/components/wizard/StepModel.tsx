@@ -5,7 +5,7 @@ import { AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
 
-const ModelViewer3D = lazy(() => import("@/components/ModelViewer3D"));
+const ModelStill = lazy(() => import("@/components/ModelStill"));
 
 type Project = Tables<"projects">;
 
@@ -41,8 +41,9 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
 
       {showPreview && (
         <Suspense fallback={<div className="aspect-video w-full rounded-lg bg-muted animate-pulse" />}>
-          <ModelViewer3D
+          <ModelStill
             key={project.model_url}
+            projectId={project.id}
             modelUrl={project.model_url!}
             className="aspect-video w-full rounded-lg animate-in fade-in duration-500"
           />
