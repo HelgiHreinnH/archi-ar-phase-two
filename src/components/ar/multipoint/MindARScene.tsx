@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { computeModelPlacement } from "@/lib/modelPlacement";
 import { computeWorldTransform } from "@/lib/computeWorldTransform";
 import {
   deviceOrientationToQuaternion,
@@ -106,9 +107,16 @@ const FLOAT_ABOVE_MARKER = 0.267;
 const STABLE_FRAME_THRESHOLD = 10;
 
 /**
- * Fix 3: Maximum standard deviation (in MindAR units) of anchor translation
+ * Fix 3: Maximum standard deviation of anchor translation, in MARKER WIDTHS,
  * over the last STABLE_FRAME_THRESHOLD frames before we allow locking.
- * ~3mm at 150mm marker size = 0.02 units.
+ * 0.02 marker widths = 3 mm on a 150 mm marker.
+ *
+ * Sept 2026: the samples used to be raw anchor-matrix translations, which are
+ * in MindAR's world units — the compiled target's pixel width (600 for the QR,
+ * 1200 for printed markers) per marker width. Against those, 0.02 meant 5
+ * MICRONS of jitter, so the gate never passed, the lock never fired and the
+ * model — hidden until the lock by design — never appeared, even though
+ * tracking was green. recordPose now normalises by the anchor scale.
  */
 const VARIANCE_THRESHOLD = 0.02;
 
@@ -138,7 +146,7 @@ const SOFT_CORRECTION_ALPHA = 0.05;
 const SOFT_CORRECTION_MIN_ANCHORS = 2;
 
 /** Bug 4 fix: Detection stall timeout in ms — auto-degrade after this. */
-const DETECTION_STALL_TIMEOUT_MS = 30_000;
+const DETECTION_STALL_TIMEOUT_MS = 12_000;
 
 /** Fix 5/6: emit scan guidance + validator samples every N render frames (~5×/s @30fps). */
 const GUIDANCE_THROTTLE_FRAMES = 6;
@@ -214,6 +222,7 @@ const MindARScene = ({
   onAnchorSample,
 }: MindARSceneProps) => {
   const isTabletop = mode === "tabletop";
+  const isTabletopMode = isTabletop;
   const floatAboveMarker = isTabletop ? FLOAT_ABOVE_MARKER : 0;
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -413,9 +422,13 @@ const MindARScene = ({
           return sd < VARIANCE_THRESHOLD;
         }
 
-        /** Record a pose sample for variance tracking. */
+        /** Record a pose sample (in marker widths) for variance tracking. */
         function recordPose(anchorIdx: number, matrix: any) {
-          const pos = { x: matrix.elements[12], y: matrix.elements[13], z: matrix.elements[14] };
+          const e = matrix.elements;
+          // The anchor matrix carries MindAR's postMatrix scale: one marker
+          // width in world units. Normalise so variance is scale-independent.
+          const unit = Math.hypot(e[0], e[1], e[2]) || 1;
+          const pos = { x: e[12] / unit, y: e[13] / unit, z: e[14] / unit };
           const history = poseHistories[anchorIdx];
           history.push(pos);
           // Keep only last 30 samples
@@ -911,24 +924,49 @@ const MindARScene = ({
           return;
         }
 
-        // Rhino Z-up → Three.js Y-up axis correction
-        model.rotation.x = -Math.PI / 2;
+        // ── Orientation ──────────────────────────────────────────────
+        // The GLB is exported Y-up ("Z to glTF Y" on in Rhino). In MindAR's
+        // anchor space the target image spans X/Y and +Z points out of it:
+        //  · wall  — the image is vertical, so +Y is already up: no rotation.
+        //  · table — the image is horizontal, so up is +Z: tip the model by 90°.
+        // initialRotation stays a spin about the model's own up axis (applied
+        // before the tip, because three composes rotations X·Y·Z).
+        if (initialRotation) {
+          model.rotation.y = T.MathUtils.degToRad(initialRotation);
+        }
+        model.rotation.x = isTabletopMode ? Math.PI / 2 : 0;
         model.updateMatrixWorld(true);
 
-        // Scale calculation
+        // ── Real-world size ──────────────────────────────────────────
+        // One unit in anchor space is one marker width (150 mm), so the model
+        // must be scaled by its real size, not normalised to a fixed number of
+        // units. glTF is metres by spec, but Rhino writes document units, so a
+        // model measuring in the hundreds or thousands is millimetres.
         const box = new T.Box3().setFromObject(model);
         const size = box.getSize(new T.Vector3());
         const center = box.getCenter(new T.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const normalizedScale = (MARKER_SIZE_MM / modelScale) / maxDim;
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        const placement = computeModelPlacement(maxDim, MARKER_SIZE_MM, modelScale);
+        const normalizedScale = placement.scale;
+
+        console.log(
+          `[MindARScene] Model ${placement.realSizeM.toFixed(2)} m ` +
+          `(${placement.unitMm === 1000 ? "metres" : "millimetres"} in file), scale 1:${modelScale} → ` +
+          `${(maxDim * normalizedScale).toFixed(2)} marker widths ` +
+          `(${(maxDim * normalizedScale * MARKER_SIZE_MM / 1000).toFixed(2)} m on the marker)`,
+        );
 
         model.scale.set(normalizedScale, normalizedScale, normalizedScale);
-        model.position.x = -center.x * normalizedScale;
-        model.position.y = -box.min.y * normalizedScale + floatAboveMarker;
-        model.position.z = -center.z * normalizedScale;
-
-        if (initialRotation) {
-          model.rotation.y = T.MathUtils.degToRad(initialRotation);
+        if (isTabletopMode) {
+          // Sit on the table, centred on the marker.
+          model.position.x = -center.x * normalizedScale;
+          model.position.y = -center.y * normalizedScale;
+          model.position.z = -box.min.z * normalizedScale + floatAboveMarker;
+        } else {
+          // Wall: the model's centre locks onto the centre of the printed QR.
+          model.position.x = -center.x * normalizedScale;
+          model.position.y = -center.y * normalizedScale;
+          model.position.z = -center.z * normalizedScale;
         }
 
         handle.attachModel(model);
@@ -957,7 +995,7 @@ const MindARScene = ({
         try { disposeScene(attached); } catch { /* noop */ }
       }
     };
-  }, [sceneEpoch, modelSource, modelScale, initialRotation, floatAboveMarker]);
+  }, [sceneEpoch, modelSource, modelScale, initialRotation, floatAboveMarker, isTabletopMode]);
 
   return (
     <div
