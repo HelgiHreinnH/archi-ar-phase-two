@@ -24,11 +24,50 @@ import { TABLETOP_QR_OPTIONS } from "@/hooks/useTabletopGeneration";
 /** Must match MARKER_SIZE_MM in MindARScene.tsx */
 const QR_PRINT_SIZE_MM = 150;
 
+/** Fetch the stored QR image as a data URL; null if unavailable. */
+async function loadStoredQr(url: string | null | undefined): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!blob.type.startsWith("image/")) throw new Error(`unexpected type ${blob.type}`);
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch (err) {
+    console.warn("[printSheet] Stored QR unavailable, re-rendering from the share link:", err);
+    return null;
+  }
+}
+
+/** Fallback for experiences generated before the QR image was stored. */
+async function renderQr(shareUrl: string): Promise<string> {
+  const canvas = document.createElement("canvas");
+  await QRCode.toCanvas(canvas, shareUrl, TABLETOP_QR_OPTIONS);
+  return canvas.toDataURL("image/png");
+}
+
 export async function downloadTabletopPrintSheet(
   projectName: string,
   shareUrl: string,
   /** Where the printed QR goes — "wall" for Wall mode, "table" for Tabletop. */
-  surface: "table" | "wall" = "table"
+  surface: "table" | "wall" = "table",
+  /**
+   * Signed URL of the QR image stored at generation time (project.qr_code_url).
+   *
+   * THIS MUST BE USED WHEN AVAILABLE. The compiled .mind tracking target is
+   * built from that exact image, and a QR's pixel pattern depends on the text
+   * it encodes. Re-generating the QR here from the CURRENT origin produced a
+   * different pattern whenever the sheet was downloaded from a different
+   * domain than the one the experience was generated on (e.g. the test site
+   * vs the live site) — the printed sheet then never matched the tracking
+   * target and AR sat on "Looking for the QR code…" forever.
+   */
+  storedQrUrl?: string | null
 ): Promise<void> {
   const isWall = surface === "wall";
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -61,9 +100,7 @@ export async function downloadTabletopPrintSheet(
   // ── Centred QR code at exact physical size ──
   // Rendered with the same options used at generation time so the print
   // matches the compiled .mind tracking target.
-  const qrCanvas = document.createElement("canvas");
-  await QRCode.toCanvas(qrCanvas, shareUrl, TABLETOP_QR_OPTIONS);
-  const qrDataUrl = qrCanvas.toDataURL("image/png");
+  const qrDataUrl = (await loadStoredQr(storedQrUrl)) ?? (await renderQr(shareUrl));
 
   const qrX = (pageW - QR_PRINT_SIZE_MM) / 2;
   const qrY = headerH + 14;

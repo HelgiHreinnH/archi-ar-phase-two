@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
+import { supabase } from "@/integrations/supabase/client";
 import { type MarkerPoint, getMarkerColor, normalizeMarkerData } from "@/lib/markerTypes";
 // Track A — lazy-load the 3D preview so the dashboard route doesn't pull in
 // model-viewer (~400KB) and three.js until ProjectOverview actually mounts.
@@ -135,7 +136,21 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
                       className="w-full justify-start gap-2 text-xs h-7"
                       onClick={async () => {
                         try {
-                          await downloadTabletopPrintSheet(project.name, shareUrl!, mode === "wall" ? "wall" : "table");
+                          // Print the QR that the tracking file was compiled
+                          // from, never a freshly generated one.
+                          let storedQrUrl: string | null = null;
+                          if (project.qr_code_url) {
+                            const { data } = await supabase.storage
+                              .from("project-assets")
+                              .createSignedUrl(project.qr_code_url, 300);
+                            storedQrUrl = data?.signedUrl ?? null;
+                          }
+                          await downloadTabletopPrintSheet(
+                            project.name,
+                            shareUrl!,
+                            mode === "wall" ? "wall" : "table",
+                            storedQrUrl,
+                          );
                         } catch (err) {
                           console.error("[ProjectOverview] print sheet failed:", err);
                           toast({ title: "PDF generation failed", variant: "destructive" });
