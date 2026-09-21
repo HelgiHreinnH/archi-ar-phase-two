@@ -158,7 +158,21 @@ async function loadMindAR(): Promise<void> {
     // either an SRI mismatch (the modulepreload integrity hash in index.html
     // no longer matches the CDN bytes) or a network/CORS issue. Disambiguate
     // by probing the URL so we can surface a precise, actionable error.
-    const { MindARSRIError, isLikelySRIFailure } = await import("@/lib/sriError");
+    const { MindARSRIError, isLikelySRIFailure, findBrokenModuleDependency } =
+      await import("@/lib/sriError");
+
+    // The runtime imports "three" and "three/addons/renderers/CSS3DRenderer.js"
+    // through the import map. A missing self-hosted file is served as index.html
+    // by the SPA, which fails module parsing and looks identical to an SRI
+    // mismatch — check that first so the error names the real cause.
+    const broken = await findBrokenModuleDependency([
+      "/assets/three/three.module.js",
+      "/assets/three/jsm/renderers/CSS3DRenderer.js",
+    ]);
+    if (broken) {
+      throw new Error(`AR engine dependency is missing or not a module: ${broken}`);
+    }
+
     const reachable = await isLikelySRIFailure(MINDAR_THREE_URL);
     if (reachable) {
       throw new MindARSRIError(MINDAR_THREE_URL,

@@ -60,3 +60,26 @@ export function sriBypassEnabled(): boolean {
     return false;
   }
 }
+
+/**
+ * The MindAR runtime resolves two bare specifiers through the import map in
+ * index.html. If either one 404s, our SPA returns index.html with status 200,
+ * so the browser fails to parse it as a module and reports the *parent* import
+ * as "failed to fetch" — which used to be misreported as an integrity failure.
+ *
+ * Returns the first dependency that is missing or served as HTML, or null when
+ * they all look like real JavaScript modules.
+ */
+export async function findBrokenModuleDependency(urls: string[]): Promise<string | null> {
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { method: "GET", cache: "no-cache" });
+      const type = res.headers.get("content-type") ?? "";
+      if (!res.ok || type.includes("text/html")) return url;
+    } catch {
+      return url;
+    }
+  }
+  return null;
+}
+
