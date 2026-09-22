@@ -45,6 +45,24 @@ Code-adjacent `.md` stays in the repo (this file, `MIGRATION.md`, READMEs).
 Reading material — audits, decision docs, session notes — goes to Notion, which is
 the source of truth for documentation.
 
+## Database migrations
+The Supabase GitHub integration is connected: everything in `supabase/migrations/` is
+applied to `njrytsladmfhbttsitmn` on push to `main`. Two rules follow from that:
+
+- **The folder must mirror the applied ledger.** Filenames are `<version>_<name>.sql` and
+  the versions must match `supabase_migrations.schema_migrations` exactly. A file whose
+  version is not in the ledger will be applied on the next push.
+- **Never add a migration dated before the latest applied one.** `db push` treats it as
+  missing and tries to run it out of order.
+
+The 13 Lovable-era migrations (Feb–Jul 2026, written against the Lovable Cloud project)
+are archived in `migrations/lovable-archive/`, deliberately outside `supabase/`. Nine
+contain unguarded `CREATE` statements and would fail against the current schema. Do not
+move them back.
+
+`migrations/external/` holds the standalone init scripts from `MIGRATION.md` and is not
+read by the integration.
+
 ## Local environment gotcha
 `NODE_ENV=production` is exported in the shell on this machine. With it set, `npm
 install` **silently omits every devDependency** — no vite, no tsc, no vitest — and
