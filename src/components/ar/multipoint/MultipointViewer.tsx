@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { ChevronDown, MapPin, Target, Check, Loader2, Info, Camera, RotateCcw } from "lucide-react";
+import { ChevronDown, MapPin, Target, Check, Loader2, Info, Camera, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
@@ -255,25 +255,8 @@ const MultipointViewer = ({
     }
   };
 
-  if (!imageTargetSrc) {
-    return (
-      <div className="fixed inset-0 bg-black flex items-center justify-center p-6">
-        <div className="text-center space-y-4 max-w-sm">
-          <div className="bg-destructive/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto">
-            <Target className="h-8 w-8 text-destructive" />
-          </div>
-          <h2 className="font-display text-lg font-bold text-white">Experience Not Ready</h2>
-          <p className="text-sm text-white/70 leading-relaxed">
-            This experience needs to be re-generated. Please ask the project owner to regenerate it.
-          </p>
-          <button onClick={onCancel} className="mt-2 text-sm text-white/60 hover:text-white/80 underline">
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  // Hooks must run before the early return below (Rules of Hooks) — these
+  // used to sit after it and would throw if imageTargetSrc ever toggled.
   // Track the most recently detected markers so we can suggest the spatially
   // nearest un-detected one (better guidance than always pointing at the lowest #).
   const [recentDetections, setRecentDetections] = useState<number[]>([]);
@@ -292,6 +275,25 @@ const MultipointViewer = ({
     }
     prevMarkersRef.current = markers;
   }, [markers]);
+
+  if (!imageTargetSrc) {
+    return (
+      <div className="fixed inset-0 bg-black flex items-center justify-center p-6">
+        <div className="text-center space-y-4 max-w-sm">
+          <div className="bg-destructive/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+            <Target className="h-8 w-8 text-destructive" />
+          </div>
+          <h2 className="font-display text-lg font-bold text-white">Experience Not Ready</h2>
+          <p className="text-sm text-white/70 leading-relaxed">
+            This experience needs to be re-generated. Please ask the project owner to regenerate it.
+          </p>
+          <button onClick={onCancel} className="mt-2 text-sm text-white/60 hover:text-white/80 underline">
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Determine the next un-detected marker — prefer spatial proximity to the
   // last detection(s) when we have marker coordinates, else fall back to
@@ -381,6 +383,19 @@ const MultipointViewer = ({
     return a.localeCompare(b);
   });
 
+  // Always-visible way out of the camera, both while aiming and once placed.
+  // Leads to the session-end screen (ARViewer), which is where viewer feedback
+  // (rating / comment for the designer) will live.
+  const closeButton = (
+    <button
+      onClick={isActive ? onExit : onCancel}
+      aria-label="Close AR view"
+      className="h-11 w-11 shrink-0 rounded-full bg-black/45 backdrop-blur-xl border border-white/25 flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+    >
+      <X className="h-5 w-5 text-white" />
+    </button>
+  );
+
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
       {/* AR scene — MindAR (multipoint image tracking) */}
@@ -455,11 +470,11 @@ const MultipointViewer = ({
       {!isActive && (
         <>
           {/* Top Guide Card */}
-          <div className="relative z-10 p-4 pt-[env(safe-area-inset-top,16px)]">
+          <div className="relative z-10 p-4 pt-[env(safe-area-inset-top,16px)] flex items-start gap-2">
             <button
               onClick={() => setGuideExpanded(!guideExpanded)}
               className={cn(
-                "w-full rounded-xl border bg-white/95 backdrop-blur-sm shadow-lg p-4 text-left transition-colors",
+                "flex-1 min-w-0 rounded-xl border bg-white/95 backdrop-blur-sm shadow-lg p-4 text-left transition-colors",
                 allDetected && "bg-green-50/95 border-green-200"
               )}
             >
@@ -476,6 +491,7 @@ const MultipointViewer = ({
                 <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{guideDescription}</p>
               )}
             </button>
+            {closeButton}
           </div>
 
           <div className="flex-1" />
@@ -558,9 +574,6 @@ const MultipointViewer = ({
               </button>
             )}
 
-            <button onClick={onCancel} className="w-full mt-3 text-center text-xs text-white/60 hover:text-white/80 transition-colors">
-              Cancel
-            </button>
           </div>
         </>
       )}
@@ -596,9 +609,7 @@ const MultipointViewer = ({
               )}
             </button>
 
-            <div className="h-10 w-10 rounded-full bg-green-500/20 backdrop-blur-xl border border-green-400/30 flex items-center justify-center">
-              <Check className="h-4 w-4 text-green-400" />
-            </div>
+            {closeButton}
           </div>
 
           <div className="flex-1" />
@@ -628,9 +639,6 @@ const MultipointViewer = ({
               </button>
             </div>
 
-            <button onClick={onExit} className="w-full mt-4 text-center text-[11px] text-white/40 hover:text-white/60 transition-colors">
-              Tap to exit AR
-            </button>
           </div>
         </>
       )}

@@ -7,6 +7,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { normalizeMarkerData } from "@/lib/markerTypes";
 import ARLanding from "@/components/ar/shared/ARLanding";
 import ARPermission from "@/components/ar/shared/ARPermission";
+import ARSessionEnd from "@/components/ar/shared/ARSessionEnd";
 import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRecovery";
 import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
 import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
@@ -17,7 +18,9 @@ type Project = Tables<"projects">;
 // "briefing" is deliberately absent. It was a 2-second branded holding screen
 // between the tap and the camera; it bought nothing and delayed the gyro
 // permission call out of its user-activation window. See launchAR.
-type ViewerState = "landing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer";
+// "ended" is the screen after the viewer closes the camera (future home of
+// viewer feedback — see ARSessionEnd).
+type ViewerState = "landing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer" | "ended";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
@@ -28,6 +31,26 @@ const dlog = (...args: unknown[]) => { if (DEBUG) console.log("[ar-flow]", ...ar
 // eliminating the edge-fn round-trip on internal navigation/refresh.
 // Audit M-2 (May 2026): hoisted to module scope to avoid per-render redeclare.
 const PUBLIC_PROJECT_CACHE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * iOS 13+ gates deviceorientation behind a permission prompt that can only be
+ * requested from inside a tap. Safe to call anywhere else — it no-ops.
+ * Not awaited by callers: the camera must never wait on this dialog.
+ */
+function requestMotionPermission() {
+  try {
+    const DOE = DeviceOrientationEvent as unknown as {
+      requestPermission?: () => Promise<PermissionState>;
+    };
+    if (typeof DOE.requestPermission === "function") {
+      void DOE.requestPermission().catch(() => {
+        // Declined or unavailable — tabletop follows the QR without it.
+      });
+    }
+  } catch {
+    // Not an iOS device, or the API is absent entirely.
+  }
+}
 
 const ARViewer = () => {
   const { shareId } = useParams<{ shareId: string }>();
@@ -42,8 +65,13 @@ const ARViewer = () => {
         try {
           const raw = sessionStorage.getItem(sessionCacheKey);
           if (raw) {
-            const parsed = JSON.parse(raw) as { at: number; data: unknown };
-            if (Date.now() - parsed.at < PUBLIC_PROJECT_CACHE_TTL_MS) {
+            const parsed = JSON.parse(raw) as { at: number; data: { mind_file_url?: string | null } | null };
+            // Only trust a cached response whose asset URLs are signed (absolute).
+            // An older edge function returned bare storage paths, which the
+            // browser resolves against our own domain and gets index.html back.
+            const mind = parsed.data?.mind_file_url;
+            const looksSigned = !mind || /^https?:\/\//.test(mind);
+            if (looksSigned && Date.now() - parsed.at < PUBLIC_PROJECT_CACHE_TTL_MS) {
               dlog("public-project served from sessionStorage");
               return parsed.data;
             }
@@ -101,27 +129,15 @@ const ARViewer = () => {
   // artificial delay, nothing awaited before the viewer mounts. `getUserMedia`
   // needs a user gesture, so one tap is the floor; everything above that floor
   // was ours to remove.
-  const launchAR = useCallback(() => {
-    dlog("launchAR — going straight to camera");
+  const launchAR = useCallback((opts?: { fromTap?: boolean }) => {
+    const fromTap = opts?.fromTap ?? true;
+    dlog("launchAR — going straight to camera", { fromTap });
 
-    // iOS 13+ requires DeviceOrientationEvent.requestPermission() to be called
-    // inside the user-activation window of the tap. The old code ran it inside
-    // a 2s setTimeout, i.e. well outside that window, so on iOS the gyro prompt
-    // could be refused without ever appearing. Fire it synchronously, first,
-    // before anything that could yield — and do not await it, or the camera
-    // waits on a dialog.
-    try {
-      const DOE = DeviceOrientationEvent as unknown as {
-        requestPermission?: () => Promise<PermissionState>;
-      };
-      if (typeof DOE.requestPermission === "function") {
-        void DOE.requestPermission().catch(() => {
-          // Declined or unavailable — gyro compensation degrades gracefully.
-        });
-      }
-    } catch {
-      // Not an iOS device, or the API is absent entirely.
-    }
+    // iOS 13+ requires DeviceOrientationEvent.requestPermission() inside the
+    // tap's user-activation window, so fire it synchronously, first. On the
+    // auto-launch path there is no tap — the first tap inside the camera view
+    // asks instead (see the pointerdown effect below).
+    if (fromTap) requestMotionPermission();
 
     // Tabletop WITHOUT a compiled tracking file (legacy projects generated
     // before QR anchoring was restored): fall back to model-viewer's native
@@ -144,6 +160,9 @@ const ARViewer = () => {
     // Fire-and-forget: react-query keeps the previous data while refetching, so
     // the viewer never loses a URL it already had, and picks up the fresh one
     // when it lands.
+    // Skipped on auto-launch: the URLs were signed moments ago (24h expiry),
+    // and a re-sign would change the model URL and restart the GLB download.
+    if (!fromTap) return;
     if (sessionCacheKey && typeof sessionStorage !== "undefined") {
       try { sessionStorage.removeItem(sessionCacheKey); } catch { /* ignore */ }
     }
@@ -151,6 +170,34 @@ const ARViewer = () => {
       dlog("refetch failed (continuing with cached URLs):", e);
     });
   }, [isMultipoint, projectHasMindFile, getInitialMarkers, refetch, markerCount, sessionCacheKey]);
+
+  // Sept 2026: open straight into the camera. Scanning the printed QR already
+  // expressed the intent — the landing page's "Launch AR Camera" tap was a
+  // second ask. getUserMedia does not need a tap (the OS shows its own camera
+  // prompt the first time); only iOS motion access does, and tabletop no longer
+  // depends on it while the QR is in view. Legacy projects without a .mind
+  // still land first (native AR needs a tap). `?landing=1` forces the landing
+  // page for testing/sharing.
+  const autoLaunched = useRef(false);
+  const forceLanding = typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("landing") === "1";
+  useEffect(() => {
+    if (autoLaunched.current || forceLanding) return;
+    if (!project || !projectHasMindFile || viewState !== "landing") return;
+    if (modelUrlError) return; // the recovery screen owns this case
+    autoLaunched.current = true;
+    dlog("auto-launch on load");
+    launchAR({ fromTap: false });
+  }, [project, projectHasMindFile, viewState, modelUrlError, forceLanding, launchAR]);
+
+  // Ask for motion access on the first tap anywhere in the camera view, so the
+  // gyro can carry the model when the QR leaves the frame. Harmless off iOS.
+  useEffect(() => {
+    if (viewState !== "detecting") return;
+    const onFirstTap = () => requestMotionPermission();
+    window.addEventListener("pointerdown", onFirstTap, { capture: true, once: true });
+    return () => window.removeEventListener("pointerdown", onFirstTap, { capture: true });
+  }, [viewState]);
 
   const handleTargetFound = useCallback((index: number) => {
     if (isMultipoint) {
@@ -340,13 +387,13 @@ const ARViewer = () => {
 
   switch (viewState) {
     case "landing":
-      return <ARLanding project={project} onLaunchAR={launchAR} />;
+      return <ARLanding project={project} onLaunchAR={() => launchAR({ fromTap: true })} />;
 
     case "permission-denied":
       return (
         <ARPermission
           onCancel={() => setViewState("landing")}
-          onRetry={launchAR}
+          onRetry={() => launchAR({ fromTap: true })}
           errorMessage={arErrorMessage}
           // Tabletop can degrade to native device AR (model-viewer) if the
           // in-browser camera path fails — user-placed instead of QR-anchored,
@@ -381,7 +428,7 @@ const ARViewer = () => {
             </div>
             <div className="flex flex-col gap-2">
               <button
-                onClick={launchAR}
+                onClick={() => launchAR({ fromTap: true })}
                 className="w-full h-11 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
               >
                 Try again
@@ -427,6 +474,17 @@ const ARViewer = () => {
         />
       );
 
+    case "ended":
+      return (
+        <ARSessionEnd
+          project={project}
+          onViewAgain={() => {
+            setResetKey((k) => k + 1);
+            launchAR({ fromTap: true });
+          }}
+        />
+      );
+
     case "detecting":
       // No model gate here: the camera and tracking start immediately and the
       // model attaches to the live scene whenever its URL/buffer lands
@@ -440,8 +498,8 @@ const ARViewer = () => {
           markerCount={markerCount}
           onTargetFound={handleTargetFound}
           onTargetLost={handleTargetLost}
-          onCancel={() => setViewState("landing")}
-          onExit={() => setViewState("landing")}
+          onCancel={() => setViewState("ended")}
+          onExit={() => setViewState("ended")}
           onReset={handleReset}
           onError={(err) => handleARError(err)}
           imageTargetSrc={imageTargetSrc}

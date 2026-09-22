@@ -145,6 +145,23 @@ const SOFT_CORRECTION_ALPHA = 0.05;
  */
 const SOFT_CORRECTION_MIN_ANCHORS = 2;
 
+/**
+ * Sept 2026: how hard a locked TABLETOP model follows the live QR pose while
+ * the QR is in view (per tracked frame). MindAR already One-Euro filters the
+ * anchor, so this only takes the edge off. Without it the locked model was
+ * held by the gyroscope alone and froze on screen whenever motion access was
+ * not granted (iOS asks separately, and only from a tap).
+ */
+const TABLETOP_FOLLOW_ALPHA = 0.5;
+
+/**
+ * Sept 2026: MindAR's addImageTargets() wraps an async executor in a Promise,
+ * so a bad tracking file (404, an HTML page, an unsigned path) never rejects —
+ * start() just never resolves and the UI sits on "Starting camera…" forever.
+ * We now pre-download and validate the file ourselves, and bound start().
+ */
+const MINDAR_START_TIMEOUT_MS = 25_000;
+
 /** Bug 4 fix: Detection stall timeout in ms — auto-degrade after this. */
 const DETECTION_STALL_TIMEOUT_MS = 12_000;
 
@@ -269,6 +286,7 @@ const MindARScene = ({
     let cleanupGyro: (() => void) | null = null;
     let stallTimer: ReturnType<typeof setTimeout> | null = null;
     let occlusionTimers: (ReturnType<typeof setTimeout> | null)[] = [];
+    let trackingBlobUrl: string | null = null;
 
     const tabletop = mode === "tabletop";
 
@@ -280,6 +298,7 @@ const MindARScene = ({
       try { cleanupGyro?.(); } catch { /* noop */ }
       for (const t of occlusionTimers) if (t) clearTimeout(t);
       if (stallTimer) clearTimeout(stallTimer);
+      if (trackingBlobUrl) { try { URL.revokeObjectURL(trackingBlobUrl); } catch { /* noop */ } trackingBlobUrl = null; }
       if (!instance) return;
       try {
         // Halt render loop before disposing GL resources
@@ -340,9 +359,32 @@ const MindARScene = ({
         console.log(
           `[MindARScene] init imageTargetSrc=${(imageTargetSrc || "").slice(0, 80)} maxTrack=${maxTrack}`
         );
+
+        // Pre-download + validate the tracking file (see MINDAR_START_TIMEOUT_MS).
+        // The viewer already warmed it with force-cache, so this is normally a
+        // cache hit; MindAR then reads it from a blob URL — one download, and a
+        // bad file fails loudly here instead of hanging start().
+        let trackingRes: Response;
+        try {
+          trackingRes = await fetch(imageTargetSrc, { cache: "force-cache" });
+        } catch {
+          throw new Error("Could not download the AR tracking file. Check your connection and try again.");
+        }
+        if (!trackingRes.ok) {
+          throw new Error(`The AR tracking file could not be downloaded (HTTP ${trackingRes.status}). The link may have expired — reload the page.`);
+        }
+        const trackingBuf = await trackingRes.arrayBuffer();
+        if (cancelled) return;
+        const firstByte = trackingBuf.byteLength > 0 ? new Uint8Array(trackingBuf)[0] : -1;
+        if (trackingBuf.byteLength < 16 || firstByte === 0x3c /* "<" — an HTML page, not a .mind */) {
+          throw new Error("The AR tracking file is invalid. Ask the designer to regenerate this experience.");
+        }
+        trackingBlobUrl = URL.createObjectURL(new Blob([trackingBuf], { type: "application/octet-stream" }));
+        if (!containerRef.current) return;
+
         const mindarThree = new MINDAR.IMAGE.MindARThree({
           container: containerRef.current,
-          imageTargetSrc,
+          imageTargetSrc: trackingBlobUrl,
           maxTrack,
           uiLoading: "no",
           uiScanning: "no",
@@ -374,6 +416,9 @@ const MindARScene = ({
         // The attached model. Null until Effect B hands one over — tracking,
         // pose history and scan guidance all run without it.
         let model: any = null;
+        // Tabletop: the model's pose relative to anchor 0 at lock time, so the
+        // locked model can keep following the QR while it is in view.
+        let modelLocalMatrix: any = null;
 
         // ── Fix 3: Per-anchor pose history for variance gate ──────────
         const poseHistories: { x: number; y: number; z: number }[][] = Array.from(
@@ -466,6 +511,7 @@ const MindARScene = ({
                   }
                   const worldMatrix = new ThreeLib.Matrix4();
                   worldMatrix.copy(anchor.group.matrix).multiply(model.matrix);
+                  modelLocalMatrix = model.matrix.clone();
                   lockModel(worldMatrix);
                 } else {
                   tryMultiPointLock(anchor);
@@ -475,7 +521,10 @@ const MindARScene = ({
               // Fix 4: Track pose while locked for soft correction
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
-              if (i === 0) applySoftCorrection(ThreeLib);
+              if (i === 0) {
+                if (tabletop) followQrWhileVisible(anchor);
+                else applySoftCorrection(ThreeLib);
+              }
             }
           };
 
@@ -534,7 +583,9 @@ const MindARScene = ({
           // Schedule a one-time check 3 s after lock — warn user if no gyro data ever arrived
           setTimeout(() => {
             if (tornDown) return;
-            if (!hasGyroRef.current) {
+            // Tabletop follows the QR directly, so a missing gyro only matters
+            // once the QR leaves the frame — not worth interrupting for.
+            if (!hasGyroRef.current && !tabletop) {
               import("@/hooks/use-toast").then(({ toast }) => {
                 toast({
                   title: "Gyroscope unavailable",
@@ -580,6 +631,28 @@ const MindARScene = ({
         }
 
         // ── Fix 4: Soft correction — blend toward new pose data ───────
+        /**
+         * Tabletop, locked, QR in view: pull the locked pose toward the live QR
+         * pose and re-base the gyro reference on it. The QR is the ground truth
+         * whenever it is visible; the gyro only carries the model while it isn't.
+         */
+        function followQrWhileVisible(anchor: any) {
+          if (!model || !lockedMatrix || !modelLocalMatrix) return;
+          const T = ThreeLib;
+          const target = new T.Matrix4().copy(anchor.group.matrix).multiply(modelLocalMatrix);
+          const lp = new T.Vector3(), lq = new T.Quaternion(), ls = new T.Vector3();
+          const tp = new T.Vector3(), tq = new T.Quaternion(), ts = new T.Vector3();
+          lockedMatrix.decompose(lp, lq, ls);
+          target.decompose(tp, tq, ts);
+          lp.lerp(tp, TABLETOP_FOLLOW_ALPHA);
+          lq.slerp(tq, TABLETOP_FOLLOW_ALPHA);
+          ls.lerp(ts, TABLETOP_FOLLOW_ALPHA);
+          lockedMatrix.compose(lp, lq, ls);
+          // The new pose is "now", so the gyro delta restarts from here.
+          lockedDeviceQuat = deviceQuaternionRef.current ? deviceQuaternionRef.current.clone() : null;
+          model.matrix.copy(lockedMatrix);
+        }
+
         function applySoftCorrection(T: any) {
           const md = markerDataRef.current;
           if (!model || !lockedMatrix || !md) return;
@@ -772,6 +845,7 @@ const MindARScene = ({
           if (model !== m) return;
           m.parent?.remove(m);
           model = null;
+          modelLocalMatrix = null;
           anchorState = "tracking";
           lockedMatrix = null;
           lockedDeviceQuat = null;
@@ -779,7 +853,20 @@ const MindARScene = ({
         }
 
         // Start MindAR — camera feed goes live here, before any model exists.
-        await mindarThree.start();
+        let startTimer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          await Promise.race([
+            mindarThree.start(),
+            new Promise((_, reject) => {
+              startTimer = setTimeout(
+                () => reject(new Error("The AR engine did not start. Reload the page to try again.")),
+                MINDAR_START_TIMEOUT_MS,
+              );
+            }),
+          ]);
+        } finally {
+          if (startTimer) clearTimeout(startTimer);
+        }
         if (cancelled) { teardown(); return; }
         setIsStarting(false);
         onReadyRef.current?.();
