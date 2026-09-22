@@ -1,0 +1,44 @@
+# Netlify configuration — Archi AR
+# main -> designingforusers.com (production). PRs get deploy previews.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback: /view/:shareId and every other route are served by the React app.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ── Security headers ──────────────────────────────────────────────────
+# NOTE: no X-Frame-Options / frame-ancestors here on purpose. /view/:shareId is a
+# link an architect sends to a client and may be embedded. Decide deliberately
+# before locking it down.
+# NOTE: no CSP here on purpose. The AR engine loads MindAR from cdn.jsdelivr.net
+# and the es-module-shims polyfill from ga.jspm.io (both declared in index.html).
+# A 'self'-only script-src would kill AR. If you add one, start it as
+# Content-Security-Policy-Report-Only with those two hosts plus Supabase allowed.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    # Camera IS the product. Gyro/accelerometer/magnetometer drive walk-around.
+    Permissions-Policy = "camera=(self), gyroscope=(self), accelerometer=(self), magnetometer=(self), xr-spatial-tracking=(self), microphone=()"
+
+# ── Hashed build output: cache hard ───────────────────────────────────
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# ── App shell: never cache, so new deploys are seen immediately ───────
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

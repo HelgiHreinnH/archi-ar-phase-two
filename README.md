@@ -1,73 +1,45 @@
-# Welcome to your Lovable project
+# Archi AR
 
-## Project info
+WebAR presentation platform for architects and interior designers. Upload a 3D
+model from Rhino, print a marker, share an AR experience with a client over a QR
+code — no native app required.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+Three modes: **Tabletop** (QR flat, model on the table), **Wall** (QR mounted
+vertically), **Spatial** (multi-marker triangulation at 1:1 in the real space).
 
-## How can I edit this code?
+## Stack
+Vite · React 18 · TypeScript · Tailwind · shadcn/Radix · MindAR.js 1.2.5 ·
+Three.js · Google Model Viewer · Supabase · Netlify.
 
-There are several ways of editing your application.
+## Local development
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Requires Node 20 (matching CI and Netlify — `nvm use 20`).
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+git clone https://github.com/HelgiHreinnH/archi-ar-phase-two.git
+cd archi-ar-phase-two
+cp .env.example .env.local   # fill in the Supabase values
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+`.npmrc` carries the install flags this project needs (`legacy-peer-deps` for the
+three/model-viewer peer conflict, `ignore-scripts` for jsdom's optional `canvas`
+dep). Don't override them ad hoc.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Scripts
 
-**Use GitHub Codespaces**
+| Command | What it does |
+|---|---|
+| `npm run dev` | Vite dev server on :8080 |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run test` | Vitest, single run |
+| `npm run lint` | ESLint |
+| `npm run build` | Production build to `dist/` |
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Deployment
+`main` deploys to [designingforusers.com](https://designingforusers.com) via
+Netlify. Pull requests get deploy previews. Build settings live in `netlify.toml`.
 
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+See `CLAUDE.md` for the working rules and `MIGRATION.md` for the Supabase
+migration runbook.

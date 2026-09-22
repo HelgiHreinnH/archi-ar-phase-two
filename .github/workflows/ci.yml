@@ -1,0 +1,33 @@
+# CI — gate every push/PR to main on typecheck + tests + build.
+# Make this a required check in GitHub -> Settings -> Branches -> Protect main.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Placeholder client env so tests/build don't fail on the Supabase client's
+# import-time env check. Real values live in Netlify, never in CI.
+env:
+  VITE_SUPABASE_URL: https://placeholder.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY: placeholder_publishable_key
+  VITE_SUPABASE_PROJECT_ID: placeholder
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npm run test
+      - name: Build
+        run: npm run build
