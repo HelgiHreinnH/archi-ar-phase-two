@@ -289,6 +289,11 @@ const MindARScene = ({
     let trackingBlobUrl: string | null = null;
 
     const tabletop = mode === "tabletop";
+    // Tabletop and wall are the same single-QR experience — one printed QR is
+    // the anchor, only the model's orientation/offset differs (see Effect B).
+    // Everything about locking and holding the model keys off this, not
+    // `tabletop`, so the two modes can't drift apart again.
+    const singleQr = tabletop || mode === "wall";
 
     const teardown = () => {
       if (tornDown) return;
@@ -505,8 +510,8 @@ const MindARScene = ({
               ) {
                 model.updateMatrix();
                 const md = markerDataRef.current;
-                if (tabletop || !md) {
-                  if (!tabletop && !md) {
+                if (singleQr || !md) {
+                  if (!singleQr && !md) {
                     console.warn("[MindARScene] Multi-point mode but no markerData — falling back to anchor-A-only placement");
                   }
                   const worldMatrix = new ThreeLib.Matrix4();
@@ -522,7 +527,7 @@ const MindARScene = ({
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
               if (i === 0) {
-                if (tabletop) followQrWhileVisible(anchor);
+                if (singleQr) followQrWhileVisible(anchor);
                 else applySoftCorrection(ThreeLib);
               }
             }
@@ -587,7 +592,7 @@ const MindARScene = ({
             if (tornDown) return;
             // Tabletop follows the QR directly, so a missing gyro only matters
             // once the QR leaves the frame — not worth interrupting for.
-            if (!hasGyroRef.current && !tabletop) {
+            if (!hasGyroRef.current && !singleQr) {
               import("@/hooks/use-toast").then(({ toast }) => {
                 toast({
                   title: "Gyroscope unavailable",
@@ -875,7 +880,7 @@ const MindARScene = ({
         onReadyRef.current?.();
 
         // Bug 4 fix: Detection stall timeout — auto-degrade after 30s
-        if (!tabletop && markerDataRef.current && maxTrack > 1) {
+        if (!singleQr && markerDataRef.current && maxTrack > 1) {
           stallTimer = setTimeout(() => {
             if (anchorState !== "tracking") return;
             const stableAnchors = stableAnchorIndices();
@@ -917,7 +922,7 @@ const MindARScene = ({
           // locked pose in the room by counter-rotating it with the gyro; with
           // no gyro, hold it as locked (soft correction may still move it).
           if (anchorState === "locked" && model && lockedMatrix) {
-            const qrInView = tabletop && anchorVisibleWhileLocked[0];
+            const qrInView = singleQr && anchorVisibleWhileLocked[0];
             const devQ = deviceQuaternionRef.current;
             // Motion access may be granted after the lock (first tap): start
             // compensating from the moment gyro data appears.
