@@ -571,6 +571,8 @@ const MindARScene = ({
 
           model.matrix.copy(lockedMatrix);
           model.matrixAutoUpdate = false;
+          // Required with matrixAutoUpdate=false, or matrixWorld stays stale.
+          model.matrixWorldNeedsUpdate = true;
           // Reveal the model now — first visible frame = correct locked frame.
           model.visible = true;
           anchorState = "locked";
@@ -651,6 +653,7 @@ const MindARScene = ({
           // The new pose is "now", so the gyro delta restarts from here.
           lockedDeviceQuat = deviceQuaternionRef.current ? deviceQuaternionRef.current.clone() : null;
           model.matrix.copy(lockedMatrix);
+          model.matrixWorldNeedsUpdate = true;
         }
 
         function applySoftCorrection(T: any) {
@@ -908,27 +911,24 @@ const MindARScene = ({
             try { emitGuidanceAndSamples(ThreeLib, camera); } catch { /* guidance is non-critical */ }
           }
 
-          if (
-            anchorState === "locked" &&
-            model &&
-            lockedMatrix &&
-            lockedDeviceQuat &&
-            deviceQuaternionRef.current
-          ) {
-            // Bug 2 fix: Snapshot lockedMatrix to prevent mid-frame mutation
-            // from onTargetUpdate soft correction callback
-            const framePose = lockedMatrix.clone();
-
-            applyGyroCompensation(
-              framePose,
-              lockedDeviceQuat,
-              deviceQuaternionRef.current,
-              model,
-              ThreeLib
-            );
-
-            // Flush the gyro-compensated pose back
-            lockedMatrix.copy(framePose);
+          // ── Locked pose → screen, every frame ──
+          // Tabletop with the QR in view: the QR is ground truth
+          // (followQrWhileVisible already wrote the pose). Otherwise hold the
+          // locked pose in the room by counter-rotating it with the gyro; with
+          // no gyro, hold it as locked (soft correction may still move it).
+          if (anchorState === "locked" && model && lockedMatrix) {
+            const qrInView = tabletop && anchorVisibleWhileLocked[0];
+            const devQ = deviceQuaternionRef.current;
+            // Motion access may be granted after the lock (first tap): start
+            // compensating from the moment gyro data appears.
+            if (devQ && !lockedDeviceQuat) lockedDeviceQuat = devQ.clone();
+            if (!qrInView && devQ && lockedDeviceQuat) {
+              // Bug 2 fix: snapshot so an onTargetUpdate mid-frame can't mutate it.
+              applyGyroCompensation(lockedMatrix.clone(), lockedDeviceQuat, devQ, model, ThreeLib);
+            } else {
+              model.matrix.copy(lockedMatrix);
+              model.matrixWorldNeedsUpdate = true;
+            }
           }
 
           renderer.render(scene, camera);

@@ -49,10 +49,18 @@ export function deviceOrientationToQuaternion(
 /**
  * Apply gyro-compensated rotation to a locked model.
  *
- * Computes how much the phone has rotated since the model was locked,
- * then applies the inverse rotation to keep the model stationary in
- * physical space. Only rotation is compensated — position and scale
- * are preserved from the locked snapshot.
+ * MindAR's camera never moves — everything is expressed in camera space. For
+ * the model to stay put in the room while the phone turns, its WHOLE pose
+ * (position and orientation) must be rotated about the camera by the inverse
+ * of the phone's rotation since lock:  C_now = (Q_now⁻¹ · Q_lock) · C_lock.
+ *
+ * Sept 2026: this used to rotate only the model's orientation about its own
+ * centre and leave its position where it was on screen, so the model rode
+ * along with the phone. It also wrote `matrix` without flagging
+ * `matrixWorldNeedsUpdate`; with matrixAutoUpdate=false three.js then never
+ * recomputed matrixWorld, so no locked-pose update ever reached the screen.
+ * Phone translation is not observable from the gyro — only the tracked marker
+ * can correct that.
  */
 export function applyGyroCompensation(
   lockedMatrix: any,
@@ -61,25 +69,11 @@ export function applyGyroCompensation(
   modelRef: any,
   ThreeLib: any
 ): void {
-  // delta = how much phone rotated since lock
-  const deltaQuat = lockedDeviceQuat
-    .clone()
-    .invert()
-    .multiply(currentDeviceQuat.clone());
-
-  // Apply inverse rotation to keep model stationary in world
-  const invDelta = deltaQuat.clone().invert();
-
-  // Decompose locked matrix, apply rotation around model's world position
-  const lockedPos = new ThreeLib.Vector3();
-  const lockedQuat = new ThreeLib.Quaternion();
-  const lockedScl = new ThreeLib.Vector3();
-  lockedMatrix.decompose(lockedPos, lockedQuat, lockedScl);
-
-  const compensatedQuat = invDelta.clone().multiply(lockedQuat);
-  const compensated = new ThreeLib.Matrix4();
-  compensated.compose(lockedPos, compensatedQuat, lockedScl);
-  modelRef.matrix.copy(compensated);
+  // Rotation that takes lock-time camera space to current camera space.
+  const invDelta = currentDeviceQuat.clone().invert().multiply(lockedDeviceQuat);
+  const rot = new ThreeLib.Matrix4().makeRotationFromQuaternion(invDelta);
+  modelRef.matrix.copy(rot.multiply(lockedMatrix));
+  modelRef.matrixWorldNeedsUpdate = true;
 }
 
 /**

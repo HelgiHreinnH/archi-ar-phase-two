@@ -56,6 +56,30 @@ const MultipointViewer = ({
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [gestureHint, setGestureHint] = useState(false);
 
+  // iOS motion access. Only asked from a tap; without it the model can be held
+  // in place only while the QR is in view. `needsMotion` stays true until the
+  // first deviceorientation event arrives (granted) — then the chip goes away.
+  const [needsMotion, setNeedsMotion] = useState(() => {
+    try {
+      return typeof (DeviceOrientationEvent as unknown as { requestPermission?: unknown })
+        .requestPermission === "function";
+    } catch { return false; }
+  });
+  useEffect(() => {
+    if (!needsMotion) return;
+    const onOrient = (e: DeviceOrientationEvent) => {
+      if (e.alpha != null) setNeedsMotion(false);
+    };
+    window.addEventListener("deviceorientation", onOrient);
+    return () => window.removeEventListener("deviceorientation", onOrient);
+  }, [needsMotion]);
+  const enableMotion = () => {
+    try {
+      const DOE = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<PermissionState> };
+      void DOE.requestPermission?.().then((r) => { if (r !== "granted") setNeedsMotion(false); }).catch(() => setNeedsMotion(false));
+    } catch { setNeedsMotion(false); }
+  };
+
   // Fix 5 (Jul 2026): live directional hints toward not-yet-found markers,
   // projected from the currently-visible reference anchor inside MindARScene.
   const [scanHints, setScanHints] = useState<ScanHint[]>([]);
@@ -586,6 +610,17 @@ const MultipointViewer = ({
               <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-6 py-4 text-center animate-fade-in">
                 <p className="text-white text-sm font-medium">Drag to orbit · Pinch to zoom</p>
               </div>
+            </div>
+          )}
+
+          {needsMotion && (
+            <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top,16px)+64px)] z-20 flex justify-center px-4">
+              <button
+                onClick={enableMotion}
+                className="rounded-full bg-black/60 backdrop-blur-xl border border-white/25 px-4 py-2 text-xs font-medium text-white shadow-lg active:scale-95 transition-transform"
+              >
+                Tap to keep the model steady as you move
+              </button>
             </div>
           )}
 
