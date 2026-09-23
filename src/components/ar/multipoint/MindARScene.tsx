@@ -152,7 +152,23 @@ const SOFT_CORRECTION_MIN_ANCHORS = 2;
  * held by the gyroscope alone and froze on screen whenever motion access was
  * not granted (iOS asks separately, and only from a tap).
  */
-const TABLETOP_FOLLOW_ALPHA = 0.5;
+const TABLETOP_FOLLOW_ALPHA = 0.8;
+
+/**
+ * Single-QR modes (tabletop, wall) are QR-LOCKED, not screen-held. MindAR is
+ * image tracking only — it has no SLAM, so once the QR is out of view nothing
+ * knows where the table is (the gyro sees rotation, never walking). Holding the
+ * last pose made the model stick to the screen. Instead: keep the last pose
+ * for a short grace (motion blur, a hand passing), then hide the model until
+ * the QR is seen again, and snap straight back onto it.
+ */
+const QR_LOST_HIDE_MS = 600;
+
+/**
+ * MindAR frames a target may be missed before it is reported lost (default 5).
+ * Raised for the single-QR modes so brief motion blur doesn't drop the lock.
+ */
+const SINGLE_QR_MISS_TOLERANCE = 10;
 
 /**
  * Sept 2026: MindAR's addImageTargets() wraps an async executor in a Promise,
@@ -394,6 +410,7 @@ const MindARScene = ({
           uiLoading: "no",
           uiScanning: "no",
           uiError: "no",
+          ...(singleQr ? { missTolerance: SINGLE_QR_MISS_TOLERANCE } : {}),
         });
         instance = mindarThree;
 
@@ -424,6 +441,10 @@ const MindARScene = ({
         // Tabletop: the model's pose relative to anchor 0 at lock time, so the
         // locked model can keep following the QR while it is in view.
         let modelLocalMatrix: any = null;
+        // Single-QR: when the QR was lost while locked (ms), and whether the
+        // next QR pose should be taken as-is instead of blended.
+        let qrLostAt: number | null = null;
+        let snapToQr = false;
 
         // ── Fix 3: Per-anchor pose history for variance gate ──────────
         const poseHistories: { x: number; y: number; z: number }[][] = Array.from(
@@ -548,6 +569,7 @@ const MindARScene = ({
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
               if (i === 0) console.log("[MindARScene] Anchor 0 re-detected while locked — using for soft correction");
+              if (singleQr && i === 0) { qrLostAt = null; snapToQr = true; }
             }
             onTargetFoundRef.current?.(i);
           };
@@ -566,6 +588,7 @@ const MindARScene = ({
             }
             if (anchorState === "locked") {
               anchorVisibleWhileLocked[i] = false;
+              if (singleQr && i === 0) qrLostAt = performance.now();
             }
             onTargetLostRef.current?.(i);
           };
@@ -659,9 +682,14 @@ const MindARScene = ({
           const tp = new T.Vector3(), tq = new T.Quaternion(), ts = new T.Vector3();
           lockedMatrix.decompose(lp, lq, ls);
           target.decompose(tp, tq, ts);
-          lp.lerp(tp, TABLETOP_FOLLOW_ALPHA);
-          lq.slerp(tq, TABLETOP_FOLLOW_ALPHA);
-          ls.lerp(ts, TABLETOP_FOLLOW_ALPHA);
+          // After the QR was lost the last pose is stale — land on the QR at once.
+          const a = snapToQr ? 1 : TABLETOP_FOLLOW_ALPHA;
+          snapToQr = false;
+          lp.lerp(tp, a);
+          lq.slerp(tq, a);
+          ls.lerp(ts, a);
+          qrLostAt = null;
+          model.visible = true;
           lockedMatrix.compose(lp, lq, ls);
           // The new pose is "now", so the gyro delta restarts from here.
           lockedDeviceQuat = deviceQuaternionRef.current ? deviceQuaternionRef.current.clone() : null;
@@ -929,8 +957,17 @@ const MindARScene = ({
           // (followQrWhileVisible already wrote the pose). Otherwise hold the
           // locked pose in the room by counter-rotating it with the gyro; with
           // no gyro, hold it as locked (soft correction may still move it).
-          if (anchorState === "locked" && model && lockedMatrix) {
-            const qrInView = singleQr && anchorVisibleWhileLocked[0];
+          if (anchorState === "locked" && model && lockedMatrix && singleQr) {
+            // QR-locked: the pose only ever comes from the QR. Out of view past
+            // the grace period → hide; never hold it on the screen.
+            if (!anchorVisibleWhileLocked[0] && qrLostAt !== null &&
+                performance.now() - qrLostAt > QR_LOST_HIDE_MS) {
+              model.visible = false;
+            }
+            model.matrix.copy(lockedMatrix);
+            model.matrixWorldNeedsUpdate = true;
+          } else if (anchorState === "locked" && model && lockedMatrix) {
+            const qrInView = false;
             const devQ = deviceQuaternionRef.current;
             // Motion access may be granted after the lock (first tap): start
             // compensating from the moment gyro data appears.

@@ -613,7 +613,17 @@ const MultipointViewer = ({
             </div>
           )}
 
-          {needsMotion && (
+          {!isMultipoint && markers["QR"] === "searching" && (
+            <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top,16px)+64px)] z-20 flex justify-center px-4">
+              <div className="rounded-full bg-black/60 backdrop-blur-xl border border-white/25 px-4 py-2 text-xs font-medium text-white shadow-lg">
+                Point at the QR to bring the model back
+              </div>
+            </div>
+          )}
+
+          {/* Motion access only matters for multipoint's gyro hold; the
+              single-QR modes are QR-locked and never need it. */}
+          {isMultipoint && needsMotion && (
             <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top,16px)+64px)] z-20 flex justify-center px-4">
               <button
                 onClick={enableMotion}
