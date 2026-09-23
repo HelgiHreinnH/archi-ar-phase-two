@@ -11,6 +11,7 @@ import ARSessionEnd from "@/components/ar/shared/ARSessionEnd";
 import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRecovery";
 import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
 import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
+import WorldLockViewer from "@/components/ar/tabletop/WorldLockViewer";
 import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
 
@@ -219,6 +220,14 @@ const ARViewer = () => {
   }, [isMultipoint, markerData]);
 
   const [resetKey, setResetKey] = useState(0);
+
+  // Tabletop/wall run on 8th Wall (image target + SLAM) so the model can be
+  // locked in the room. If that engine can't start on a device, fall back to
+  // MindAR (QR-anchored only). `?engine=mindar` forces the fallback for testing.
+  const [worldEngineFailed, setWorldEngineFailed] = useState(
+    () => typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("engine") === "mindar",
+  );
 
   const handleReset = useCallback(() => {
     setMarkers(getInitialMarkers());
@@ -487,6 +496,24 @@ const ARViewer = () => {
       );
 
     case "detecting":
+      if (!isMultipoint && !worldEngineFailed) {
+        return (
+          <WorldLockViewer
+            key={`wl-${resetKey}`}
+            project={project}
+            shareId={shareId ?? ""}
+            modelUrl={publicModelUrl}
+            modelScale={scaleNum}
+            initialRotation={project.initial_rotation || 0}
+            onClose={() => setViewState("ended")}
+            onModelError={(err) => handleARError(err)}
+            onEngineError={(err) => {
+              console.warn("[ARViewer] 8th Wall unavailable, falling back to MindAR:", err);
+              setWorldEngineFailed(true);
+            }}
+          />
+        );
+      }
       // No model gate here: the camera and tracking start immediately and the
       // model attaches to the live scene whenever its URL/buffer lands
       // (MindARScene Effect B). Only the model-viewer path above needs the

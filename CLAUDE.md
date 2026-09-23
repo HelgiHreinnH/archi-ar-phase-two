@@ -8,8 +8,9 @@ WebAR presentation platform for architects: upload a model from Rhino, generate 
 printed marker, share an AR experience with a client by QR code. No native app.
 
 ## Stack (locked)
-Vite + React 18 + TS + Tailwind + shadcn/Radix · MindAR.js 1.2.5 (Spatial) ·
-Google Model Viewer (Tabletop/Wall) · three 0.170 (PINNED — see .npmrc) ·
+Vite + React 18 + TS + Tailwind + shadcn/Radix · MindAR.js 1.2.5 (Spatial, and
+fallback for Tabletop/Wall) · 8th Wall engine binary 1.0.0 (Tabletop/Wall: QR image
+target + SLAM, "Lock model"; `WorldLockScene.tsx`) · three 0.170 (PINNED — see .npmrc) ·
 Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS.
 
 ## Rules
@@ -27,6 +28,11 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
   not through a sandbox mount.
 - **No secrets in tracked files.** Client env is `VITE_*` publishable values only;
   real values live in Netlify, `.env.local` locally, `.env.example` in git.
+- **8th Wall licence:** the engine binary is Niantic Spatial's "Distributed Engine
+  Binary" licence, not MIT. Keep the on-screen attribution + licence link in
+  `WorldLockViewer.tsx`. §1.2 restricts paid products whose value derives
+  substantially from the engine — accepted risk (Helgi, 23 Sep 2026); get it
+  cleared with Niantic Spatial before scaling. Never modify or rehost altered builds.
 - One tap is the floor. `getUserMedia` and native AR both require user activation;
   zero-tap is not achievable in a browser.
 
