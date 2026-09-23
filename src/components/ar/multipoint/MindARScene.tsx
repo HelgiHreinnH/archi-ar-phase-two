@@ -494,6 +494,14 @@ const MindARScene = ({
           anchors.push(anchor);
 
           anchor.onTargetUpdate = () => {
+            // MindAR 1.2.5 calls onTargetUpdate on EVERY tracker update for
+            // this target — including the one where it is lost, after setting
+            // group.matrix to an all-zero "invisible" matrix. Treating that as
+            // a pose dragged the locked model toward the camera origin (it slid,
+            // shrank and vanished), kept "QR in view" stuck true so the gyro
+            // never took over, and could even count toward a lock. Only a
+            // visible target carries a real pose.
+            if (!anchor.visible) return;
             if (anchorState === "tracking") {
               stableFrameCounts[i]++;
               lastPoseFrame[i] = frameCount;
