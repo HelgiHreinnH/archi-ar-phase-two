@@ -97,7 +97,7 @@ interface WorldLockSceneProps {
   onTargetLost?: () => void;
   /** First time the model is placed on the QR. */
   onPlaced?: () => void;
-  onModelLoaded?: () => void;
+  onModelLoaded?: (info: { displayedSizeM?: { width: number; depth: number; height: number } }) => void;
   onTrackingStatus?: (status: string, reason: string) => void;
   onError?: (err: Error) => void;
 }
@@ -174,6 +174,7 @@ const WorldLockScene = ({
         let anchor: Any = null;
         let placed = false;
         let modelLoading = false;
+        let sizeLogged = false;
 
         // Gravity-aligned, outlier-rejecting, smoothed QR pose (qrPoseFilter).
         const filter = new QrPoseFilter(T, mode);
@@ -192,6 +193,13 @@ const WorldLockScene = ({
           if (!placed && model) {
             placed = true;
             cb.current.onPlaced?.();
+          }
+          if (model && !sizeLogged) {
+            sizeLogged = true;
+            anchor.updateMatrixWorld(true);
+            const span = new T.Box3().setFromObject(model).getSize(new T.Vector3());
+            const qrs = Math.max(span.x, span.y, span.z) / pose.width;
+            console.log(`[WorldLock] size check: model spans ${qrs.toFixed(2)} QR widths = ${(qrs * QR_SIZE_MM / 1000).toFixed(2)} m on a ${QR_SIZE_MM} mm QR (1:${modelScale})`);
           }
         };
 
@@ -227,7 +235,7 @@ const WorldLockScene = ({
           });
           console.log(`[WorldLock] model ${placement.realSizeM.toFixed(2)} m, 1:${modelScale}`);
           anchor.add(model);
-          cb.current.onModelLoaded?.();
+          cb.current.onModelLoaded?.({ displayedSizeM: placement.displayedSizeM });
           // If the QR was already seen before the model arrived, it's placed now.
           if (anchor.visible && !placed) { placed = true; cb.current.onPlaced?.(); }
         };

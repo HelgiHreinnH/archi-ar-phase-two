@@ -81,4 +81,14 @@ describe("placeModelOnQr", () => {
     const c = new T.Box3().setFromObject(m).getCenter(new T.Vector3());
     expect(c.length()).toBeLessThan(1e-5);
   });
+
+  it("reports the size as shown on the QR: real size ÷ scale", () => {
+    const m = offsetModelWithBadBounds(); // 8.8 × 8.6 m room, 3 m high, metres
+    const p = placeModelOnQr(m, T, { mode: "tabletop", modelScale: 10, markerSizeMm: 150 });
+    expect(p.displayedSizeM!.width).toBeCloseTo(0.88, 5);
+    expect(p.displayedSizeM!.depth).toBeCloseTo(0.86, 5);
+    expect(p.displayedSizeM!.height).toBeCloseTo(0.3, 5);
+    const one = placeModelOnQr(offsetModelWithBadBounds(), T, { mode: "tabletop", modelScale: 1, markerSizeMm: 150 });
+    expect(one.displayedSizeM!.width).toBeCloseTo(8.8, 5);
+  });
 });

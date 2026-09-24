@@ -21,6 +21,12 @@ export interface ModelPlacement {
   unitMm: number;
   /** The model's real largest dimension, in metres. */
   realSizeM: number;
+  /**
+   * Size of the model as it appears on the QR, in metres (width, depth,
+   * height — plan X, plan Y, up), i.e. real size divided by the scale. Only
+   * set by placeModelOnQr; shown to the viewer so the scale can be checked.
+   */
+  displayedSizeM?: { width: number; depth: number; height: number };
 }
 
 export function computeModelPlacement(
@@ -113,6 +119,12 @@ export function placeModelOnQr(
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
   const placement = computeModelPlacement(maxDim, opts.markerSizeMm, opts.modelScale);
   const s = placement.scale;
+
+  // Metres on the QR = file units × (mm per unit) / 1000 / scale denominator.
+  const toShownM = placement.unitMm / 1000 / (opts.modelScale > 0 ? opts.modelScale : 1);
+  placement.displayedSizeM = isTabletop
+    ? { width: size.x * toShownM, depth: size.y * toShownM, height: size.z * toShownM }
+    : { width: size.x * toShownM, depth: size.z * toShownM, height: size.y * toShownM };
 
   model.scale.set(s, s, s);
   model.position.x = -center.x * s;

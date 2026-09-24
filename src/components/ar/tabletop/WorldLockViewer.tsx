@@ -31,6 +31,9 @@ interface WorldLockViewerProps {
   onEngineError: (err: Error) => void;
 }
 
+/** 0.886 → "0.89", 12.4 → "12.4" */
+const fmtM = (m: number) => (m < 10 ? m.toFixed(2) : m.toFixed(1));
+
 const LICENSE_URL = "https://github.com/8thwall/engine/blob/main/LICENSE";
 
 const WorldLockViewer = ({
@@ -47,6 +50,7 @@ const WorldLockViewer = ({
   const [target, setTarget] = useState<Xr8ImageTargetData | null>(null);
   const [engineReady, setEngineReady] = useState(false);
   const [modelLoaded, setModelLoaded] = useState(false);
+  const [shownSize, setShownSize] = useState<{ width: number; depth: number; height: number } | null>(null);
   const [placed, setPlaced] = useState(false);
   const [qrInView, setQrInView] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -98,7 +102,7 @@ const WorldLockViewer = ({
           initialRotation={initialRotation}
           locked={locked}
           onReady={() => setEngineReady(true)}
-          onModelLoaded={() => setModelLoaded(true)}
+          onModelLoaded={(info) => { setModelLoaded(true); setShownSize(info.displayedSizeM ?? null); }}
           onPlaced={() => setPlaced(true)}
           onTargetFound={() => setQrInView(true)}
           onTargetLost={() => setQrInView(false)}
@@ -153,6 +157,11 @@ const WorldLockViewer = ({
         )}
         {placed && !locked && !qrInView && (
           <p className="text-[11px] text-white/80 text-center">Point back at the QR to adjust the placement.</p>
+        )}
+        {placed && shownSize && (
+          <p className="text-[11px] text-white/85 text-center font-mono tabular-nums">
+            Scale 1:{modelScale} · {fmtM(shownSize.width)} × {fmtM(shownSize.depth)} m, {fmtM(shownSize.height)} m high
+          </p>
         )}
         <p className="text-[10px] text-white/55 text-center">
           AR engine: 8th Wall by Niantic Spatial ·{" "}
