@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { computeModelPlacement } from "@/lib/modelPlacement";
+import { computeModelPlacement, measureModel } from "@/lib/modelPlacement";
 import { computeWorldTransform } from "@/lib/computeWorldTransform";
 import {
   deviceOrientationToQuaternion,
@@ -1072,14 +1072,14 @@ const MindARScene = ({
           model.rotation.y = T.MathUtils.degToRad(initialRotation);
         }
         model.rotation.x = isTabletopMode ? Math.PI / 2 : 0;
-        model.updateMatrixWorld(true);
 
         // ── Real-world size ──────────────────────────────────────────
         // One unit in anchor space is one marker width (150 mm), so the model
         // must be scaled by its real size, not normalised to a fixed number of
         // units. glTF is metres by spec, but Rhino writes document units, so a
         // model measuring in the hundreds or thousands is millimetres.
-        const box = new T.Box3().setFromObject(model);
+        // measureModel: exporter-written bounds can be wrong (see modelPlacement).
+        const box = measureModel(model, T);
         const size = box.getSize(new T.Vector3());
         const center = box.getCenter(new T.Vector3());
         const maxDim = Math.max(size.x, size.y, size.z) || 1;

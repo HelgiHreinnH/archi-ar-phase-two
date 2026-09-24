@@ -11,6 +11,7 @@
  * only image textures are dropped, so the result reads as a clean clay render.
  */
 import * as THREE from "three";
+import { measureModel } from "@/lib/modelPlacement";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
@@ -74,7 +75,7 @@ export async function renderGlbThumbnail(file: File): Promise<Blob | null> {
     pmrem.dispose();
     scene.add(model);
 
-    const box = new THREE.Box3().setFromObject(model);
+    const box = measureModel(model, THREE);
     if (box.isEmpty()) return null;
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 1e-3);

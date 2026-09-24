@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { computeModelPlacement } from "./modelPlacement";
+import * as T from "three";
+import { computeModelPlacement, measureModel, placeModelOnQr } from "./modelPlacement";
 
 const MARKER = 150; // mm
 
@@ -37,5 +38,47 @@ describe("computeModelPlacement", () => {
   it("falls back safely on nonsense input", () => {
     expect(computeModelPlacement(0, MARKER, 0).scale).toBeGreaterThan(0);
     expect(Number.isFinite(computeModelPlacement(0, MARKER, 0).scale)).toBe(true);
+  });
+});
+
+
+/** A box mesh far from the origin whose loader-seeded bounds are inverted on Z,
+ *  like the Rhino/Draco export of Fændediget 12 (24 Sep 2026). */
+function offsetModelWithBadBounds() {
+  const root = new T.Group();
+  const g = new T.BoxGeometry(8.8, 3, 8.6).translate(4.4, 1.5, -20.4); // metres, Y-up
+  g.boundingBox = new T.Box3(new T.Vector3(0, 0, -16.1), new T.Vector3(8.8, 3, -24.7)); // min.z > max.z
+  root.add(new T.Mesh(g));
+  return root;
+}
+
+describe("measureModel", () => {
+  it("measures real vertices, not exporter-written bounds", () => {
+    const m = offsetModelWithBadBounds();
+    m.rotation.x = Math.PI / 2;
+    const box = measureModel(m, T);
+    expect(box.min.z).toBeCloseTo(0, 5);
+    expect(box.max.z).toBeCloseTo(3, 5);
+    expect(box.min.y).toBeCloseTo(16.1, 5);
+  });
+});
+
+describe("placeModelOnQr", () => {
+  it("tabletop: plan centre on the QR centre, bottom on the QR, wherever the model sits in Rhino", () => {
+    const m = offsetModelWithBadBounds();
+    placeModelOnQr(m, T, { mode: "tabletop", modelScale: 10, markerSizeMm: 150 });
+    const box = (m.updateMatrixWorld(true), new T.Box3().setFromObject(m));
+    const c = box.getCenter(new T.Vector3());
+    expect(c.x).toBeCloseTo(0, 5);
+    expect(c.y).toBeCloseTo(0, 5);
+    expect(box.min.z).toBeCloseTo(0, 5);
+  });
+
+  it("wall: box centre on the QR centre", () => {
+    const m = offsetModelWithBadBounds();
+    placeModelOnQr(m, T, { mode: "wall", modelScale: 10, markerSizeMm: 150 });
+    m.updateMatrixWorld(true);
+    const c = new T.Box3().setFromObject(m).getCenter(new T.Vector3());
+    expect(c.length()).toBeLessThan(1e-5);
   });
 });

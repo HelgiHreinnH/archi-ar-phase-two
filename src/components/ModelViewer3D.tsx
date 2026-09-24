@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, RotateCcw } from "lucide-react";
+import { measureModel } from "@/lib/modelPlacement";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -237,7 +238,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
       scene.add(model);
 
       // Frame the model: orbit around its centre, distance from its size.
-      const box = new THREE.Box3().setFromObject(model);
+      const box = measureModel(model, THREE);
       const sphere = box.getBoundingSphere(new THREE.Sphere());
       const radius = Math.max(sphere.radius, 1e-3);
       const dist = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.05;

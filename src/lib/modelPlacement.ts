@@ -39,6 +39,40 @@ export function computeModelPlacement(
 }
 
 /**
+ * World-space bounding box of a loaded model, measured from its real vertices.
+ *
+ * Why not just `new Box3().setFromObject(model)`: GLTFLoader seeds every
+ * geometry's bounding box from the POSITION accessor's min/max in the file,
+ * and exporters get those wrong. Fændediget 12 (Rhino, Draco, 24 Sep 2026) had
+ * 12,209 of 49,808 primitives with min > max on one axis. three treats such a
+ * box as empty, so Box3.applyMatrix4 skips it and the RAW, untransformed
+ * corners are unioned in — after the tabletop tip the box ran 24 m below the
+ * table and the model was placed far off the QR. Recomputing each geometry's
+ * box from its decoded vertices makes the measurement independent of what the
+ * exporter wrote. Every place that centres or frames a model uses this.
+ */
+export function measureModel(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  model: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  T: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seen = new Set<any>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  model.traverse((o: any) => {
+    const g = o.geometry;
+    if (!g || seen.has(g) || !g.attributes?.position) return;
+    seen.add(g);
+    g.computeBoundingBox();
+    g.computeBoundingSphere();
+  });
+  model.updateMatrixWorld(true);
+  return new T.Box3().setFromObject(model);
+}
+
+/**
  * Orient, scale and offset a loaded GLB so it sits correctly on a single
  * printed QR, in "marker units" (1 unit = one QR width, markerSizeMm across).
  * The caller puts the model inside a group whose transform is the QR's pose
@@ -49,6 +83,10 @@ export function computeModelPlacement(
  * +Z points out of it:
  *  · wall     — the image is vertical, +Y already up: no tip, centred on QR.
  *  · tabletop — the image is horizontal, up is +Z: tip 90°, sit on the QR.
+ *
+ * Universal rule (all modes, all GLBs): the centre of the model's bounding box
+ * in plan (Rhino X/Y) lands on the centre of the QR, wherever the model sits
+ * in the Rhino file. Tabletop: the bottom of the box sits on the QR.
  */
 export function placeModelOnQr(
   // three.js objects from the self-hosted runtime module (not the npm types).
@@ -69,9 +107,7 @@ export function placeModelOnQr(
     model.rotation.y = T.MathUtils.degToRad(opts.initialRotation);
   }
   model.rotation.x = isTabletop ? Math.PI / 2 : 0;
-  model.updateMatrixWorld(true);
-
-  const box = new T.Box3().setFromObject(model);
+  const box = measureModel(model, T);
   const size = box.getSize(new T.Vector3());
   const center = box.getCenter(new T.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
