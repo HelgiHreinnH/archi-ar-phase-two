@@ -4,6 +4,7 @@ import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
 import { QrPoseFilter } from "@/lib/qrPoseFilter";
+import { applyRoomEnvironment, fetchWithProgress, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 
 /**
  * Tabletop / wall AR on the 8th Wall engine: image target + SLAM.
@@ -97,6 +98,8 @@ interface WorldLockSceneProps {
   onTargetLost?: () => void;
   /** First time the model is placed on the QR. */
   onPlaced?: () => void;
+  /** Model download progress, 0–1. */
+  onModelProgress?: (fraction: number) => void;
   onModelLoaded?: (info: { displayedSizeM?: { width: number; depth: number; height: number } }) => void;
   onTrackingStatus?: (status: string, reason: string) => void;
   onError?: (err: Error) => void;
@@ -114,16 +117,17 @@ const WorldLockScene = ({
   onTargetLost,
   onPlaced,
   onModelLoaded,
+  onModelProgress,
   onTrackingStatus,
   onError,
 }: WorldLockSceneProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lockedRef = useRef(locked);
-  const cb = useRef({ onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onTrackingStatus, onError });
+  const cb = useRef({ onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError });
   useEffect(() => { lockedRef.current = locked; }, [locked]);
   useEffect(() => {
-    cb.current = { onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onTrackingStatus, onError };
-  }, [onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onTrackingStatus, onError]);
+    cb.current = { onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError };
+  }, [onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError]);
 
   // Latest model URL without restarting the engine when it is re-signed.
   const modelUrlRef = useRef(modelUrl);
@@ -217,15 +221,17 @@ const WorldLockScene = ({
           loader.setDRACOLoader(draco);
           loader.setMeshoptDecoder(MeshoptDecoder);
 
-          const res = await fetch(url);
+          const res = await fetchWithProgress(url, (f) => cb.current.onModelProgress?.(f));
           if (!res.ok) throw new ModelLoadError(`The 3D model could not be downloaded (HTTP ${res.status}).`);
-          const buf = await res.arrayBuffer();
+          const buf = res.buffer;
           if (buf.byteLength < 4 || new DataView(buf).getUint32(0, true) !== GLB_MAGIC) {
             throw new ModelLoadError("The 3D model file is not a valid GLB.");
           }
           const gltf: Any = await new Promise((ok, fail) => loader.parse(buf, "", ok, fail));
           if (cancelled) { disposeScene(gltf.scene); return; }
           model = gltf.scene;
+          const { renderer: xrRenderer } = XR8.Threejs.xrScene();
+          tuneMaterialsForMobile(model, T, xrRenderer);
           const placement = placeModelOnQr(model, T, {
             mode,
             modelScale,
@@ -234,6 +240,7 @@ const WorldLockScene = ({
             floatAboveMarker: mode === "tabletop" ? FLOAT_ABOVE_MARKER : 0,
           });
           console.log(`[WorldLock] model ${placement.realSizeM.toFixed(2)} m, 1:${modelScale}`);
+          freezeModelMatrices(model);
           anchor.add(model);
           cb.current.onModelLoaded?.({ displayedSizeM: placement.displayedSizeM });
           // If the QR was already seen before the model arrived, it's placed now.
@@ -256,8 +263,11 @@ const WorldLockScene = ({
             onAttach: ({ orientation }: Any) => sizeCanvas(orientation),
             onDeviceOrientationChange: ({ orientation }: Any) => sizeCanvas(orientation),
             onStart: () => {
-              const { scene, camera } = XR8.Threejs.xrScene();
-              scene.add(new T.AmbientLight(0xffffff, 0.8));
+              const { scene, camera, renderer } = XR8.Threejs.xrScene();
+              // Environment lighting carries most of the look now; the
+              // ambient is only a floor for unlit corners.
+              void applyRoomEnvironment(scene, renderer, T);
+              scene.add(new T.AmbientLight(0xffffff, 0.4));
               const sun = new T.DirectionalLight(0xffffff, 1.2);
               sun.position.set(5, 10, 7.5);
               scene.add(sun);

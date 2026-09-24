@@ -5,7 +5,7 @@ import { Upload, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
-import { isGlbFile, optimizeGlbTextures } from "@/lib/glbFile";
+import { isGlbFile, optimizeGlbTextures, storageSafeName } from "@/lib/glbFile";
 import { thumbnailPath } from "@/lib/thumbnailPath";
 import type { MarkerPoint } from "@/lib/markerTypes";
 
@@ -51,6 +51,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
+  const [prepareStage, setPrepareStage] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -89,6 +90,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
     let file = selected;
     let geometryCompressed = false;
+    let drawCalls = "";
     let markersPromise: Promise<MarkerPoint[] | null> = Promise.resolve(null);
 
     // ── Prepare in the browser, BEFORE upload ──
@@ -111,11 +113,14 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
       }
 
       try {
-        const { compressGlbGeometry } = await import("@/lib/compressGlbGeometry");
-        const geo = await compressGlbGeometry(file);
+        const { compressGlbGeometry, STAGE_LABEL } = await import("@/lib/compressGlbGeometry");
+        const geo = await compressGlbGeometry(file, (stage) => setPrepareStage(STAGE_LABEL[stage]));
         if (geo.changed) {
           file = geo.file;
           geometryCompressed = true;
+          if (geo.before && geo.after) {
+            drawCalls = `${geo.before.primitives.toLocaleString()} → ${geo.after.primitives.toLocaleString()} parts`;
+          }
         }
       } catch (geoErr) {
         console.warn("[ModelUploader] Geometry compression skipped:", geoErr);
@@ -124,12 +129,13 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
       if (file !== selected) {
         toast({
           title: "Model optimized",
-          description: `${mb(selected.size)} MB → ${mb(file.size)} MB — ready for phones`,
+          description: `${mb(selected.size)} MB → ${mb(file.size)} MB${drawCalls ? ` · ${drawCalls}` : ""} — ready for phones`,
         });
       }
       console.log(`[ModelUploader] prepared in ${Math.round(performance.now() - t0)} ms: ${mb(selected.size)} → ${mb(file.size)} MB`);
     } finally {
       setIsPreparing(false);
+      setPrepareStage(null);
     }
 
     setIsUploading(true);
@@ -140,7 +146,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     // Unique folder per upload: the file is cached as immutable, so re-using a
     // path (same file name re-uploaded) could serve the previous model.
     const uploadId = Date.now().toString(36);
-    const filePath = `${projectId}/${uploadId}/${file.name}`;
+    const filePath = `${projectId}/${uploadId}/${storageSafeName(file.name)}`;
     abortRef.current = new AbortController();
 
     try {
@@ -261,9 +267,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
       {isPreparing ? (
         <div className="border-2 border-dashed border-primary/30 rounded-lg p-5 text-center space-y-2">
           <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
-          <p className="text-sm font-medium">Optimizing model…</p>
+          <p className="text-sm font-medium">{prepareStage ?? "Optimizing model…"}</p>
           <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-            Compressing geometry and textures on your computer so the upload is small. Usually a few seconds.
+            Compressing geometry and textures on your computer so the upload is small. Heavy interiors can take up to a minute.
           </p>
         </div>
       ) : isUploading ? (

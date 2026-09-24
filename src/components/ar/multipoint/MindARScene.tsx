@@ -8,6 +8,7 @@ import {
 } from "@/lib/arGyro";
 import { teardownThree, disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
+import { applyRoomEnvironment, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 // Type-only import — erased at build, so it does not pull the npm three package
 // at runtime (the scene loads a self-hosted three.module.js). Used to type the
 // Fix 5/6 guidance helper without adding to the file's `any` surface.
@@ -232,6 +233,7 @@ async function loadMindAR(): Promise<void> {
  * without restarting the camera or MindAR.
  */
 interface SceneHandle {
+  renderer: any;
   ThreeLib: any;
   attachModel: (model: any) => void;
   detachModel: (model: any) => void;
@@ -418,12 +420,13 @@ const MindARScene = ({
         // Cap pixel ratio at 2 to halve GPU fill rate on 3× Retina iPhones.
         try { renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); } catch { /* ignore */ }
 
-        // Lighting
-        const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.8);
+        // Lighting — environment for reflections (metals render black
+        // without it); ambient is only a floor.
+        void applyRoomEnvironment(scene, renderer, ThreeLib);
+        const ambientLight = new ThreeLib.AmbientLight(0xffffff, 0.4);
         scene.add(ambientLight);
         const directionalLight = new ThreeLib.DirectionalLight(0xffffff, 1.2);
         directionalLight.position.set(5, 10, 7.5);
-        directionalLight.castShadow = true;
         scene.add(directionalLight);
 
         // ── State machine ─────────────────────────────────────────────
@@ -985,7 +988,7 @@ const MindARScene = ({
         });
 
         // Publish the live scene so Effect B can hand over the model.
-        sceneRef.current = { ThreeLib, attachModel, detachModel };
+        sceneRef.current = { ThreeLib, renderer, attachModel, detachModel };
         setSceneEpoch((e) => e + 1);
       } catch (err) {
         if (cancelled) return;
@@ -1060,6 +1063,7 @@ const MindARScene = ({
           disposeScene(model);
           return;
         }
+        tuneMaterialsForMobile(model, T, handle.renderer);
 
         // ── Orientation ──────────────────────────────────────────────
         // The GLB is exported Y-up ("Z to glTF Y" on in Rhino). In MindAR's

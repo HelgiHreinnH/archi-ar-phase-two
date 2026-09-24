@@ -50,6 +50,7 @@ const WorldLockViewer = ({
   const [target, setTarget] = useState<Xr8ImageTargetData | null>(null);
   const [engineReady, setEngineReady] = useState(false);
   const [modelLoaded, setModelLoaded] = useState(false);
+  const [modelProgress, setModelProgress] = useState(0);
   const [shownSize, setShownSize] = useState<{ width: number; depth: number; height: number } | null>(null);
   const [placed, setPlaced] = useState(false);
   const [qrInView, setQrInView] = useState(false);
@@ -78,7 +79,11 @@ const WorldLockViewer = ({
     busy = true;
   } else if (!placed) {
     title = `Point at the QR code on the ${surface}`;
-    body = modelLoaded ? "Hold the phone steady for a moment." : "Loading the model…";
+    body = modelLoaded
+      ? "Hold the phone steady for a moment."
+      : modelProgress > 0 && modelProgress < 1
+        ? `Loading the model… ${Math.round(modelProgress * 100)}%`
+        : "Loading the model…";
     busy = !modelLoaded;
   } else if (!locked) {
     title = "Model placed";
@@ -102,6 +107,7 @@ const WorldLockViewer = ({
           initialRotation={initialRotation}
           locked={locked}
           onReady={() => setEngineReady(true)}
+          onModelProgress={setModelProgress}
           onModelLoaded={(info) => { setModelLoaded(true); setShownSize(info.displayedSizeM ?? null); }}
           onPlaced={() => setPlaced(true)}
           onTargetFound={() => setQrInView(true)}

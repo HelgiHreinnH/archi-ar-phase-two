@@ -18,6 +18,16 @@
  * bufferViews replaced and fixes every offset.
  */
 
+/** Supabase Storage rejects non-ASCII keys (æ/ø/å → HTTP 400). */
+export function storageSafeName(name: string): string {
+  const map: Record<string, string> = { æ: "ae", ø: "oe", å: "aa", Æ: "Ae", Ø: "Oe", Å: "Aa", ð: "d", Ð: "D", þ: "th", Þ: "Th", ß: "ss" };
+  const ascii = name
+    .replace(/[æøåÆØÅðÐþÞß]/g, (c) => map[c])
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9._ -]/g, "_");
+  return ascii || "model.glb";
+}
+
 export const MAX_TEXTURE_SIZE = 2048;
 const JPEG_QUALITY = 0.88;
 
