@@ -3,6 +3,7 @@ import { placeModelOnQr } from "@/lib/modelPlacement";
 import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
+import { QrPoseFilter } from "@/lib/qrPoseFilter";
 
 /**
  * Tabletop / wall AR on the 8th Wall engine: image target + SLAM.
@@ -174,15 +175,19 @@ const WorldLockScene = ({
         let placed = false;
         let modelLoading = false;
 
+        // Gravity-aligned, outlier-rejecting, smoothed QR pose (qrPoseFilter).
+        const filter = new QrPoseFilter(T, mode);
         const setPose = (detail: Any) => {
           if (!anchor || lockedRef.current) return;
-          anchor.position.set(detail.position.x, detail.position.y, detail.position.z);
-          anchor.quaternion.set(detail.rotation.x, detail.rotation.y, detail.rotation.z, detail.rotation.w);
           // 1 local unit = the QR's width in the scene. For a 3:4 portrait
           // target, scale = its height and scaledWidth = 0.75, so
           // scaledWidth × scale = the printed QR width (it fills the width).
           const qrWidth = (detail.scaledWidth ?? 0.75) * (detail.scale ?? 1);
-          anchor.scale.setScalar(qrWidth);
+          const pose = filter.push({ position: detail.position, rotation: detail.rotation, width: qrWidth });
+          if (!pose) return; // outlier (steep angle / glare / half in frame)
+          anchor.position.copy(pose.position);
+          anchor.quaternion.copy(pose.quaternion);
+          anchor.scale.setScalar(pose.width);
           anchor.visible = true;
           if (!placed && model) {
             placed = true;
