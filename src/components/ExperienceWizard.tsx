@@ -11,6 +11,7 @@ import { MODE_COPY, toExperienceMode, type ExperienceMode } from "@/lib/modeCopy
 import StepProgress from "@/components/wizard/StepProgress";
 import StepDetails, { type StepDetailsHandle } from "@/components/wizard/StepDetails";
 import StepModel from "@/components/wizard/StepModel";
+import ModelQualityCard from "@/components/wizard/ModelQualityCard";
 import StepMarkers from "@/components/wizard/StepMarkers";
 import StepGenerate from "@/components/wizard/StepGenerate";
 
@@ -343,6 +344,7 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
           </CardContent>
         </Card>
         <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
+        <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
       </FlowSection>
 
       {/* 2 · Markers — rendered once reached */}

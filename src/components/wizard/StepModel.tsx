@@ -69,6 +69,7 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
           }}
           onMarkersDetected={onMarkersDetected}
           previousModelPath={project.model_url}
+          optimize={project.optimize_model}
         />
       )}
     </div>

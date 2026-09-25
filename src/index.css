@@ -162,6 +162,11 @@
     .flow-span-3 {
       grid-column: 1 / -1;
     }
+    /* Pins a card to the right-hand column (e.g. stacking under Details)
+       instead of wherever row-major auto-placement would otherwise put it. */
+    .flow-col-3 {
+      grid-column: 3;
+    }
   }
   .flow-span-3 {
     grid-column: 1 / -1;

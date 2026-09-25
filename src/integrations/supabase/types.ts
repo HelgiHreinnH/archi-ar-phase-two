@@ -93,6 +93,7 @@ export type Database = {
           mode: string
           model_url: string | null
           name: string
+          optimize_model: boolean
           original_model_url: string | null
           qr_code_url: string | null
           qr_size: string | null
@@ -118,6 +119,7 @@ export type Database = {
           mode?: string
           model_url?: string | null
           name: string
+          optimize_model?: boolean
           original_model_url?: string | null
           qr_code_url?: string | null
           qr_size?: string | null
@@ -143,6 +145,7 @@ export type Database = {
           mode?: string
           model_url?: string | null
           name?: string
+          optimize_model?: boolean
           original_model_url?: string | null
           qr_code_url?: string | null
           qr_size?: string | null

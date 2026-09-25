@@ -24,6 +24,12 @@ interface ModelUploaderProps {
   onMarkersDetected?: (markers: MarkerPoint[]) => void;
   /** Storage path of the model this upload replaces — removed after success. */
   previousModelPath?: string | null;
+  /**
+   * The architect's "Model quality" choice (ModelQualityCard, defaults to
+   * true). false uploads the file exactly as exported — no texture cap, no
+   * geometry pass, and no automatic server fallback either.
+   */
+  optimize?: boolean;
 }
 
 function validateFile(file: File): string | null {
@@ -47,7 +53,7 @@ function warnIfHeavy(bytes: number | undefined) {
   });
 }
 
-const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previousModelPath }: ModelUploaderProps) => {
+const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previousModelPath, optimize = true }: ModelUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
@@ -99,43 +105,47 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     //   1. markers read from the untouched original (textures skipped)
     //   2. textures resized to ≤2048 px
     //   3. geometry compressed (meshopt) — typically 5–10× smaller
-    setIsPreparing(true);
-    try {
-      if (onMarkersDetected) {
-        markersPromise = parseGlbMarkers(selected).catch(() => null);
-      }
+    if (onMarkersDetected) {
+      markersPromise = parseGlbMarkers(selected).catch(() => null);
+    }
 
+    if (optimize) {
+      setIsPreparing(true);
       try {
-        const tex = await optimizeGlbTextures(file);
-        if (tex.changed) file = tex.file;
-      } catch (texErr) {
-        console.warn("[ModelUploader] Texture optimization skipped:", texErr);
-      }
-
-      try {
-        const { compressGlbGeometry, STAGE_LABEL } = await import("@/lib/compressGlbGeometry");
-        const geo = await compressGlbGeometry(file, (stage) => setPrepareStage(STAGE_LABEL[stage]));
-        if (geo.changed) {
-          file = geo.file;
-          geometryCompressed = true;
-          if (geo.before && geo.after) {
-            drawCalls = `${geo.before.primitives.toLocaleString()} → ${geo.after.primitives.toLocaleString()} parts`;
-          }
+        try {
+          const tex = await optimizeGlbTextures(file);
+          if (tex.changed) file = tex.file;
+        } catch (texErr) {
+          console.warn("[ModelUploader] Texture optimization skipped:", texErr);
         }
-      } catch (geoErr) {
-        console.warn("[ModelUploader] Geometry compression skipped:", geoErr);
-      }
 
-      if (file !== selected) {
-        toast({
-          title: "Model optimized",
-          description: `${mb(selected.size)} MB → ${mb(file.size)} MB${drawCalls ? ` · ${drawCalls}` : ""} — ready for phones`,
-        });
+        try {
+          const { compressGlbGeometry, STAGE_LABEL } = await import("@/lib/compressGlbGeometry");
+          const geo = await compressGlbGeometry(file, (stage) => setPrepareStage(STAGE_LABEL[stage]));
+          if (geo.changed) {
+            file = geo.file;
+            geometryCompressed = true;
+            if (geo.before && geo.after) {
+              drawCalls = `${geo.before.primitives.toLocaleString()} → ${geo.after.primitives.toLocaleString()} parts`;
+            }
+          }
+        } catch (geoErr) {
+          console.warn("[ModelUploader] Geometry compression skipped:", geoErr);
+        }
+
+        if (file !== selected) {
+          toast({
+            title: "Model optimized",
+            description: `${mb(selected.size)} MB → ${mb(file.size)} MB${drawCalls ? ` · ${drawCalls}` : ""} — ready for phones`,
+          });
+        }
+        console.log(`[ModelUploader] prepared in ${Math.round(performance.now() - t0)} ms: ${mb(selected.size)} → ${mb(file.size)} MB`);
+      } finally {
+        setIsPreparing(false);
+        setPrepareStage(null);
       }
-      console.log(`[ModelUploader] prepared in ${Math.round(performance.now() - t0)} ms: ${mb(selected.size)} → ${mb(file.size)} MB`);
-    } finally {
-      setIsPreparing(false);
-      setPrepareStage(null);
+    } else {
+      console.log(`[ModelUploader] optimization off — uploading ${mb(selected.size)} MB as exported`);
     }
 
     setIsUploading(true);
@@ -230,8 +240,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
 
       // Fallback only: if in-browser compression couldn't run (e.g. the file
       // was already Draco-compressed or the browser failed), let the server
-      // try — in the background, never blocking the architect.
-      if (!geometryCompressed) {
+      // try — in the background, never blocking the architect. Never runs
+      // when the architect explicitly asked for the original quality.
+      if (optimize && !geometryCompressed) {
         void supabase.functions
           .invoke("optimize-model", { body: { projectId, inputPath: filePath } })
           .then(({ data }) => {
@@ -247,7 +258,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
       setIsUploading(false);
       abortRef.current = null;
     }
-  }, [projectId, onUploadComplete, onMarkersDetected, previousModelPath]);
+  }, [projectId, onUploadComplete, onMarkersDetected, previousModelPath, optimize]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
