@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { friendlyError } from "@/lib/plans";
 import type { Tables } from "@/integrations/supabase/types";
 import QRCode from "qrcode";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
@@ -139,7 +140,7 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
       console.error("Tabletop generation error:", err);
       toast({
         title: "Generation failed",
-        description: err.message || "An unexpected error occurred",
+        description: friendlyError(err),
         variant: "destructive",
       });
     } finally {

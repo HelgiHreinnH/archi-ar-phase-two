@@ -5,8 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, ArrowRight, Grid3X3, MapPin, LayoutPanelTop } from "lucide-react";
+import { ArrowLeft, ArrowRight, Grid3X3, MapPin, LayoutPanelTop, Lock } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { usePlan } from "@/hooks/usePlan";
+import { FREE_MODEL_CAP, PLAN_COPY, canCreate, friendlyError } from "@/lib/plans";
 
 type Mode = "tabletop" | "wall" | "multipoint";
 
@@ -16,13 +18,16 @@ const NewProject = () => {
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<Mode>("tabletop");
-  // Multi-Point is temporarily gated while we ship the Rhino integration + Railway .mind compiler (Q3 2026).
-  // Existing multipoint experiences keep working in the dashboard and AR viewer — only new creation is blocked.
-  const MULTIPOINT_DISABLED = true;
+  // Free vs paid (migration 009): Spatial (`multipoint`) is paid-only and free
+  // accounts get FREE_MODEL_CAP Tabletop/Wall models. The DB trigger enforces
+  // both; this only explains it up front.
+  const { plan, quota } = usePlan();
+  const spatialLocked = plan !== "paid";
+  const allowed = canCreate(mode, plan, quota.used);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !allowed) return;
 
     setLoading(true);
     try {
@@ -33,8 +38,8 @@ const NewProject = () => {
       });
       toast({ title: "Experience created!" });
       navigate(`/dashboard/experiences/${project.id}`);
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Couldn't create the experience", description: friendlyError(error), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -97,38 +102,69 @@ const NewProject = () => {
 
         <button
           type="button"
-          onClick={() => !MULTIPOINT_DISABLED && setMode("multipoint")}
-          disabled={MULTIPOINT_DISABLED}
-          aria-disabled={MULTIPOINT_DISABLED}
+          onClick={() => setMode("multipoint")}
+          aria-describedby={spatialLocked ? "spatial-paid-note" : undefined}
           className={`relative rounded-xl border-2 p-5 text-left transition-all ${
-            MULTIPOINT_DISABLED
-              ? "border-border bg-muted/30 cursor-not-allowed opacity-75"
-              : mode === "multipoint"
-                ? "border-primary bg-primary/5 shadow-sm"
-                : "border-border hover:border-primary/30"
+            mode === "multipoint"
+              ? spatialLocked
+                ? "border-amber-400 bg-amber-50/60 shadow-sm"
+                : "border-primary bg-primary/5 shadow-sm"
+              : "border-border hover:border-primary/30"
           }`}
         >
-          {MULTIPOINT_DISABLED && (
-            <span className="absolute top-3 right-3 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wide">
-              Coming soon
+          {spatialLocked && (
+            <span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wide">
+              <Lock className="h-3 w-3" aria-hidden="true" />
+              Paid
             </span>
           )}
           <div className="flex items-center gap-3 mb-2">
-            <div className={`rounded-lg p-2 ${!MULTIPOINT_DISABLED && mode === "multipoint" ? "bg-primary/10" : "bg-muted"}`}>
-              <MapPin className={`h-5 w-5 ${!MULTIPOINT_DISABLED && mode === "multipoint" ? "text-primary" : "text-muted-foreground"}`} />
+            <div className={`rounded-lg p-2 ${mode === "multipoint" ? "bg-primary/10" : "bg-muted"}`}>
+              <MapPin className={`h-5 w-5 ${mode === "multipoint" ? "text-primary" : "text-muted-foreground"}`} />
             </div>
             <span className="font-display font-semibold">Spatial</span>
           </div>
           <p className="text-sm text-muted-foreground">
             Three markers placed in the room. Full-scale spatial visualization at 1:1 in the actual space.
           </p>
-          {MULTIPOINT_DISABLED && (
-            <p className="mt-3 text-xs text-amber-700">
-              Launching with native Rhino integration in Q3 2026.
-            </p>
-          )}
         </button>
       </div>
+
+      {mode === "multipoint" && spatialLocked && (
+        <div
+          id="spatial-paid-note"
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <Lock className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-medium">Spatial is part of the paid plan</p>
+            <p>{PLAN_COPY.spatialLocked}</p>
+          </div>
+        </div>
+      )}
+
+      {mode !== "multipoint" && plan === "free" && (
+        <div
+          role="status"
+          className={`rounded-xl border p-4 text-sm ${
+            quota.reached
+              ? "border-destructive/40 bg-destructive/5 text-destructive"
+              : "border-border bg-muted/40 text-muted-foreground"
+          }`}
+        >
+          {quota.reached ? (
+            <>
+              <p className="font-medium">Free limit reached</p>
+              <p className="mt-1">{PLAN_COPY.capReached}</p>
+            </>
+          ) : (
+            <p>
+              {quota.used} of {FREE_MODEL_CAP} free Tabletop/Wall models used.
+            </p>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -151,7 +187,7 @@ const NewProject = () => {
               <Button type="button" variant="outline" onClick={() => navigate(-1)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={loading || !name.trim()}>
+              <Button type="submit" disabled={loading || !name.trim() || !allowed}>
                 {loading ? "Creating..." : "Create Experience"}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>

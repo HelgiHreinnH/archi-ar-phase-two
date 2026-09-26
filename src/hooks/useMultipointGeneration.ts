@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { friendlyError } from "@/lib/plans";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
 import QRCode from "qrcode";
@@ -158,7 +159,7 @@ export function useMultipointGeneration(
       console.error("Multipoint generation error:", err);
       toast({
         title: "Generation failed",
-        description: err.message || "An unexpected error occurred",
+        description: friendlyError(err),
         variant: "destructive",
       });
     } finally {

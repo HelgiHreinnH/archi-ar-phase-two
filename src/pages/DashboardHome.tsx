@@ -5,6 +5,8 @@ import { FolderOpen, Plus, Clock, Eye, Grid3X3, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { usePlan } from "@/hooks/usePlan";
+import { PLAN_COPY } from "@/lib/plans";
 
 const modeConfig = {
   tabletop: {
@@ -31,6 +33,7 @@ const DashboardHome = () => {
   const { user } = useAuth();
   const { projects, isLoading } = useProjects();
   const navigate = useNavigate();
+  const { plan, quota, isLoading: planLoading } = usePlan();
 
   const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "there";
 
@@ -89,6 +92,37 @@ const DashboardHome = () => {
           </Card>
         ))}
       </div>
+
+      {/* Free-plan quota (migration 009) — paid accounts have no cap. */}
+      {plan === "free" && !planLoading && (
+        <div
+          role="status"
+          className={`flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${
+            quota.reached ? "border-destructive/40 bg-destructive/5" : "border-border bg-muted/30"
+          }`}
+        >
+          <div>
+            <p className="text-sm font-medium">
+              {quota.used} of {quota.cap} free models
+              <span className="ml-2 text-xs font-normal text-muted-foreground">Tabletop &amp; Wall</span>
+            </p>
+            <p className={`text-xs mt-1 ${quota.reached ? "text-destructive" : "text-muted-foreground"}`}>
+              {quota.reached
+                ? PLAN_COPY.capReached
+                : "Spatial (full-scale, multi-marker) is part of the paid plan."}
+            </p>
+          </div>
+          <div
+            className="h-2 w-full sm:w-40 rounded-full bg-muted overflow-hidden"
+            aria-hidden="true"
+          >
+            <div
+              className={`h-full ${quota.reached ? "bg-destructive" : "bg-primary"}`}
+              style={{ width: `${Math.min(100, (quota.used / quota.cap) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Recent experiences */}
       <div>
