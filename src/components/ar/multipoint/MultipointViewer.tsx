@@ -379,10 +379,10 @@ const MultipointViewer = ({
     }
   } else if (allDetected) {
     guideIcon = <Check className="h-4 w-4" />;
-    guideTitle = "Model locked";
+    guideTitle = isMultipoint ? "Model locked" : "Model placed on the QR";
     guideDescription = isMultipoint
       ? "All markers detected. Your AR experience is active."
-      : `QR code locked. Your model is placed on the ${qrSurface} — move around to view it.`;
+      : `Your model sits on the QR on the ${qrSurface}. Move around to view it — keep the QR in view and the model stays on it.`;
   }
 
 
@@ -608,7 +608,9 @@ const MultipointViewer = ({
           {gestureHint && (
             <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
               <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-6 py-4 text-center animate-fade-in">
-                <p className="text-white text-sm font-medium">Drag to orbit · Pinch to zoom</p>
+                {/* Single-QR (MindAR) is locked to the QR, not to the room, and
+                    has no touch gestures — say what actually holds the model. */}
+                <p className="text-white text-sm font-medium">Keep the QR in view — the model stays on it</p>
               </div>
             </div>
           )}

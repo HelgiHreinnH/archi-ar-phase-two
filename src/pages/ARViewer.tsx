@@ -105,7 +105,8 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop" && project?.mode !== "wall";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
-  // Both modes use MindAR image tracking (8th Wall XR8 path removed).
+  // All modes use MindAR image tracking by default (8th Wall only behind
+  // `?engine=8thwall`, see worldEngineOn below).
   // Tabletop's single tracking target is the printed QR code itself; projects
   // generated before QR anchoring have no .mind and fall back to model-viewer.
   const projectHasMindFile = !!project?.mind_file_url;
@@ -221,12 +222,15 @@ const ARViewer = () => {
 
   const [resetKey, setResetKey] = useState(0);
 
-  // Tabletop/wall run on 8th Wall (image target + SLAM) so the model can be
-  // locked in the room. If that engine can't start on a device, fall back to
-  // MindAR (QR-anchored only). `?engine=mindar` forces the fallback for testing.
-  const [worldEngineFailed, setWorldEngineFailed] = useState(
+  // Tabletop/wall engine (26 Sep 2026, free vs paid proposal): MindAR by
+  // default — the model is locked to the printed QR while the QR is in view.
+  // The 8th Wall world-lock viewer (image target + SLAM, "Lock model") is kept
+  // for testing only and is reached with `?engine=8thwall`; if that engine
+  // can't start, it still falls back to MindAR. `?engine=mindar` is accepted
+  // for old links and simply means the default.
+  const [worldEngineOn, setWorldEngineOn] = useState(
     () => typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("engine") === "mindar",
+      new URLSearchParams(window.location.search).get("engine") === "8thwall",
   );
 
   const handleReset = useCallback(() => {
@@ -496,7 +500,7 @@ const ARViewer = () => {
       );
 
     case "detecting":
-      if (!isMultipoint && !worldEngineFailed) {
+      if (!isMultipoint && worldEngineOn) {
         return (
           <WorldLockViewer
             key={`wl-${resetKey}`}
@@ -509,7 +513,7 @@ const ARViewer = () => {
             onModelError={(err) => handleARError(err)}
             onEngineError={(err) => {
               console.warn("[ARViewer] 8th Wall unavailable, falling back to MindAR:", err);
-              setWorldEngineFailed(true);
+              setWorldEngineOn(false);
             }}
           />
         );
