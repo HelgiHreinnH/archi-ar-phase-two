@@ -56,6 +56,7 @@ export type Database = {
           full_name: string | null
           id: string
           logo_url: string | null
+          plan: string
           updated_at: string
           user_id: string
         }
@@ -65,6 +66,7 @@ export type Database = {
           full_name?: string | null
           id?: string
           logo_url?: string | null
+          plan?: string
           updated_at?: string
           user_id: string
         }
@@ -74,6 +76,7 @@ export type Database = {
           full_name?: string | null
           id?: string
           logo_url?: string | null
+          plan?: string
           updated_at?: string
           user_id?: string
         }
@@ -95,6 +98,7 @@ export type Database = {
           name: string
           optimize_model: boolean
           original_model_url: string | null
+          paid_at: string | null
           qr_code_url: string | null
           qr_size: string | null
           scale: string | null
@@ -121,6 +125,7 @@ export type Database = {
           name: string
           optimize_model?: boolean
           original_model_url?: string | null
+          paid_at?: string | null
           qr_code_url?: string | null
           qr_size?: string | null
           scale?: string | null
@@ -147,6 +152,7 @@ export type Database = {
           name?: string
           optimize_model?: boolean
           original_model_url?: string | null
+          paid_at?: string | null
           qr_code_url?: string | null
           qr_size?: string | null
           scale?: string | null
@@ -165,6 +171,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      free_model_cap: { Args: never; Returns: number }
+      is_client_role: { Args: never; Returns: boolean }
       is_project_owner: { Args: { _project_id: string }; Returns: boolean }
     }
     Enums: {
