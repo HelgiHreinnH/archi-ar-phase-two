@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { computeModelPlacement, measureModel } from "@/lib/modelPlacement";
+import { computeModelPlacement, measureModel, placeModelOnQr, qrOffsetMm } from "@/lib/modelPlacement";
 import { computeWorldTransform } from "@/lib/computeWorldTransform";
 import {
   deviceOrientationToQuaternion,
@@ -101,8 +101,6 @@ const MINDAR_THREE_URL =
  */
 export const MARKER_SIZE_MM = 150;
 
-/** Float height above marker plane for tabletop mode (in MindAR units). */
-const FLOAT_ABOVE_MARKER = 0.267;
 
 /** Number of stable frames before we consider locking */
 const STABLE_FRAME_THRESHOLD = 10;
@@ -146,24 +144,29 @@ const SOFT_CORRECTION_ALPHA = 0.05;
  */
 const SOFT_CORRECTION_MIN_ANCHORS = 2;
 
-/**
- * Sept 2026: how hard a locked TABLETOP model follows the live QR pose while
- * the QR is in view (per tracked frame). MindAR already One-Euro filters the
- * anchor, so this only takes the edge off. Without it the locked model was
- * held by the gyroscope alone and froze on screen whenever motion access was
- * not granted (iOS asks separately, and only from a tap).
- */
-const TABLETOP_FOLLOW_ALPHA = 0.8;
 
 /**
- * Single-QR modes (tabletop, wall) are QR-LOCKED, not screen-held. MindAR is
- * image tracking only — it has no SLAM, so once the QR is out of view nothing
- * knows where the table is (the gyro sees rotation, never walking). Holding the
- * last pose made the model stick to the screen. Instead: keep the last pose
- * for a short grace (motion blur, a hand passing), then hide the model until
- * the QR is seen again, and snap straight back onto it.
+ * Single-QR modes (tabletop, wall) are PINNED to the QR (28 Sep 2026): the model
+ * is a child of the QR's anchor group for the whole session, so it moves in the
+ * same frame as the QR pose — no lock, no blending, no gyro. MindAR hides the
+ * group itself when the QR is lost and shows it again, in place, when it is
+ * found. MindAR has no SLAM, so nothing could hold the model without the QR.
+ *
+ * The only smoothing is MindAR's own One-Euro filter on the QR pose, tuned
+ * below (MindAR defaults: minCF 0.001, beta 1000). Lower minCF = steadier when
+ * the phone is still; higher beta = less lag when it moves. Tune on the phone
+ * with ?fcf=<minCF>&fb=<beta>.
  */
-const QR_LOST_HIDE_MS = 600;
+const SINGLE_QR_FILTER_MIN_CF = 0.0001;
+const SINGLE_QR_FILTER_BETA = 10;
+
+function readFilterOverride(key: string, fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  const raw = new URLSearchParams(window.location.search).get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const v = Number(raw);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
 
 /**
  * MindAR frames a target may be missed before it is reported lost (default 5).
@@ -256,9 +259,6 @@ const MindARScene = ({
   onScanGuidance,
   onAnchorSample,
 }: MindARSceneProps) => {
-  const isTabletop = mode === "tabletop";
-  const isTabletopMode = isTabletop;
-  const floatAboveMarker = isTabletop ? FLOAT_ABOVE_MARKER : 0;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [, setIsStarting] = useState(true);
@@ -412,7 +412,13 @@ const MindARScene = ({
           uiLoading: "no",
           uiScanning: "no",
           uiError: "no",
-          ...(singleQr ? { missTolerance: SINGLE_QR_MISS_TOLERANCE } : {}),
+          ...(singleQr
+            ? {
+                missTolerance: SINGLE_QR_MISS_TOLERANCE,
+                filterMinCF: readFilterOverride("fcf", SINGLE_QR_FILTER_MIN_CF),
+                filterBeta: readFilterOverride("fb", SINGLE_QR_FILTER_BETA),
+              }
+            : {}),
         });
         instance = mindarThree;
 
@@ -430,8 +436,10 @@ const MindARScene = ({
         scene.add(directionalLight);
 
         // ── State machine ─────────────────────────────────────────────
-        // 'tracking' — model (if attached) inside anchor 0's group, hidden
-        // 'locked'   — model in scene root, gyro-compensated each frame
+        // 'tracking' — model (if attached) inside anchor 0's group. Hidden until
+        //              the first stable QR pose; single-QR modes then stay here
+        //              for good (pinned to the QR, see SINGLE_QR_FILTER_*).
+        // 'locked'   — Spatial only: model in scene root, gyro-compensated
         type AnchorState = "tracking" | "locked";
         let anchorState: AnchorState = "tracking";
 
@@ -441,13 +449,6 @@ const MindARScene = ({
         // The attached model. Null until Effect B hands one over — tracking,
         // pose history and scan guidance all run without it.
         let model: any = null;
-        // Tabletop: the model's pose relative to anchor 0 at lock time, so the
-        // locked model can keep following the QR while it is in view.
-        let modelLocalMatrix: any = null;
-        // Single-QR: when the QR was lost while locked (ms), and whether the
-        // next QR pose should be taken as-is instead of blended.
-        let qrLostAt: number | null = null;
-        let snapToQr = false;
 
         // ── Fix 3: Per-anchor pose history for variance gate ──────────
         const poseHistories: { x: number; y: number; z: number }[][] = Array.from(
@@ -537,18 +538,23 @@ const MindARScene = ({
               if (
                 i === 0 &&
                 model &&
+                !(singleQr && model.visible) &&
                 stableFrameCounts[0] >= STABLE_FRAME_THRESHOLD &&
                 hasLowVariance(0)
               ) {
-                model.updateMatrix();
                 const md = markerDataRef.current;
-                if (singleQr || !md) {
-                  if (!singleQr && !md) {
-                    console.warn("[MindARScene] Multi-point mode but no markerData — falling back to anchor-A-only placement");
-                  }
+                if (singleQr) {
+                  // Pinned: the model already sits in the QR's anchor group
+                  // with its lift/gap offset. Reveal it once on the first
+                  // stable pose; from then on MindAR's group visibility alone
+                  // shows/hides it as the QR comes and goes.
+                  model.visible = true;
+                  console.log("[MindARScene] Model pinned to the QR.");
+                } else if (!md) {
+                  console.warn("[MindARScene] Multi-point mode but no markerData — falling back to anchor-A-only placement");
+                  model.updateMatrix();
                   const worldMatrix = new ThreeLib.Matrix4();
                   worldMatrix.copy(anchor.group.matrix).multiply(model.matrix);
-                  modelLocalMatrix = model.matrix.clone();
                   lockModel(worldMatrix);
                 } else {
                   tryMultiPointLock(anchor);
@@ -558,10 +564,7 @@ const MindARScene = ({
               // Fix 4: Track pose while locked for soft correction
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
-              if (i === 0) {
-                if (singleQr) followQrWhileVisible(anchor);
-                else applySoftCorrection(ThreeLib);
-              }
+              if (i === 0) applySoftCorrection(ThreeLib);
             }
           };
 
@@ -572,7 +575,6 @@ const MindARScene = ({
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
               if (i === 0) console.log("[MindARScene] Anchor 0 re-detected while locked — using for soft correction");
-              if (singleQr && i === 0) { qrLostAt = null; snapToQr = true; }
             }
             onTargetFoundRef.current?.(i);
           };
@@ -591,7 +593,6 @@ const MindARScene = ({
             }
             if (anchorState === "locked") {
               anchorVisibleWhileLocked[i] = false;
-              if (singleQr && i === 0) qrLostAt = performance.now();
             }
             onTargetLostRef.current?.(i);
           };
@@ -672,34 +673,6 @@ const MindARScene = ({
         }
 
         // ── Fix 4: Soft correction — blend toward new pose data ───────
-        /**
-         * Tabletop, locked, QR in view: pull the locked pose toward the live QR
-         * pose and re-base the gyro reference on it. The QR is the ground truth
-         * whenever it is visible; the gyro only carries the model while it isn't.
-         */
-        function followQrWhileVisible(anchor: any) {
-          if (!model || !lockedMatrix || !modelLocalMatrix) return;
-          const T = ThreeLib;
-          const target = new T.Matrix4().copy(anchor.group.matrix).multiply(modelLocalMatrix);
-          const lp = new T.Vector3(), lq = new T.Quaternion(), ls = new T.Vector3();
-          const tp = new T.Vector3(), tq = new T.Quaternion(), ts = new T.Vector3();
-          lockedMatrix.decompose(lp, lq, ls);
-          target.decompose(tp, tq, ts);
-          // After the QR was lost the last pose is stale — land on the QR at once.
-          const a = snapToQr ? 1 : TABLETOP_FOLLOW_ALPHA;
-          snapToQr = false;
-          lp.lerp(tp, a);
-          lq.slerp(tq, a);
-          ls.lerp(ts, a);
-          qrLostAt = null;
-          model.visible = true;
-          lockedMatrix.compose(lp, lq, ls);
-          // The new pose is "now", so the gyro delta restarts from here.
-          lockedDeviceQuat = deviceQuaternionRef.current ? deviceQuaternionRef.current.clone() : null;
-          model.matrix.copy(lockedMatrix);
-          model.matrixWorldNeedsUpdate = true;
-        }
-
         function applySoftCorrection(T: any) {
           const md = markerDataRef.current;
           if (!model || !lockedMatrix || !md) return;
@@ -892,7 +865,6 @@ const MindARScene = ({
           if (model !== m) return;
           m.parent?.remove(m);
           model = null;
-          modelLocalMatrix = null;
           anchorState = "tracking";
           lockedMatrix = null;
           lockedDeviceQuat = null;
@@ -955,21 +927,12 @@ const MindARScene = ({
             try { emitGuidanceAndSamples(ThreeLib, camera); } catch { /* guidance is non-critical */ }
           }
 
-          // ── Locked pose → screen, every frame ──
-          // Tabletop with the QR in view: the QR is ground truth
-          // (followQrWhileVisible already wrote the pose). Otherwise hold the
-          // locked pose in the room by counter-rotating it with the gyro; with
-          // no gyro, hold it as locked (soft correction may still move it).
-          if (anchorState === "locked" && model && lockedMatrix && singleQr) {
-            // QR-locked: the pose only ever comes from the QR. Out of view past
-            // the grace period → hide; never hold it on the screen.
-            if (!anchorVisibleWhileLocked[0] && qrLostAt !== null &&
-                performance.now() - qrLostAt > QR_LOST_HIDE_MS) {
-              model.visible = false;
-            }
-            model.matrix.copy(lockedMatrix);
-            model.matrixWorldNeedsUpdate = true;
-          } else if (anchorState === "locked" && model && lockedMatrix) {
+          // ── Locked pose → screen, every frame (Spatial only) ──
+          // Single-QR models never lock: they live in the QR's anchor group and
+          // MindAR moves them with the QR. Spatial holds the locked pose in the
+          // room by counter-rotating it with the gyro; with no gyro, it holds it
+          // as locked (soft correction may still move it).
+          if (anchorState === "locked" && model && lockedMatrix) {
             const qrInView = false;
             const devQ = deviceQuaternionRef.current;
             // Motion access may be granted after the lock (first tap): start
@@ -1065,49 +1028,46 @@ const MindARScene = ({
         }
         tuneMaterialsForMobile(model, T, handle.renderer);
 
-        // ── Orientation ──────────────────────────────────────────────
-        // The GLB is exported Y-up ("Z to glTF Y" on in Rhino). In MindAR's
-        // anchor space the target image spans X/Y and +Z points out of it:
-        //  · wall  — the image is vertical, so +Y is already up: no rotation.
-        //  · table — the image is horizontal, so up is +Z: tip the model by 90°.
-        // initialRotation stays a spin about the model's own up axis (applied
-        // before the tip, because three composes rotations X·Y·Z).
-        if (initialRotation) {
-          model.rotation.y = T.MathUtils.degToRad(initialRotation);
-        }
-        model.rotation.x = isTabletopMode ? Math.PI / 2 : 0;
-
-        // ── Real-world size ──────────────────────────────────────────
-        // One unit in anchor space is one marker width (150 mm), so the model
-        // must be scaled by its real size, not normalised to a fixed number of
-        // units. glTF is metres by spec, but Rhino writes document units, so a
-        // model measuring in the hundreds or thousands is millimetres.
-        // measureModel: exporter-written bounds can be wrong (see modelPlacement).
-        const box = measureModel(model, T);
-        const size = box.getSize(new T.Vector3());
-        const center = box.getCenter(new T.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z) || 1;
-        const placement = computeModelPlacement(maxDim, MARKER_SIZE_MM, modelScale);
-        const normalizedScale = placement.scale;
-
-        console.log(
-          `[MindARScene] Model ${placement.realSizeM.toFixed(2)} m ` +
-          `(${placement.unitMm === 1000 ? "metres" : "millimetres"} in file), scale 1:${modelScale} → ` +
-          `${(maxDim * normalizedScale).toFixed(2)} marker widths ` +
-          `(${(maxDim * normalizedScale * MARKER_SIZE_MM / 1000).toFixed(2)} m on the marker)`,
-        );
-
-        model.scale.set(normalizedScale, normalizedScale, normalizedScale);
-        if (isTabletopMode) {
-          // Sit on the table, centred on the marker.
-          model.position.x = -center.x * normalizedScale;
-          model.position.y = -center.y * normalizedScale;
-          model.position.z = -box.min.z * normalizedScale + floatAboveMarker;
+        if (mode === "tabletop" || mode === "wall") {
+          // ── Single-QR placement (shared with the 8th Wall viewer) ──────
+          // Real-size scale, plan centre on the QR centre, and the face nearest
+          // the QR held a fixed real-mm gap off it: the bottom above a table
+          // (TABLETOP_LIFT_MM), the back in front of a wall (WALL_OFFSET_MM).
+          const placement = placeModelOnQr(model, T, {
+            mode,
+            modelScale,
+            initialRotation,
+            markerSizeMm: MARKER_SIZE_MM,
+            offsetMm: qrOffsetMm(mode),
+          });
+          console.log(
+            `[MindARScene] Model ${placement.realSizeM.toFixed(2)} m ` +
+            `(${placement.unitMm === 1000 ? "metres" : "millimetres"} in file), scale 1:${modelScale}, ` +
+            `${qrOffsetMm(mode)} mm ${mode === "tabletop" ? "above" : "in front of"} the QR`,
+          );
         } else {
-          // Wall: the model's centre locks onto the centre of the printed QR.
-          model.position.x = -center.x * normalizedScale;
-          model.position.y = -center.y * normalizedScale;
-          model.position.z = -center.z * normalizedScale;
+          // ── Spatial (multipoint) — unchanged ───────────────────────────
+          // The GLB is exported Y-up; marker images are treated like a wall
+          // (+Y up, +Z out of the image). Centre of the model on anchor A;
+          // the Procrustes lock then places it from the marker coordinates.
+          if (initialRotation) {
+            model.rotation.y = T.MathUtils.degToRad(initialRotation);
+          }
+          model.rotation.x = 0;
+          const box = measureModel(model, T);
+          const size = box.getSize(new T.Vector3());
+          const center = box.getCenter(new T.Vector3());
+          const maxDim = Math.max(size.x, size.y, size.z) || 1;
+          const placement = computeModelPlacement(maxDim, MARKER_SIZE_MM, modelScale);
+          const s = placement.scale;
+          console.log(
+            `[MindARScene] Model ${placement.realSizeM.toFixed(2)} m ` +
+            `(${placement.unitMm === 1000 ? "metres" : "millimetres"} in file), scale 1:${modelScale}`,
+          );
+          model.scale.set(s, s, s);
+          model.position.x = -center.x * s;
+          model.position.y = -center.y * s;
+          model.position.z = -center.z * s;
         }
 
         handle.attachModel(model);
@@ -1136,7 +1096,7 @@ const MindARScene = ({
         try { disposeScene(attached); } catch { /* noop */ }
       }
     };
-  }, [sceneEpoch, modelSource, modelScale, initialRotation, floatAboveMarker, isTabletopMode]);
+  }, [sceneEpoch, modelSource, modelScale, initialRotation, mode]);
 
   return (
     <div

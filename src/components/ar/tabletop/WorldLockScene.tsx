@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { placeModelOnQr } from "@/lib/modelPlacement";
+import { placeModelOnQr, qrOffsetMm } from "@/lib/modelPlacement";
 import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
@@ -34,8 +34,6 @@ const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 
 /** Printed QR width. Must match the print sheet (see MindARScene). */
 export const QR_SIZE_MM = 150;
-/** Tabletop float above the paper, in QR widths (same as MindAR). */
-const FLOAT_ABOVE_MARKER = 0.267;
 const GLB_MAGIC = 0x46546c67;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -237,7 +235,7 @@ const WorldLockScene = ({
             modelScale,
             initialRotation,
             markerSizeMm: QR_SIZE_MM,
-            floatAboveMarker: mode === "tabletop" ? FLOAT_ABOVE_MARKER : 0,
+            offsetMm: qrOffsetMm(mode),
           });
           console.log(`[WorldLock] model ${placement.realSizeM.toFixed(2)} m, 1:${modelScale}`);
           freezeModelMatrices(model);

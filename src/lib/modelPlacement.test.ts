@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import * as T from "three";
-import { computeModelPlacement, measureModel, placeModelOnQr } from "./modelPlacement";
+import {
+  computeModelPlacement,
+  measureModel,
+  placeModelOnQr,
+  qrOffsetMm,
+  TABLETOP_LIFT_MM,
+  WALL_OFFSET_MM,
+} from "./modelPlacement";
 
 const MARKER = 150; // mm
 
@@ -74,12 +81,30 @@ describe("placeModelOnQr", () => {
     expect(box.min.z).toBeCloseTo(0, 5);
   });
 
-  it("wall: box centre on the QR centre", () => {
+  it("wall: centred on the QR in X/Y, back of the model flat on the wall", () => {
     const m = offsetModelWithBadBounds();
     placeModelOnQr(m, T, { mode: "wall", modelScale: 10, markerSizeMm: 150 });
     m.updateMatrixWorld(true);
-    const c = new T.Box3().setFromObject(m).getCenter(new T.Vector3());
-    expect(c.length()).toBeLessThan(1e-5);
+    const box = new T.Box3().setFromObject(m);
+    const c = box.getCenter(new T.Vector3());
+    expect(c.x).toBeCloseTo(0, 5);
+    expect(c.y).toBeCloseTo(0, 5);
+    expect(box.min.z).toBeCloseTo(0, 5);
+  });
+
+  it("offsets by real millimetres, independent of the project scale", () => {
+    for (const modelScale of [1, 10, 50]) {
+      const t = offsetModelWithBadBounds();
+      placeModelOnQr(t, T, { mode: "tabletop", modelScale, markerSizeMm: 150, offsetMm: 40 });
+      t.updateMatrixWorld(true);
+      // 40 mm on a 150 mm QR = 0.2667 QR widths above the QR plane.
+      expect(new T.Box3().setFromObject(t).min.z).toBeCloseTo(40 / 150, 5);
+
+      const w = offsetModelWithBadBounds();
+      placeModelOnQr(w, T, { mode: "wall", modelScale, markerSizeMm: 150, offsetMm: 20 });
+      w.updateMatrixWorld(true);
+      expect(new T.Box3().setFromObject(w).min.z).toBeCloseTo(20 / 150, 5);
+    }
   });
 
   it("reports the size as shown on the QR: real size ÷ scale", () => {
@@ -90,5 +115,22 @@ describe("placeModelOnQr", () => {
     expect(p.displayedSizeM!.height).toBeCloseTo(0.3, 5);
     const one = placeModelOnQr(offsetModelWithBadBounds(), T, { mode: "tabletop", modelScale: 1, markerSizeMm: 150 });
     expect(one.displayedSizeM!.width).toBeCloseTo(8.8, 5);
+  });
+});
+
+describe("qrOffsetMm", () => {
+  it("defaults per mode", () => {
+    expect(qrOffsetMm("tabletop", "")).toBe(TABLETOP_LIFT_MM);
+    expect(qrOffsetMm("wall", "")).toBe(WALL_OFFSET_MM);
+  });
+  it("takes ?lift= for tabletop and ?gap= for wall", () => {
+    expect(qrOffsetMm("tabletop", "?lift=0")).toBe(0);
+    expect(qrOffsetMm("tabletop", "?lift=25&gap=90")).toBe(25);
+    expect(qrOffsetMm("wall", "?gap=35")).toBe(35);
+  });
+  it("ignores nonsense", () => {
+    expect(qrOffsetMm("tabletop", "?lift=abc")).toBe(TABLETOP_LIFT_MM);
+    expect(qrOffsetMm("wall", "?gap=-5")).toBe(WALL_OFFSET_MM);
+    expect(qrOffsetMm("wall", "?gap=99999")).toBe(WALL_OFFSET_MM);
   });
 });

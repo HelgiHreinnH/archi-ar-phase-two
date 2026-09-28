@@ -87,13 +87,36 @@ export function measureModel(
  * Same maths as MindARScene's Effect B (kept identical on purpose, so both
  * engines place a model the same way). The target image spans local X/Y and
  * +Z points out of it:
- *  · wall     — the image is vertical, +Y already up: no tip, centred on QR.
- *  · tabletop — the image is horizontal, up is +Z: tip 90°, sit on the QR.
+ *  · wall     — the image is vertical, +Y already up: no tip. Centred on the
+ *               QR in X/Y; the BACK of the box stands offsetMm in front of it.
+ *  · tabletop — the image is horizontal, up is +Z: tip 90°. Centred on the QR
+ *               in plan; the BOTTOM of the box floats offsetMm above it.
  *
  * Universal rule (all modes, all GLBs): the centre of the model's bounding box
  * in plan (Rhino X/Y) lands on the centre of the QR, wherever the model sits
  * in the Rhino file. Tabletop: the bottom of the box sits on the QR.
  */
+/**
+ * Gap between the printed QR and the model, in real millimetres (Sep 2026).
+ *  · tabletop — the bottom of the model floats this far ABOVE the QR.
+ *  · wall     — the back of the model stands this far IN FRONT of the wall.
+ * Real mm, not model mm: the gap is the same whatever the project scale.
+ * Override on the phone for tuning with ?lift=<mm> (tabletop) / ?gap=<mm> (wall).
+ */
+export const TABLETOP_LIFT_MM = 40;
+export const WALL_OFFSET_MM = 20;
+
+/** The QR→model gap for a mode, honouring the ?lift= / ?gap= tuning overrides. */
+export function qrOffsetMm(mode: string, search?: string): number {
+  const isTabletop = mode === "tabletop";
+  const fallback = isTabletop ? TABLETOP_LIFT_MM : WALL_OFFSET_MM;
+  const q = search ?? (typeof window !== "undefined" ? window.location.search : "");
+  const raw = new URLSearchParams(q).get(isTabletop ? "lift" : "gap");
+  if (raw === null || raw.trim() === "") return fallback;
+  const mm = Number(raw);
+  return Number.isFinite(mm) && mm >= 0 && mm <= 1000 ? mm : fallback;
+}
+
 export function placeModelOnQr(
   // three.js objects from the self-hosted runtime module (not the npm types).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,7 +128,8 @@ export function placeModelOnQr(
     modelScale: number;
     initialRotation?: number;
     markerSizeMm: number;
-    floatAboveMarker?: number;
+    /** Real mm between the QR and the model (see TABLETOP_LIFT_MM / WALL_OFFSET_MM). Default 0. */
+    offsetMm?: number;
   },
 ): ModelPlacement {
   const isTabletop = opts.mode === "tabletop";
@@ -129,8 +153,9 @@ export function placeModelOnQr(
   model.scale.set(s, s, s);
   model.position.x = -center.x * s;
   model.position.y = -center.y * s;
-  model.position.z = isTabletop
-    ? -box.min.z * s + (opts.floatAboveMarker ?? 0)
-    : -center.z * s;
+  // Both modes: the face of the box nearest the QR (bottom on a table, back on
+  // a wall — +Z points out of the QR in both) sits offsetMm off the QR plane.
+  const offsetUnits = Math.max(0, opts.offsetMm ?? 0) / opts.markerSizeMm;
+  model.position.z = -box.min.z * s + offsetUnits;
   return placement;
 }
