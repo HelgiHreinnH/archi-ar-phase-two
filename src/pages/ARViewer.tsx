@@ -139,8 +139,9 @@ const ARViewer = () => {
     // tap's user-activation window, so fire it synchronously, first. On the
     // auto-launch path there is no tap — the first tap inside the camera view
     // asks instead (see the pointerdown effect below).
-    // Tabletop/wall are QR-locked and never use the gyro — don't ask.
-    if (fromTap && isMultipoint) requestMotionPermission();
+    // Every mode holds the placed model with the gyro (tabletop/wall since
+    // 29 Sep: hold and correct), so ask for motion access on the tap.
+    if (fromTap) requestMotionPermission();
 
     // Tabletop WITHOUT a compiled tracking file (legacy projects generated
     // before QR anchoring was restored): fall back to model-viewer's native
@@ -196,7 +197,7 @@ const ARViewer = () => {
   // Ask for motion access on the first tap anywhere in the camera view, so the
   // gyro can carry the model when the QR leaves the frame. Harmless off iOS.
   useEffect(() => {
-    if (viewState !== "detecting" || !isMultipoint) return;
+    if (viewState !== "detecting") return;
     const onFirstTap = () => requestMotionPermission();
     window.addEventListener("pointerdown", onFirstTap, { capture: true, once: true });
     return () => window.removeEventListener("pointerdown", onFirstTap, { capture: true });

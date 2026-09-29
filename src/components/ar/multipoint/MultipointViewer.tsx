@@ -382,7 +382,7 @@ const MultipointViewer = ({
     guideTitle = isMultipoint ? "Model locked" : "Model placed on the QR";
     guideDescription = isMultipoint
       ? "All markers detected. Your AR experience is active."
-      : `Your model sits on the QR on the ${qrSurface}. Move around to view it — keep the QR in view and the model stays on it.`;
+      : `Your model is placed on the ${qrSurface}. Look around — it stays put. Point back at the QR any time to re-align it.`;
   }
 
 
@@ -608,24 +608,19 @@ const MultipointViewer = ({
           {gestureHint && (
             <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
               <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-6 py-4 text-center animate-fade-in">
-                {/* Single-QR (MindAR) is locked to the QR, not to the room, and
-                    has no touch gestures — say what actually holds the model. */}
-                <p className="text-white text-sm font-medium">Keep the QR in view — the model stays on it</p>
+                {/* Single-QR (MindAR): placed from the QR, then held by the
+                    gyro and re-aligned whenever the QR is seen. No gestures. */}
+                <p className="text-white text-sm font-medium">Look around — the model stays put</p>
               </div>
             </div>
           )}
 
-          {!isMultipoint && markers["QR"] === "searching" && (
-            <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top,16px)+64px)] z-20 flex justify-center px-4">
-              <div className="rounded-full bg-black/60 backdrop-blur-xl border border-white/25 px-4 py-2 text-xs font-medium text-white shadow-lg">
-                Point at the QR to bring the model back
-              </div>
-            </div>
-          )}
+          {/* No "point at the QR" chip for single-QR: after placement the
+              model is never hidden (hold and correct, Sep 2026). */}
 
-          {/* Motion access only matters for multipoint's gyro hold; the
-              single-QR modes are QR-locked and never need it. */}
-          {isMultipoint && needsMotion && (
+          {/* Motion access lets the gyro hold the model in place while the
+              phone turns — every mode uses it (iOS asks only from a tap). */}
+          {needsMotion && (
             <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top,16px)+64px)] z-20 flex justify-center px-4">
               <button
                 onClick={enableMotion}

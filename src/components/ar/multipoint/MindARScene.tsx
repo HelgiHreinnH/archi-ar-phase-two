@@ -146,16 +146,37 @@ const SOFT_CORRECTION_MIN_ANCHORS = 2;
 
 
 /**
- * Single-QR modes (tabletop, wall) are PINNED to the QR (28 Sep 2026): the model
- * is a child of the QR's anchor group for the whole session, so it moves in the
- * same frame as the QR pose — no lock, no blending, no gyro. MindAR hides the
- * group itself when the QR is lost and shows it again, in place, when it is
- * found. MindAR has no SLAM, so nothing could hold the model without the QR.
+ * Single-QR modes (tabletop, wall) — HOLD AND CORRECT (29 Sep 2026).
  *
- * The only smoothing is MindAR's own One-Euro filter on the QR pose, tuned
- * below (MindAR defaults: minCF 0.001, beta 1000). Lower minCF = steadier when
- * the phone is still; higher beta = less lag when it moves. Tune on the phone
- * with ?fcf=<minCF>&fb=<beta>.
+ * Launch is unchanged (QR scan → camera → model streams → QR found). After
+ * that, the 7 July 2026 behaviour that tested so well comes back, fixed:
+ *  1. Lock: on the first steady QR reading (STABLE_FRAME_THRESHOLD frames,
+ *     < 3 mm wobble) the model's pose is captured once and moved off the QR
+ *     into the scene. From then on it never follows the QR frame by frame,
+ *     so the QR's own jitter never reaches the model.
+ *  2. Hold: the phone's gyro counter-rotates that pose (arGyro, fixed 23 Sep
+ *     `1aff7db` — in July the gyro updates never reached the screen). Turning
+ *     the phone keeps the model in place in the room. The gyro can't see the
+ *     phone MOVING, only turning; that is what 3 is for.
+ *  3. Correct: whenever the QR is in view and steady, and the model is more
+ *     than RESNAP_MM / RESNAP_DEG off where the QR says it should be for
+ *     RESNAP_FRAMES frames in a row, the model re-snaps onto the QR (eased
+ *     over RESNAP_EASE_MS). Small differences are ignored — no swimming.
+ *  4. Never hide: once placed, the model stays visible when the QR is lost.
+ *
+ * Without motion access (iOS before the first tap) the model holds its pose
+ * as locked, like July, and 3 still corrects it whenever the QR is seen.
+ * Tuning on the phone: ?snapmm=<mm>&snapdeg=<deg>.
+ */
+const RESNAP_MM = 15;
+const RESNAP_DEG = 4;
+const RESNAP_FRAMES = 6;
+const RESNAP_EASE_MS = 250;
+
+/**
+ * The QR pose that feeds 1 and 3 is smoothed by MindAR's One-Euro filter
+ * (MindAR defaults: minCF 0.001, beta 1000). Lower minCF = steadier when the
+ * phone is still; higher beta = less lag when it moves. ?fcf=<minCF>&fb=<beta>.
  */
 const SINGLE_QR_FILTER_MIN_CF = 0.0001;
 const SINGLE_QR_FILTER_BETA = 10;
@@ -436,10 +457,11 @@ const MindARScene = ({
         scene.add(directionalLight);
 
         // ── State machine ─────────────────────────────────────────────
-        // 'tracking' — model (if attached) inside anchor 0's group. Hidden until
-        //              the first stable QR pose; single-QR modes then stay here
-        //              for good (pinned to the QR, see SINGLE_QR_FILTER_*).
-        // 'locked'   — Spatial only: model in scene root, gyro-compensated
+        // 'tracking' — model (if attached) inside anchor 0's group, hidden until
+        //              the first stable pose
+        // 'locked'   — model in scene root, gyro-compensated each frame;
+        //              single-QR re-snaps onto the QR (see RESNAP_*), Spatial
+        //              soft-corrects from its markers
         type AnchorState = "tracking" | "locked";
         let anchorState: AnchorState = "tracking";
 
@@ -449,6 +471,18 @@ const MindARScene = ({
         // The attached model. Null until Effect B hands one over — tracking,
         // pose history and scan guidance all run without it.
         let model: any = null;
+        // Single-QR: the model's transform inside the QR anchor (scale, lift/gap,
+        // centring) captured at lock, so a later QR reading gives the pose the
+        // model SHOULD have: anchor.matrix × modelLocalMatrix.
+        let modelLocalMatrix: any = null;
+        // Single-QR re-snap: consecutive off-by-too-much QR readings, the recent
+        // QR positions (QR widths) for the steadiness check, and the eased snap.
+        let snapCount = 0;
+        let snapSamples: { x: number; y: number; z: number }[] = [];
+        let easeFrom: any = null;
+        let easeStart = 0;
+        const resnapMm = readFilterOverride("snapmm", RESNAP_MM);
+        const resnapDeg = readFilterOverride("snapdeg", RESNAP_DEG);
 
         // ── Fix 3: Per-anchor pose history for variance gate ──────────
         const poseHistories: { x: number; y: number; z: number }[][] = Array.from(
@@ -538,18 +572,15 @@ const MindARScene = ({
               if (
                 i === 0 &&
                 model &&
-                !(singleQr && model.visible) &&
                 stableFrameCounts[0] >= STABLE_FRAME_THRESHOLD &&
                 hasLowVariance(0)
               ) {
                 const md = markerDataRef.current;
                 if (singleQr) {
-                  // Pinned: the model already sits in the QR's anchor group
-                  // with its lift/gap offset. Reveal it once on the first
-                  // stable pose; from then on MindAR's group visibility alone
-                  // shows/hides it as the QR comes and goes.
-                  model.visible = true;
-                  console.log("[MindARScene] Model pinned to the QR.");
+                  // Lock (see RESNAP_* doc): capture the pose once, off the QR.
+                  model.updateMatrix();
+                  modelLocalMatrix = model.matrix.clone();
+                  lockModel(new ThreeLib.Matrix4().copy(anchor.group.matrix).multiply(modelLocalMatrix));
                 } else if (!md) {
                   console.warn("[MindARScene] Multi-point mode but no markerData — falling back to anchor-A-only placement");
                   model.updateMatrix();
@@ -564,7 +595,10 @@ const MindARScene = ({
               // Fix 4: Track pose while locked for soft correction
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
-              if (i === 0) applySoftCorrection(ThreeLib);
+              if (i === 0) {
+                if (singleQr) correctFromQr(anchor);
+                else applySoftCorrection(ThreeLib);
+              }
             }
           };
 
@@ -593,6 +627,9 @@ const MindARScene = ({
             }
             if (anchorState === "locked") {
               anchorVisibleWhileLocked[i] = false;
+              // Single-QR: the model stays where it is (never hidden); the
+              // next re-snap needs a fresh run of steady readings.
+              if (singleQr && i === 0) { snapCount = 0; snapSamples = []; }
             }
             onTargetLostRef.current?.(i);
           };
@@ -673,6 +710,49 @@ const MindARScene = ({
         }
 
         // ── Fix 4: Soft correction — blend toward new pose data ───────
+        /**
+         * Single-QR, locked, QR in view: compare the pose on screen with the
+         * pose the QR asks for. Inside the dead band nothing happens (no
+         * swimming); a steady, sustained difference re-snaps the model onto
+         * the QR and re-bases the gyro on "now".
+         */
+        function correctFromQr(anchor: any) {
+          if (!model || !lockedMatrix || !modelLocalMatrix) return;
+          const T = ThreeLib;
+          const e = anchor.group.matrix.elements;
+          // World units per QR width (MindAR's postMatrix scale).
+          const unit = Math.hypot(e[0], e[1], e[2]) || 1;
+          const target = new T.Matrix4().copy(anchor.group.matrix).multiply(modelLocalMatrix);
+          const tp = new T.Vector3(), tq = new T.Quaternion(), ts = new T.Vector3();
+          const cp = new T.Vector3(), cq = new T.Quaternion(), cs = new T.Vector3();
+          target.decompose(tp, tq, ts);
+          model.matrix.decompose(cp, cq, cs);
+
+          snapSamples.push({ x: tp.x / unit, y: tp.y / unit, z: tp.z / unit });
+          if (snapSamples.length > RESNAP_FRAMES) snapSamples.shift();
+
+          const offMm = (tp.distanceTo(cp) / unit) * MARKER_SIZE_MM;
+          const dot = Math.min(1, Math.abs(tq.dot(cq)));
+          const offDeg = (2 * Math.acos(dot) * 180) / Math.PI;
+          if (offMm < resnapMm && offDeg < resnapDeg) { snapCount = 0; return; }
+          snapCount++;
+          if (snapCount < RESNAP_FRAMES || snapSamples.length < RESNAP_FRAMES) return;
+
+          // Only trust a steady QR (same < 3 mm gate as the first lock).
+          const n = snapSamples.length;
+          const m = snapSamples.reduce((a, p) => ({ x: a.x + p.x / n, y: a.y + p.y / n, z: a.z + p.z / n }), { x: 0, y: 0, z: 0 });
+          const sd = Math.sqrt(snapSamples.reduce((a, p) => a + (p.x - m.x) ** 2 + (p.y - m.y) ** 2 + (p.z - m.z) ** 2, 0) / n);
+          if (sd >= VARIANCE_THRESHOLD) return;
+
+          easeFrom = model.matrix.clone();
+          easeStart = performance.now();
+          lockedMatrix = target;
+          lockedDeviceQuat = deviceQuaternionRef.current ? deviceQuaternionRef.current.clone() : null;
+          snapCount = 0;
+          snapSamples = [];
+          console.log(`[MindARScene] Re-snapped to the QR (${offMm.toFixed(0)} mm, ${offDeg.toFixed(1)}° off).`);
+        }
+
         function applySoftCorrection(T: any) {
           const md = markerDataRef.current;
           if (!model || !lockedMatrix || !md) return;
@@ -851,6 +931,10 @@ const MindARScene = ({
           // 0 is already stable the lock fires on its very next update.
           m.visible = false;
           m.matrixAutoUpdate = true;
+          modelLocalMatrix = null;
+          easeFrom = null;
+          snapCount = 0;
+          snapSamples = [];
           anchors[0]?.group.add(m);
           console.log(
             `[MindARScene] Model attached to live scene (anchor 0 stable frames: ${stableFrameCounts[0] ?? 0}).`
@@ -865,6 +949,8 @@ const MindARScene = ({
           if (model !== m) return;
           m.parent?.remove(m);
           model = null;
+          modelLocalMatrix = null;
+          easeFrom = null;
           anchorState = "tracking";
           lockedMatrix = null;
           lockedDeviceQuat = null;
@@ -927,11 +1013,10 @@ const MindARScene = ({
             try { emitGuidanceAndSamples(ThreeLib, camera); } catch { /* guidance is non-critical */ }
           }
 
-          // ── Locked pose → screen, every frame (Spatial only) ──
-          // Single-QR models never lock: they live in the QR's anchor group and
-          // MindAR moves them with the QR. Spatial holds the locked pose in the
-          // room by counter-rotating it with the gyro; with no gyro, it holds it
-          // as locked (soft correction may still move it).
+          // ── Locked pose → screen, every frame ──
+          // Hold the locked pose in the room by counter-rotating it with the
+          // gyro; with no gyro, hold it as locked. Corrections (single-QR
+          // re-snap, Spatial soft correction) only ever change lockedMatrix.
           if (anchorState === "locked" && model && lockedMatrix) {
             const qrInView = false;
             const devQ = deviceQuaternionRef.current;
@@ -944,6 +1029,23 @@ const MindARScene = ({
             } else {
               model.matrix.copy(lockedMatrix);
               model.matrixWorldNeedsUpdate = true;
+            }
+            // Single-QR re-snap: glide from where the model was to the new pose.
+            if (easeFrom) {
+              const t = Math.min(1, (performance.now() - easeStart) / RESNAP_EASE_MS);
+              if (t >= 1) {
+                easeFrom = null;
+              } else {
+                const k = t * t * (3 - 2 * t);
+                const T = ThreeLib;
+                const fp = new T.Vector3(), fq = new T.Quaternion(), fs = new T.Vector3();
+                const np = new T.Vector3(), nq = new T.Quaternion(), ns = new T.Vector3();
+                easeFrom.decompose(fp, fq, fs);
+                model.matrix.decompose(np, nq, ns);
+                fp.lerp(np, k); fq.slerp(nq, k); fs.lerp(ns, k);
+                model.matrix.compose(fp, fq, fs);
+                model.matrixWorldNeedsUpdate = true;
+              }
             }
           }
 

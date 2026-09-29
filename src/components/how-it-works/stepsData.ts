@@ -62,7 +62,7 @@ export const tabletopSteps: Step[] = [
       'Hit "Generate Experience" to create a QR code for your project. The pipeline generates a QR → uploads it → activates the experience in three quick steps. No marker images or .mind files are needed for tabletop mode.',
     tips: [
       "Print the QR code on heavy stock paper (200gsm+) with matte finish to reduce glare",
-      "The printed QR is the tracking marker: the model loads centred on it and stays on it while the QR is in view",
+      "The printed QR is the tracking marker: the model loads centred on it, stays put as you look around, and re-aligns whenever the QR is back in view",
       "Adjust the initial rotation in the experience settings if the model faces the wrong direction",
     ],
   },
@@ -74,7 +74,7 @@ export const tabletopSteps: Step[] = [
       "Once generated, share the unique link with your client. They scan the QR or open the link, tap 'Launch AR Camera', and point the camera at the printed QR — the scaled model appears on it. No app install needed.",
     tips: [
       "The share link works in iOS Safari and Android Chrome — no app, no WebXR needed",
-      "Clients can move around the table to view the model from all angles at the configured scale — keep the QR in view",
+      "Clients can move around the table to view the model from all angles at the configured scale",
       "You can regenerate the link anytime if you need to revoke access",
     ],
   },

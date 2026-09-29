@@ -103,7 +103,7 @@ export function measureModel(
  * Real mm, not model mm: the gap is the same whatever the project scale.
  * Override on the phone for tuning with ?lift=<mm> (tabletop) / ?gap=<mm> (wall).
  */
-export const TABLETOP_LIFT_MM = 40;
+export const TABLETOP_LIFT_MM = 20;
 export const WALL_OFFSET_MM = 20;
 
 /** The QR→model gap for a mode, honouring the ?lift= / ?gap= tuning overrides. */
