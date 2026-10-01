@@ -10,7 +10,11 @@ import type { SpatialTracker } from "./SpatialTracker";
 
 export async function loadSpatialAdapter(engine: LabEngine): Promise<SpatialTracker | null> {
   switch (engine) {
-    case "8thwall":
+    case "8thwall": {
+      // spatial-8thwall branch: 8th Wall engine binary, image targets inside SLAM.
+      const { create8thWallTracker } = await import("./adapter8thWall");
+      return create8thWallTracker();
+    }
     case "zappar":
     case "immersal":
     default:
