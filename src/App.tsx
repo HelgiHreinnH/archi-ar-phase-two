@@ -11,6 +11,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 // etc. out of its initial bundle is the biggest single win here.
 const LandingPage = lazy(() => import("./pages/LandingPage"));
 const ARViewer = lazy(() => import("./pages/ARViewer"));
+// Spatial engine bake-off (Oct 2026): hidden lab page, only active on the lab sites.
+const SpatialLab = lazy(() => import("./pages/SpatialLab"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const Auth = lazy(() => import("./pages/Auth"));
 const DashboardLayout = lazy(() => import("./components/DashboardLayout"));
@@ -45,6 +47,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/view/:shareId" element={<ARViewer />} />
+            <Route path="/lab/spatial/:shareId" element={<SpatialLab />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/auth" element={<Auth />} />
             <Route
