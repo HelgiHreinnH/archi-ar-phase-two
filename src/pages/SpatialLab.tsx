@@ -7,7 +7,9 @@
  * SurveyCollector; as soon as two markers are known the Rhino markers are
  * fitted onto them and the model appears. The fit error (mm) is shown live.
  * Lock freezes the placement — after that only the engine's world tracking
- * holds the model (Tracking principle). Export run stores the numbers in this
+ * holds the model (Tracking principle). Fit changes during the survey go
+ * through PoseBlender: < 1 cm ignored, larger ones ease in over 0.5 s. Losing
+ * tracking never hides the model; a "tracking weak" chip shows instead. Export run stores the numbers in this
  * lab's own schema (lab_<engine>.test_runs) or downloads them as JSON.
  *
  * Engine-agnostic: the engine comes from loadSpatialAdapter(LAB.engine).
@@ -19,7 +21,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { LAB, labDb } from "@/lib/lab";
 import { normalizeMarkerData, type MarkerPoint } from "@/lib/markerTypes";
 import { getMarkerLabel } from "@/lib/spatial/markerLabels";
-import { SurveyCollector, fitSurvey, type FitResult } from "@/lib/spatial/surveyFit";
+import { SurveyCollector, fitSurvey, rhinoMmToModelM, type FitResult } from "@/lib/spatial/surveyFit";
+import { PoseBlender } from "@/lib/spatial/poseBlend";
 import { loadSpatialAdapter } from "@/lib/spatial/adapters";
 import type { SpatialTracker, TrackingState } from "@/lib/spatial/SpatialTracker";
 import { applyRoomEnvironment, fetchWithProgress, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
@@ -58,6 +61,8 @@ export default function SpatialLab() {
   const timings = useRef({ mount: performance.now(), camera: 0, lock: 0 });
   const lossCount = useRef(0);
   const fpsRef = useRef<number[]>([]);
+  const blender = useRef(new PoseBlender());
+  const rendererRef = useRef<Any>(null);
 
   const [project, setProject] = useState<Project | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -66,6 +71,7 @@ export default function SpatialLab() {
   const [fit, setFit] = useState<FitResult | null>(null);
   const [counts, setCounts] = useState<Record<number, number>>({});
   const [fps, setFps] = useState(0);
+  const [drawCalls, setDrawCalls] = useState(0);
   const [modelProgress, setModelProgress] = useState(0);
   const [checkErrors, setCheckErrors] = useState<string[]>(Array(CHECK_POINTS).fill(""));
   const [driftErrors, setDriftErrors] = useState<string[]>(Array(CHECK_POINTS).fill(""));
@@ -76,6 +82,9 @@ export default function SpatialLab() {
     () => (project ? normalizeMarkerData(project.marker_data) ?? [] : []),
     [project],
   );
+  useEffect(() => {
+    blender.current.setPoints(markers.map(rhinoMmToModelM));
+  }, [markers]);
 
   // ── Load project ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -118,6 +127,7 @@ export default function SpatialLab() {
 
       const { THREE: T, scene, renderer } = await tracker.start({ canvas: canvasRef.current, markers: targets });
       timings.current.camera = performance.now();
+      rendererRef.current = renderer;
       setPhase("surveying");
 
       void applyRoomEnvironment(scene, renderer, T);
@@ -190,12 +200,8 @@ export default function SpatialLab() {
       });
       fitRef.current = f;
       setFit(f);
-      const root = modelRootRef.current;
-      if (root && f) {
-        root.matrix.fromArray(f.matrix);
-        root.matrixWorldNeedsUpdate = true;
-        root.visible = true;
-      }
+      // Corrections blend, never snap: the frame loop below writes the matrix.
+      if (f) blender.current.setTarget({ yaw: f.yaw, scale: f.scale, translation: f.translation }, performance.now());
     }, 250);
     return () => window.clearInterval(id);
   }, [phase, markers]);
@@ -208,12 +214,20 @@ export default function SpatialLab() {
       fpsRef.current.push(1000 / Math.max(1, now - last));
       if (fpsRef.current.length > 120) fpsRef.current.shift();
       last = now;
+      // Model placement: newest blended pose, no smoothing once settled.
+      const root = modelRootRef.current;
+      if (root && blender.current.hasPose()) {
+        root.matrix.fromArray(blender.current.matrix(performance.now()));
+        root.matrixWorldNeedsUpdate = true;
+        root.visible = true;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     const show = window.setInterval(() => {
       const a = fpsRef.current;
       setFps(a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0);
+      setDrawCalls(rendererRef.current?.info?.render?.calls ?? 0);
     }, 1000);
     return () => { cancelAnimationFrame(raf); window.clearInterval(show); };
   }, [phase]);
@@ -232,6 +246,7 @@ export default function SpatialLab() {
     lockedRef.current = false;
     collector.current.clear();
     timings.current.lock = 0;
+    blender.current.reset();
     if (modelRootRef.current) modelRootRef.current.visible = false;
     setFit(null);
     setPhase("surveying");
@@ -254,7 +269,7 @@ export default function SpatialLab() {
       tracking_losses: lossCount.current,
       fps_avg: fps,
       notes: notes || null,
-      raw: { engine: LAB?.engine, fit: f, estimates: collector.current.estimates() },
+      raw: { engine: LAB?.engine, fit: f, estimates: collector.current.estimates(), draw_calls: drawCalls },
     };
     try {
       const { error } = await labDb().from("test_runs").insert(row);
@@ -287,7 +302,7 @@ export default function SpatialLab() {
             <>
               <p className="max-w-sm text-sm text-white/70">
                 Walk to each marker in turn ({markers.map((m) => getMarkerLabel(m.index)).join(" → ")}) and hold the
-                camera on it until its dot turns green. Lock when the fit error is low.
+                camera on it until its letter turns green. Lock when the fit error is low.
               </p>
               <button onClick={start} className="rounded-full bg-white px-6 py-3 font-semibold text-black">
                 Start camera
@@ -303,11 +318,16 @@ export default function SpatialLab() {
           <div className="absolute inset-x-0 top-0 z-10 space-y-2 bg-gradient-to-b from-black/70 to-transparent p-3 text-xs">
             <div className="flex items-center justify-between">
               <span className="rounded-full bg-white/15 px-2 py-1">{LAB?.engine} · {tracking}</span>
-              <span className="rounded-full bg-white/15 px-2 py-1">{fps} fps</span>
+              <span className="rounded-full bg-white/15 px-2 py-1">{fps} fps · {drawCalls} draws</span>
               {modelProgress > 0 && modelProgress < 1 && (
                 <span className="rounded-full bg-white/15 px-2 py-1">model {Math.round(modelProgress * 100)}%</span>
               )}
             </div>
+            {(tracking === "limited" || tracking === "lost") && (
+              <div className="rounded-full bg-amber-500/90 px-3 py-1 text-center font-semibold text-black">
+                Tracking weak · move slowly, aim at textured surfaces
+              </div>
+            )}
             <div className="flex gap-2">
               {markers.map((m) => {
                 const n = counts[m.index] ?? 0;

@@ -162,7 +162,8 @@ export interface FitResult {
   markersUsed: number;
 }
 
-function applyFit(yaw: number, s: number, t: Vec3, p: Vec3): Vec3 {
+/** world = s · Ry(yaw) · p + t */
+export function applyFit(yaw: number, s: number, t: Vec3, p: Vec3): Vec3 {
   const c = Math.cos(yaw), n = Math.sin(yaw);
   // three.js rotation about +Y: x' = c·x + n·z, z' = −n·x + c·z
   return {
@@ -170,6 +171,17 @@ function applyFit(yaw: number, s: number, t: Vec3, p: Vec3): Vec3 {
     y: s * p.y + t.y,
     z: s * (-n * p.x + c * p.z) + t.z,
   };
+}
+
+/** Column-major 4×4 of s·Ry(yaw) then translation t (THREE.Matrix4.fromArray). */
+export function fitMatrix(yaw: number, s: number, t: Vec3): number[] {
+  const c = Math.cos(yaw), si = Math.sin(yaw);
+  return [
+    s * c, 0, -s * si, 0,
+    0, s, 0, 0,
+    s * si, 0, s * c, 0,
+    t.x, t.y, t.z, 1,
+  ];
 }
 
 /**
@@ -235,16 +247,7 @@ export function fitGravityAligned(pairs: FitPair[], opts: FitOptions = {}): FitR
     }
   }
 
-  const c = Math.cos(yaw), si = Math.sin(yaw);
-  // Columns of s·Ry(yaw), then translation.
-  const matrix = [
-    s * c, 0, -s * si, 0,
-    0, s, 0, 0,
-    s * si, 0, s * c, 0,
-    t.x, t.y, t.z, 1,
-  ];
-
-  return { yaw, scale: s, translation: t, matrix, residuals, rmsMm, pairs: pairDistances, markersUsed: n };
+  return { yaw, scale: s, translation: t, matrix: fitMatrix(yaw, s, t), residuals, rmsMm, pairs: pairDistances, markersUsed: n };
 }
 
 /**
