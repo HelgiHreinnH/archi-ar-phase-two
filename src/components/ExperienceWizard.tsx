@@ -12,6 +12,7 @@ import StepProgress from "@/components/wizard/StepProgress";
 import StepDetails, { type StepDetailsHandle } from "@/components/wizard/StepDetails";
 import StepModel from "@/components/wizard/StepModel";
 import ModelQualityCard from "@/components/wizard/ModelQualityCard";
+import PresentationConfigCard, { type PresentationConfigHandle } from "@/components/wizard/PresentationConfigCard";
 import StepMarkers from "@/components/wizard/StepMarkers";
 import StepGenerate from "@/components/wizard/StepGenerate";
 
@@ -22,7 +23,23 @@ interface ExperienceWizardProps {
   onProjectUpdate: () => void;
 }
 
-const SECTION_LABELS = ["3D Model & Details", "Markers", "Generate"];
+type SectionKey = "setup" | "model" | "markers" | "generate";
+
+const SECTION_LABELS: Record<SectionKey, string> = {
+  setup: "Scale & Quality",
+  model: "3D Model & Details",
+  markers: "Markers",
+  generate: "Generate",
+};
+
+/**
+ * Oct 2026: Tabletop/Wall start with "Scale & Quality" — presentation config +
+ * Model quality — BEFORE the upload, because the optimize choice is applied
+ * in the browser at upload time. Spatial has no presentation config, so it
+ * keeps the 3-step flow with Model quality beside Details.
+ */
+const sectionOrder = (mode: ExperienceMode): SectionKey[] =>
+  mode === "multipoint" ? ["model", "markers", "generate"] : ["setup", "model", "markers", "generate"];
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -214,12 +231,16 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     markerData.some((m) => m.x !== 0 || m.y !== 0 || m.z !== 0)
   );
 
+  const order = useMemo(() => sectionOrder(mode), [mode]);
+  const idx = useCallback((key: SectionKey) => order.indexOf(key), [order]);
+
   // Returning projects open with every section they've already completed unlocked.
   const initialUnlocked = useMemo(() => {
     const hasDetails = !!(project.client_name || project.location || project.description);
-    if (!hasDetails || !hasModel) return 0;
-    if (!hasValidMarkers) return 1;
-    return 2;
+    if (!hasDetails && !hasModel) return 0;
+    if (!hasDetails || !hasModel) return idx("model");
+    if (!hasValidMarkers) return idx("markers");
+    return idx("generate");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -232,12 +253,16 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
   const sectionEls = useRef<(HTMLElement | null)[]>([]);
   const detailsRef = useRef<StepDetailsHandle>(null);
+  const configRef = useRef<PresentationConfigHandle>(null);
 
-  const steps = useMemo(() => [
-    { label: SECTION_LABELS[0], completed: hasModel && unlocked > 0 },
-    { label: SECTION_LABELS[1], completed: hasValidMarkers && unlocked > 1 },
-    { label: SECTION_LABELS[2], completed: project.status === "active" },
-  ], [hasModel, hasValidMarkers, unlocked, project.status]);
+  const steps = useMemo(() => order.map((key, i) => ({
+    label: SECTION_LABELS[key],
+    completed:
+      key === "setup" ? unlocked > i :
+      key === "model" ? hasModel && unlocked > i :
+      key === "markers" ? hasValidMarkers && unlocked > i :
+      project.status === "active",
+  })), [order, hasModel, hasValidMarkers, unlocked, project.status]);
 
   // Scroll once the target section has rendered (it may have just unlocked).
   useEffect(() => {
@@ -274,12 +299,18 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     setPendingScroll(index);
   }, []);
 
+  const handleSetupSectionNext = useCallback(() => {
+    // Autosaving card: flush a pending edit in the background, never wait on it.
+    void configRef.current?.save().catch((err) => console.warn("[ExperienceWizard] config save failed:", err));
+    goTo(idx("model"));
+  }, [goTo, idx]);
+
   const handleModelSectionNext = useCallback(() => {
     // Details are optional and autosave: flush any pending edit in the
     // background and move on straight away, so the CTA never waits on the network.
     void detailsRef.current?.save().catch((err) => console.warn("[ExperienceWizard] details save failed:", err));
-    goTo(1);
-  }, [goTo]);
+    goTo(idx("markers"));
+  }, [goTo, idx]);
 
   const handleMarkersDetected = useCallback(async (markers: MarkerPoint[]) => {
     await supabase
@@ -309,16 +340,32 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
       </div>
       </div>
 
-      {/* 1 · 3D model (2 columns) + details (1 column) */}
+      {/* Tabletop/Wall · Scale & Quality — config (2 columns) + Model quality (1 column) */}
+      {mode !== "multipoint" && (
       <FlowSection
-        index={0}
-        title="3D Model & Details"
+        index={idx("setup")}
+        title={SECTION_LABELS.setup}
+        description={`Set how the model appears on the ${surface} and how it's prepared for phones — before you upload.`}
+        sectionRef={setSectionRef(idx("setup"))}
+        cta={<NextButton label="Continue to 3D model" onClick={handleSetupSectionNext} />}
+      >
+        <ModeBanner mode={mode} />
+        <PresentationConfigCard ref={configRef} className="flow-span-2" project={project} mode={mode} onUpdate={onProjectUpdate} />
+        <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
+      </FlowSection>
+      )}
+
+      {/* 3D model (2 columns) + details (1 column) */}
+      {unlocked >= idx("model") && (
+      <FlowSection
+        index={idx("model")}
+        title={SECTION_LABELS.model}
         description={
           mode === "wall"
             ? "Upload the model that will hang on the wall, and describe the project."
             : "Upload your model and describe the project."
         }
-        sectionRef={setSectionRef(0)}
+        sectionRef={setSectionRef(idx("model"))}
         cta={
           <NextButton
             label="Continue to markers"
@@ -327,7 +374,7 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
           />
         }
       >
-        <ModeBanner mode={mode} />
+        {mode === "multipoint" && <ModeBanner mode={mode} />}
         <Card className="flow-span-2">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -344,24 +391,25 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
           </CardContent>
         </Card>
         <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
-        <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
+        {mode === "multipoint" && <ModelQualityCard className="flow-col-3" project={project} onUpdate={onProjectUpdate} />}
       </FlowSection>
+      )}
 
-      {/* 2 · Markers — rendered once reached */}
-      {unlocked >= 1 && (
+      {/* Markers — rendered once reached */}
+      {unlocked >= idx("markers") && (
       <FlowSection
-        index={1}
-        title="Markers"
+        index={idx("markers")}
+        title={SECTION_LABELS.markers}
         description={
           mode === "multipoint"
             ? "Set where each printed marker sits in the room."
             : `Review how the QR code on the ${surface} anchors your model.`
         }
-        sectionRef={setSectionRef(1)}
+        sectionRef={setSectionRef(idx("markers"))}
         cta={
           <NextButton
             label="Continue to generate"
-            onClick={() => goTo(2)}
+            onClick={() => goTo(idx("generate"))}
             blockedReason={hasValidMarkers ? undefined : "Enter coordinates for at least 3 markers to continue"}
           />
         }
@@ -375,13 +423,13 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
       </FlowSection>
       )}
 
-      {/* 3 · Generate — rendered once reached */}
-      {unlocked >= 2 && (
+      {/* Generate — rendered once reached */}
+      {unlocked >= idx("generate") && (
       <FlowSection
-        index={2}
-        title="Generate"
+        index={idx("generate")}
+        title={SECTION_LABELS.generate}
         description="Check the list and generate your AR experience."
-        sectionRef={setSectionRef(2)}
+        sectionRef={setSectionRef(idx("generate"))}
       >
         <StepGenerate
           project={project}

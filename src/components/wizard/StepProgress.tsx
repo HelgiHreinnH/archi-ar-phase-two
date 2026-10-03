@@ -16,7 +16,7 @@ interface StepProgressProps {
 
 const StepProgress = ({ steps, currentStep, maxReachable, onStepClick }: StepProgressProps) => {
   return (
-    <nav aria-label="Upload progress" className="flex items-center justify-center w-full max-w-xl mx-auto">
+    <nav aria-label="Upload progress" className="flex items-center justify-center w-full max-w-3xl mx-auto">
       {steps.map((step, i) => {
         const isCompleted = step.completed;
         const isCurrent = i === currentStep;
