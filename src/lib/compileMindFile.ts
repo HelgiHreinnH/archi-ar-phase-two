@@ -143,29 +143,93 @@ export interface CompileResult {
   blob: Blob;
 }
 
+/** A compile that hasn't finished by now has stalled (a healthy QR compile takes ~5 s). */
+export const COMPILE_TIMEOUT_MS = 60_000;
+
+export class MindCompileError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = "MindCompileError";
+  }
+}
+
 /**
  * Compile an array of HTMLImageElements into a .mind target file.
+ *
+ * Oct 2026: MindAR's compiler can fail *inside* its own async code (e.g. no
+ * WebGL → TensorFlow falls back to CPU → "Kernel 'BinomialFilter' not
+ * registered"). That error surfaces only as an unhandled rejection and the
+ * compile promise never settles — the Generate step then spins forever.
+ * We race the compile against those global errors and a timeout so the
+ * architect always gets an answer.
+ *
  * @param images Array of marker images (HTMLImageElement)
  * @param onProgress Optional callback receiving 0-100 progress percentage
  * @returns The compiled .mind file as ArrayBuffer and Blob
  */
 export async function compileMindFile(
   images: HTMLImageElement[],
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  timeoutMs = COMPILE_TIMEOUT_MS,
 ): Promise<CompileResult> {
   await loadCompilerScript();
   await waitForCompiler();
 
   const CompilerClass = window.MINDAR!.IMAGE!.Compiler;
   const compiler = new CompilerClass();
+  const t0 = performance.now();
 
-  // compileImageTargets expects an array of Image elements
-  await compiler.compileImageTargets(images, (progress: number) => {
-    onProgress?.(Math.round(progress * 100));
+  let cleanup = () => {};
+  const failure = new Promise<never>((_, reject) => {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      reject(new MindCompileError(describeCompileFailure(e.reason), e.reason));
+    };
+    const onError = (e: ErrorEvent) => {
+      reject(new MindCompileError(describeCompileFailure(e.error ?? e.message), e.error));
+    };
+    const timer = setTimeout(() => {
+      reject(new MindCompileError(
+        document.hidden
+          ? "Compiling paused because the tab was in the background. Keep this tab open in front while generating, then try again."
+          : "Compiling the tracking target stalled. Reload the page and try again — if it keeps happening, try Chrome.",
+      ));
+    }, timeoutMs);
+    window.addEventListener("unhandledrejection", onRejection);
+    window.addEventListener("error", onError);
+    cleanup = () => {
+      clearTimeout(timer);
+      window.removeEventListener("unhandledrejection", onRejection);
+      window.removeEventListener("error", onError);
+    };
   });
 
-  const buffer = await compiler.exportData();
-  const blob = new Blob([buffer], { type: "application/octet-stream" });
+  try {
+    // MindAR reports progress as 0–100 already.
+    await Promise.race([
+      compiler.compileImageTargets(images, (progress: number) => {
+        onProgress?.(Math.min(100, Math.round(progress)));
+      }),
+      failure,
+    ]);
+    const buffer = await Promise.race([compiler.exportData(), failure]);
+    console.log(`[compileMindFile] ${images.length} target(s) in ${Math.round(performance.now() - t0)} ms`);
+    const blob = new Blob([buffer], { type: "application/octet-stream" });
+    return { buffer, blob };
+  } finally {
+    cleanup();
+    failure.catch(() => {}); // settled or not, never an unhandled rejection of our own
+  }
+}
 
-  return { buffer, blob };
+/** Plain-language reason for a compiler failure (keeps the raw error for the console). */
+export function describeCompileFailure(reason: unknown): string {
+  const raw = reason instanceof Error ? reason.message : String(reason ?? "");
+  console.error("[compileMindFile] compiler failed:", reason);
+  if (/kernel .* not registered|backend 'cpu'|webgl/i.test(raw)) {
+    return "Your browser couldn't start graphics acceleration (WebGL), which is needed to build the tracking target. Reload the page; if it persists, try Chrome or turn off Low Power Mode.";
+  }
+  if (/context lost/i.test(raw)) {
+    return "The graphics context was lost while compiling. Reload the page and try again.";
+  }
+  return `Compiling the tracking target failed${raw ? `: ${raw}` : ""}. Reload the page and try again.`;
 }
