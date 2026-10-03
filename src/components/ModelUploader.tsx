@@ -8,6 +8,13 @@ import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
 import { isGlbFile, optimizeGlbTextures, storageSafeName } from "@/lib/glbFile";
 import { thumbnailPath } from "@/lib/thumbnailPath";
 import type { MarkerPoint } from "@/lib/markerTypes";
+import {
+  describeUploadError,
+  tooLargeError,
+  UploadError,
+  STORAGE_MAX_UPLOAD_BYTES,
+  type UploadErrorInfo,
+} from "@/lib/uploadErrors";
 
 const MAX_FILE_SIZE_MB = 250;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -62,6 +69,8 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Classified server/network failure: message + repair tip + detail. */
+  const [uploadError, setUploadError] = useState<UploadErrorInfo | null>(null);
   const [oversized, setOversized] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -84,7 +93,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     }
 
     setError(null);
+    setUploadError(null);
     setOversized(false);
+    lastFileRef.current = selected;
 
     // Content check: a renamed USDZ/zip must never reach storage.
     if (!(await isGlbFile(selected))) {
@@ -148,6 +159,15 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
       console.log(`[ModelUploader] optimization off — uploading ${mb(selected.size)} MB as exported`);
     }
 
+    // Pre-check against the server's hard limit, so the architect doesn't
+    // wait for a full upload only to be rejected (Storage answers 400/413).
+    if (file.size > STORAGE_MAX_UPLOAD_BYTES) {
+      const info = tooLargeError(file.size);
+      console.warn("[ModelUploader] too large for storage:", info.detail);
+      setUploadError(info);
+      return;
+    }
+
     setIsUploading(true);
     setProgress(0);
     setUploadedBytes(0);
@@ -162,7 +182,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     try {
       // Use XMLHttpRequest for progress tracking since Supabase JS SDK v2 doesn't expose onUploadProgress
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Not authenticated");
+      if (!session) throw new UploadError(describeUploadError(401, null, file.size));
 
       const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/project-models/${filePath}`;
 
@@ -185,9 +205,12 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
 
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed with status ${xhr.status}`));
+          else reject(new UploadError(describeUploadError(xhr.status, xhr.responseText, file.size)));
         };
-        xhr.onerror = () => reject(new Error("Network error during upload"));
+        xhr.onerror = () => {
+          if (abortRef.current?.signal.aborted) reject(new Error("aborted"));
+          else reject(new UploadError(describeUploadError(0, null, file.size)));
+        };
 
         abortRef.current!.signal.addEventListener("abort", () => xhr.abort());
 
@@ -200,7 +223,14 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
         .update({ model_url: filePath })
         .eq("id", projectId);
 
-      if (dbError) throw dbError;
+      if (dbError) {
+        throw new UploadError({
+          kind: "server",
+          message: "The model uploaded, but the project couldn't be updated.",
+          tip: "Reload the page and upload again. If it keeps happening, contact support.",
+          detail: `projects.update · ${dbError.code ?? ""} ${dbError.message}`,
+        });
+      }
 
       console.log(`[ModelUploader] uploaded in ${Math.round(performance.now() - t0)} ms total`);
       toast({ title: "Model uploaded successfully" });
@@ -251,7 +281,10 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
           .catch((optErr) => console.warn("[ModelUploader] Server optimization failed:", optErr));
       }
     } catch (err: any) {
-      if (err?.message !== "Network error during upload" || !abortRef.current?.signal.aborted) {
+      if (err instanceof UploadError) {
+        console.warn("[ModelUploader] upload failed:", err.info.detail);
+        setUploadError(err.info);
+      } else if (err?.message !== "aborted") {
         setError(err?.message || "Upload failed. Please try again.");
       }
     } finally {
@@ -318,6 +351,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
           <p className="text-xs text-muted-foreground">
             GLB · Max {MAX_FILE_SIZE_MB} MB · works on iPhone & Android
           </p>
+          <p className="text-[11px] text-muted-foreground/80 mt-1 max-w-xs">
+            Must be under {Math.round(STORAGE_MAX_UPLOAD_BYTES / (1024 * 1024))} MB after optimizing
+          </p>
         </div>
       )}
 
@@ -329,6 +365,37 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
             <RefreshCw className="mr-1 h-3 w-3" />
             Retry
           </Button>
+        </div>
+      )}
+
+      {uploadError && !oversized && !isUploading && !isPreparing && (
+        <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-1.5">
+          <div className="flex items-start gap-2 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span className="font-medium">{uploadError.message}</span>
+          </div>
+          <p className="text-xs text-muted-foreground pl-6">
+            <span className="font-medium text-foreground">How to fix: </span>
+            {uploadError.tip}
+          </p>
+          <div className="flex items-center gap-2 pl-6">
+            <details className="text-[11px] text-muted-foreground/80">
+              <summary className="cursor-pointer select-none">Technical details</summary>
+              <code className="block mt-1 break-all">{uploadError.detail}</code>
+            </details>
+            <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={() => {
+              const fileFault = uploadError.kind === "too-large" || uploadError.kind === "file-type" || uploadError.kind === "bad-name";
+              setUploadError(null);
+              // Transient failures retry the same file; file problems need a new one.
+              if (!fileFault && lastFileRef.current) void handleUpload(lastFileRef.current);
+              else fileInputRef.current?.click();
+            }}>
+              <RefreshCw className="mr-1 h-3 w-3" />
+              {uploadError.kind === "too-large" || uploadError.kind === "file-type" || uploadError.kind === "bad-name"
+                ? "Choose another file"
+                : "Retry"}
+            </Button>
+          </div>
         </div>
       )}
 
