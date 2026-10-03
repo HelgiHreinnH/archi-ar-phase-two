@@ -23,11 +23,19 @@
  *     ~2 mm on a 9 m kitchen, invisible at 1:10) — 1.14 M → 271 k tris.
  *  6. meshopt compression (decodes in ms on phones, no WASM worker needed).
  *
+ * Step 0 (office test, 3 Oct 2026): Rhino exports selected curves/polylines as
+ * LINE_STRIP primitives. weld() only handles triangles and throws ("Missing
+ * support for KHR_mesh_primitive_restart"), which silently skipped the whole
+ * geometry pass — 73 MB in, 60 MB out, rejected by storage. Points and lines
+ * are dropped (markers are read from the untouched original before this runs);
+ * triangle strips/fans are converted to plain triangles.
+ *
  * Measured on Fændediget in Node: 50.3 MB → 4.4 MB, ~17 s.
  */
 import type { Document, Material, Texture, TextureInfo } from "@gltf-transform/core";
 import type { Transmission } from "@gltf-transform/extensions";
-import { dedup, flatten, instance, join, meshopt, prune, simplify, weld } from "@gltf-transform/functions";
+import { Primitive } from "@gltf-transform/core";
+import { convertPrimitiveToTriangles, dedup, flatten, instance, join, meshopt, prune, simplify, weld } from "@gltf-transform/functions";
 
 /** Relative simplification error (fraction of the mesh's bounding extent). */
 export const SIMPLIFY_ERROR = 0.0002;
@@ -141,6 +149,33 @@ export function fixMaterials(doc: Document): { glass: number; displayColour: num
   return { glass, displayColour, samplers };
 }
 
+/**
+ * Leave only TRIANGLES primitives: drop points/lines (curves, helper geometry —
+ * invisible-thin in AR and unsupported by weld/simplify) and convert triangle
+ * strips/fans. Returns how many primitives were removed / converted.
+ */
+export function triangulatePrimitives(doc: Document): { linesRemoved: number; stripsConverted: number } {
+  let linesRemoved = 0;
+  let stripsConverted = 0;
+  for (const mesh of doc.getRoot().listMeshes()) {
+    for (const prim of mesh.listPrimitives()) {
+      const mode = prim.getMode();
+      if (mode === Primitive.Mode.TRIANGLES) continue;
+      if (mode === Primitive.Mode.TRIANGLE_STRIP || mode === Primitive.Mode.TRIANGLE_FAN) {
+        convertPrimitiveToTriangles(prim);
+        stripsConverted++;
+      } else {
+        prim.dispose();
+        linesRemoved++;
+      }
+    }
+    // A curve-only mesh is now empty; dedup would merge the empties and
+    // instance() then crashes batching a mesh with no primitives.
+    if (mesh.listPrimitives().length === 0) mesh.dispose();
+  }
+  return { linesRemoved, stripsConverted };
+}
+
 export type OptimizeStage = "decode" | "materials" | "merge" | "simplify" | "compress" | "write";
 
 export interface OptimizeDeps {
@@ -156,9 +191,9 @@ export async function optimizeDocument(
   doc: Document,
   deps: OptimizeDeps,
   onStage: (s: OptimizeStage) => void = () => {},
-): Promise<{ fixes: ReturnType<typeof fixMaterials> }> {
+): Promise<{ fixes: ReturnType<typeof fixMaterials> & ReturnType<typeof triangulatePrimitives> }> {
   onStage("materials");
-  const fixes = fixMaterials(doc);
+  const fixes = { ...fixMaterials(doc), ...triangulatePrimitives(doc) };
 
   onStage("merge");
   await doc.transform(
