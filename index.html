@@ -39,13 +39,36 @@
          The actual import in MindARScene.tsx is dynamic (await import(URL)) and
          dynamic imports cannot carry an integrity attribute. Preloading here with
          integrity makes the browser verify the hash before the module is reused
-         by the later import. Recompute when bumping `mind-ar` version. -->
-    <link
-      rel="modulepreload"
-      href="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
-      integrity="sha384-V4MJvKKF+j4p5na1bzvsCAqd88oPPyGSRD/QSJM0Ad+Nkx88/3wnkr7Cx3caZmpt"
-      crossorigin="anonymous"
-    />
+         by the later import. Recompute when bumping `mind-ar` version.
+         Oct 2026: skipped on ?engine=8thwall links, where the MindAR + TF.js
+         bundle only competed with the 8th Wall engine download on 4G. -->
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search);
+        if (q.get("engine") === "8thwall") return;
+        var l = document.createElement("link");
+        l.rel = "modulepreload";
+        l.href = "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+        l.integrity = "sha384-V4MJvKKF+j4p5na1bzvsCAqd88oPPyGSRD/QSJM0Ad+Nkx88/3wnkr7Cx3caZmpt";
+        l.crossOrigin = "anonymous";
+        document.head.appendChild(l);
+      })();
+    </script>
+    <!-- AR links: open the TLS connection to Supabase (get-public-project)
+         while the app bundle is still downloading. Vite fills the env value at
+         build time; skipped if it is missing. -->
+    <script>
+      (function () {
+        if (location.pathname.indexOf("/view/") !== 0) return;
+        var u = "%VITE_SUPABASE_URL%";
+        if (!/^https:\/\//.test(u)) return;
+        var l = document.createElement("link");
+        l.rel = "preconnect";
+        l.href = u;
+        l.crossOrigin = "anonymous";
+        document.head.appendChild(l);
+      })();
+    </script>
 
   <meta property="og:title" content="Archi AR">
   <meta name="twitter:title" content="Archi AR">
@@ -55,6 +78,23 @@
 
   <body>
     <div id="root"></div>
+    <!-- AR links (/view/…): paint a dark loading shell immediately instead of
+         a white page while the bundle and the project load (4 Oct test,
+         bug 8). React replaces it on first render. -->
+    <script>
+      (function () {
+        if (location.pathname.indexOf("/view/") !== 0) return;
+        document.documentElement.style.background = "#0a0d12";
+        document.body.style.background = "#0a0d12";
+        var r = document.getElementById("root");
+        if (!r) return;
+        r.innerHTML =
+          '<div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0a0d12;color:rgba(255,255,255,.6);font:14px system-ui,-apple-system,sans-serif">' +
+          '<div style="width:32px;height:32px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#1a5ee5;animation:archi-spin .9s linear infinite"></div>' +
+          "<div>Loading AR experience\u2026</div></div>" +
+          "<style>@keyframes archi-spin{to{transform:rotate(360deg)}}</style>";
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

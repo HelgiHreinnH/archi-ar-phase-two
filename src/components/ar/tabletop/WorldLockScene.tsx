@@ -6,6 +6,7 @@ import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
 import { QrPoseFilter } from "@/lib/qrPoseFilter";
 import { applyRoomEnvironment, fetchWithProgress, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { markAR } from "@/lib/arTiming";
+import { waitForCameraGrant } from "@/lib/arLaunch";
 
 /**
  * Tabletop / wall AR on the 8th Wall engine: image target + SLAM.
@@ -335,6 +336,10 @@ const WorldLockScene = ({
           },
         ]);
 
+        // The tap already asked for the camera; let that prompt be answered
+        // before XR8 asks again.
+        await waitForCameraGrant();
+        if (cancelled || !canvasRef.current) return;
         XR8.run({ canvas: canvasRef.current });
         started = true;
       } catch (err) {

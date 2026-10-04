@@ -16,6 +16,8 @@ import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import { markAR, setARContext, logARTimingSummary, resetARSessionMarks } from "@/lib/arTiming";
 import ARTimingOverlay from "@/components/ar/shared/ARTimingOverlay";
+import QrPreCamera from "@/components/ar/qr/QrPreCamera";
+import { beginARLaunchFromTap } from "@/lib/arLaunch";
 
 // Phase 0 timing: this chunk being evaluated = the app bundle is in.
 markAR("app-start");
@@ -138,8 +140,9 @@ const ARViewer = () => {
   // artificial delay, nothing awaited before the viewer mounts. `getUserMedia`
   // needs a user gesture, so one tap is the floor; everything above that floor
   // was ours to remove.
-  const launchAR = useCallback((opts?: { fromTap?: boolean }) => {
+  const launchAR = useCallback((opts?: { fromTap?: boolean; resign?: boolean }) => {
     const fromTap = opts?.fromTap ?? true;
+    const resign = opts?.resign ?? fromTap;
     dlog("launchAR — going straight to camera", { fromTap });
     markAR("tap", fromTap ? undefined : "auto-launch");
 
@@ -149,7 +152,9 @@ const ARViewer = () => {
     // asks instead (see the pointerdown effect below).
     // Every mode holds the placed model with the gyro (tabletop/wall since
     // 29 Sep: hold and correct), so ask for motion access on the tap.
-    if (fromTap) requestMotionPermission();
+    // Tabletop/Wall ask for motion (and camera) in beginARLaunchFromTap,
+    // called by the tap handler itself — see launchFromTap.
+    if (fromTap && isMultipoint) requestMotionPermission();
 
     // Tabletop WITHOUT a compiled tracking file (legacy projects generated
     // before QR anchoring was restored): fall back to model-viewer's native
@@ -174,7 +179,7 @@ const ARViewer = () => {
     // when it lands.
     // Skipped on auto-launch: the URLs were signed moments ago (24h expiry),
     // and a re-sign would change the model URL and restart the GLB download.
-    if (!fromTap) return;
+    if (!resign) return;
     if (sessionCacheKey && typeof sessionStorage !== "undefined") {
       try { sessionStorage.removeItem(sessionCacheKey); } catch { /* ignore */ }
     }
@@ -196,11 +201,27 @@ const ARViewer = () => {
   useEffect(() => {
     if (autoLaunched.current || forceLanding) return;
     if (!project || !projectHasMindFile || viewState !== "landing") return;
+    // Oct 2026: Tabletop/Wall no longer auto-launch — they get the single tap
+    // on QrPreCamera (iOS motion access needs a gesture; without it there is
+    // no world lock / gyro hold). Spatial keeps auto-launch unchanged.
+    if (!isMultipoint) return;
     if (modelUrlError) return; // the recovery screen owns this case
     autoLaunched.current = true;
     dlog("auto-launch on load");
     launchAR({ fromTap: false });
-  }, [project, projectHasMindFile, viewState, modelUrlError, forceLanding, launchAR]);
+  }, [project, projectHasMindFile, viewState, modelUrlError, forceLanding, launchAR, isMultipoint]);
+
+  /**
+   * Every tap that opens the camera. Tabletop/Wall: motion + camera are asked
+   * synchronously here, before anything else runs (iOS user activation).
+   * The pre-camera tap skips the URL re-sign: the URLs were signed seconds
+   * ago, and re-signing would restart the model download the screen already
+   * started.
+   */
+  const launchFromTap = useCallback((opts?: { resign?: boolean }) => {
+    if (!isMultipoint) beginARLaunchFromTap();
+    launchAR({ fromTap: true, resign: opts?.resign });
+  }, [isMultipoint, launchAR]);
 
   // Ask for motion access on the first tap anywhere in the camera view, so the
   // gyro can carry the model when the QR leaves the frame. Harmless off iOS.
@@ -333,10 +354,12 @@ const ARViewer = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      // Dark, matching the static shell in index.html and the screen that
+      // follows (pre-camera / camera) — no white page before AR (bug 8).
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0d12]">
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground text-sm">Loading AR experience…</p>
+          <p className="text-white/60 text-sm">Loading AR experience…</p>
         </div>
       </div>
     );
@@ -422,13 +445,26 @@ const ARViewer = () => {
 
   const body = (() => { switch (viewState) {
     case "landing":
-      return <ARLanding project={project} onLaunchAR={() => launchAR({ fromTap: true })} />;
+      // Tabletop/Wall: the single tap screen (unless ?landing=1, or a legacy
+      // project that can only open native device AR).
+      if (!isMultipoint && !forceLanding && (projectHasMindFile || worldEngineOn)) {
+        return (
+          <QrPreCamera
+            projectName={project.name}
+            mode={project.mode}
+            scale={project.scale}
+            clientName={project.client_name}
+            onLaunch={() => launchFromTap({ resign: false })}
+          />
+        );
+      }
+      return <ARLanding project={project} onLaunchAR={() => launchFromTap()} />;
 
     case "permission-denied":
       return (
         <ARPermission
           onCancel={() => setViewState("landing")}
-          onRetry={() => launchAR({ fromTap: true })}
+          onRetry={() => launchFromTap()}
           errorMessage={arErrorMessage}
           // Tabletop can degrade to native device AR (model-viewer) if the
           // in-browser camera path fails — user-placed instead of QR-anchored,
@@ -463,7 +499,7 @@ const ARViewer = () => {
             </div>
             <div className="flex flex-col gap-2">
               <button
-                onClick={() => launchAR({ fromTap: true })}
+                onClick={() => launchFromTap()}
                 className="w-full h-11 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
               >
                 Try again
@@ -516,7 +552,7 @@ const ARViewer = () => {
           onViewAgain={() => {
             resetARSessionMarks();
             setResetKey((k) => k + 1);
-            launchAR({ fromTap: true });
+            launchFromTap();
           }}
         />
       );

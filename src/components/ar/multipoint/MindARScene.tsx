@@ -10,6 +10,7 @@ import { teardownThree, disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import { applyRoomEnvironment, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { markAR } from "@/lib/arTiming";
+import { waitForCameraGrant } from "@/lib/arLaunch";
 // Type-only import — erased at build, so it does not pull the npm three package
 // at runtime (the scene loads a self-hosted three.module.js). Used to type the
 // Fix 5/6 guidance helper without adding to the file's `any` surface.
@@ -980,6 +981,11 @@ const MindARScene = ({
           lockedDeviceQuat = null;
           anchorVisibleWhileLocked.fill(false);
         }
+
+        // Tabletop/Wall: the tap already asked for the camera — let that prompt
+        // be answered before MindAR asks again. No tap (Spatial): no wait.
+        await waitForCameraGrant();
+        if (cancelled) { teardown(); return; }
 
         // Start MindAR — camera feed goes live here, before any model exists.
         let startTimer: ReturnType<typeof setTimeout> | null = null;
