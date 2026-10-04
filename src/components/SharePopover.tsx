@@ -11,9 +11,13 @@ import QRCode from "qrcode";
 interface SharePopoverProps {
   shareUrl: string;
   projectName: string;
+  /** Controlled mode (e.g. opened from a card's ⋯ menu): no trigger button is rendered. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
+const SharePopover = ({ shareUrl, projectName, open, onOpenChange }: SharePopoverProps) => {
+  const controlled = open !== undefined;
   const [tab, setTab] = useState("share");
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -66,13 +70,15 @@ const SharePopover = ({ shareUrl, projectName }: SharePopoverProps) => {
   };
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="default" size="sm" className="w-full gap-2">
-          <Share2 className="h-3.5 w-3.5" />
-          Share Experience
-        </Button>
-      </DialogTrigger>
+    <Dialog {...(controlled ? { open, onOpenChange } : {})}>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button variant="default" size="sm" className="w-full gap-2">
+            <Share2 className="h-3.5 w-3.5" />
+            Share Experience
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-md">
         <DialogTitle className="text-base font-semibold">Share Experience</DialogTitle>
         <div className="space-y-4">

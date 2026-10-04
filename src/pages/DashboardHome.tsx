@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { usePlan } from "@/hooks/usePlan";
 import { PLAN_COPY } from "@/lib/plans";
+import ProjectCardMenu from "@/components/ProjectCardMenu";
+import { isArchived } from "@/lib/projectActions";
 
 const modeConfig = {
   tabletop: {
@@ -31,7 +33,10 @@ const modeConfig = {
 
 const DashboardHome = () => {
   const { user } = useAuth();
-  const { projects, isLoading } = useProjects();
+  const { projects: allProjects, isLoading } = useProjects();
+  // Archived experiences are tucked away on the Experiences page.
+  const projects = allProjects.filter((p) => !isArchived(p));
+  const allNames = allProjects.map((p) => p.name);
   const navigate = useNavigate();
   const { plan, quota, isLoading: planLoading } = usePlan();
 
@@ -174,15 +179,18 @@ const DashboardHome = () => {
                         </Badge>
                         <h3 className="font-display font-semibold truncate">{project.name}</h3>
                       </div>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          project.status === "active"
-                            ? "bg-marker-green/10 text-marker-green"
-                            : "bg-marker-yellow/10 text-marker-yellow"
-                        }`}
-                      >
-                        {project.status}
-                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            project.status === "active"
+                              ? "bg-marker-green/10 text-marker-green"
+                              : "bg-marker-yellow/10 text-marker-yellow"
+                          }`}
+                        >
+                          {project.status}
+                        </span>
+                        <ProjectCardMenu project={project} allNames={allNames} />
+                      </div>
                     </div>
                     {project.client_name && (
                       <p className="text-sm text-muted-foreground">{project.client_name}</p>

@@ -1,16 +1,12 @@
 import { useProjects } from "@/hooks/useProjects";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, FolderOpen, Trash2, MoreVertical, FileBox, FileQuestion, Grid3X3, MapPin } from "lucide-react";
+import { useState } from "react";
+import { Plus, FolderOpen, FileBox, FileQuestion, Grid3X3, MapPin, Archive } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { toast } from "@/hooks/use-toast";
+import ProjectCardMenu from "@/components/ProjectCardMenu";
+import { isArchived } from "@/lib/projectActions";
 
 const modeConfig = {
   tabletop: {
@@ -34,18 +30,12 @@ const modeConfig = {
 } as const;
 
 const ProjectsList = () => {
-  const { projects, isLoading, deleteProject } = useProjects();
+  const { projects: allProjects, isLoading } = useProjects();
   const navigate = useNavigate();
-
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    try {
-      await deleteProject.mutateAsync(id);
-      toast({ title: "Experience deleted" });
-    } catch {
-      toast({ title: "Error deleting experience", variant: "destructive" });
-    }
-  };
+  const [view, setView] = useState<"current" | "archived">("current");
+  const archivedCount = allProjects.filter(isArchived).length;
+  const projects = allProjects.filter((p) => (view === "archived" ? isArchived(p) : !isArchived(p)));
+  const allNames = allProjects.map((p) => p.name);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -60,6 +50,25 @@ const ProjectsList = () => {
         </Button>
       </div>
 
+      {(archivedCount > 0 || view === "archived") && (
+        <div role="tablist" aria-label="Filter experiences" className="inline-flex rounded-full border bg-muted/40 p-0.5 text-sm">
+          {([["current", "Current"], ["archived", `Archived (${archivedCount})`]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              type="button"
+              aria-selected={view === key}
+              onClick={() => setView(key)}
+              className={`rounded-full px-3 py-1 transition-colors ${
+                view === key ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
@@ -71,6 +80,13 @@ const ProjectsList = () => {
             </Card>
           ))}
         </div>
+      ) : view === "archived" && projects.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <Archive className="h-10 w-10 text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground">Nothing archived.</p>
+          </CardContent>
+        </Card>
       ) : projects.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
@@ -95,7 +111,7 @@ const ProjectsList = () => {
             return (
               <Card
                 key={project.id}
-                className={`group cursor-pointer hover:shadow-md transition-all border-l-4 ${config.borderColor}`}
+                className={`group cursor-pointer hover:shadow-md transition-all border-l-4 ${config.borderColor} ${isArchived(project) ? "opacity-70" : ""}`}
                 onClick={() => navigate(`/dashboard/experiences/${project.id}`)}
               >
                 <CardContent className="p-6">
@@ -112,29 +128,7 @@ const ProjectsList = () => {
                         <p className="text-sm text-muted-foreground truncate">{project.client_name}</p>
                       )}
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(project.id, project.name);
-                          }}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <ProjectCardMenu project={project} allNames={allNames} />
                   </div>
 
                   <div className="flex items-center justify-between mt-4">
@@ -142,6 +136,8 @@ const ProjectsList = () => {
                       className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                         project.status === "active"
                           ? "bg-marker-green/10 text-marker-green"
+                          : isArchived(project)
+                          ? "bg-muted text-muted-foreground"
                           : "bg-marker-yellow/10 text-marker-yellow"
                       }`}
                     >
