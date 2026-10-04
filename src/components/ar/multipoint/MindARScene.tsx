@@ -9,6 +9,7 @@ import {
 import { teardownThree, disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import { applyRoomEnvironment, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
+import { easeInOut, GLIDE_MS } from "@/lib/poseGlide";
 import { markAR } from "@/lib/arTiming";
 import { waitForCameraGrant } from "@/lib/arLaunch";
 import { loadMindAR } from "@/lib/mindarEngine";
@@ -181,10 +182,15 @@ const SOFT_CORRECTION_MIN_ANCHORS = 2;
  * as locked, like July, and 3 still corrects it whenever the QR is seen.
  * Tuning on the phone: ?snapmm=<mm>&snapdeg=<deg>.
  */
+// 4 Oct 2026 (Helgi: "if the model should move, make the movement smoother"):
+// the re-snap is a 900 ms smootherstep glide (poseGlide.GLIDE_MS) instead of a
+// 250 ms ease, and needs 10 steady frames (was 6) so it happens less often.
+// MindAR has no world tracking — it can't see the phone MOVE, only turn — so
+// a fully fixed model on the free engine is not possible; 8th Wall does that.
 const RESNAP_MM = 15;
 const RESNAP_DEG = 4;
-const RESNAP_FRAMES = 6;
-const RESNAP_EASE_MS = 250;
+const RESNAP_FRAMES = 10;
+const RESNAP_EASE_MS = GLIDE_MS;
 
 /**
  * The QR pose that feeds 1 and 3 is smoothed by MindAR's One-Euro filter
@@ -1059,34 +1065,37 @@ const MindARScene = ({
           // gyro; with no gyro, hold it as locked. Corrections (single-QR
           // re-snap, Spatial soft correction) only ever change lockedMatrix.
           if (anchorState === "locked" && model && lockedMatrix) {
-            const qrInView = false;
             const devQ = deviceQuaternionRef.current;
             // Motion access may be granted after the lock (first tap): start
             // compensating from the moment gyro data appears.
             if (devQ && !lockedDeviceQuat) lockedDeviceQuat = devQ.clone();
-            if (!qrInView && devQ && lockedDeviceQuat) {
-              // Bug 2 fix: snapshot so an onTargetUpdate mid-frame can't mutate it.
-              applyGyroCompensation(lockedMatrix.clone(), lockedDeviceQuat, devQ, model, ThreeLib);
-            } else {
-              model.matrix.copy(lockedMatrix);
-              model.matrixWorldNeedsUpdate = true;
-            }
-            // Single-QR re-snap: glide from where the model was to the new pose.
+            // Single-QR re-snap glide, in room space: easeFrom and lockedMatrix
+            // share the same gyro base (both captured at the snap), so the
+            // blend stays correct even if the phone turns during the glide.
+            let pose = lockedMatrix.clone();
             if (easeFrom) {
               const t = Math.min(1, (performance.now() - easeStart) / RESNAP_EASE_MS);
               if (t >= 1) {
                 easeFrom = null;
               } else {
-                const k = t * t * (3 - 2 * t);
+                const k = easeInOut(t);
                 const T = ThreeLib;
                 const fp = new T.Vector3(), fq = new T.Quaternion(), fs = new T.Vector3();
                 const np = new T.Vector3(), nq = new T.Quaternion(), ns = new T.Vector3();
                 easeFrom.decompose(fp, fq, fs);
-                model.matrix.decompose(np, nq, ns);
+                lockedMatrix.decompose(np, nq, ns);
                 fp.lerp(np, k); fq.slerp(nq, k); fs.lerp(ns, k);
-                model.matrix.compose(fp, fq, fs);
-                model.matrixWorldNeedsUpdate = true;
+                pose = new T.Matrix4().compose(fp, fq, fs);
               }
+            }
+            // Hold the pose in the room by counter-rotating it with the gyro;
+            // with no gyro, hold it as locked. Corrections (single-QR re-snap,
+            // Spatial soft correction) only ever change lockedMatrix.
+            if (devQ && lockedDeviceQuat) {
+              applyGyroCompensation(pose, lockedDeviceQuat, devQ, model, ThreeLib);
+            } else {
+              model.matrix.copy(pose);
+              model.matrixWorldNeedsUpdate = true;
             }
           }
 

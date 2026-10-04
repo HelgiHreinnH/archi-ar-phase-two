@@ -97,13 +97,15 @@ export function measureModel(
  * in the Rhino file. Tabletop: the bottom of the box sits on the QR.
  */
 /**
- * Gap between the printed QR and the model, in real millimetres (Sep 2026).
+ * Gap between the printed QR and the model, in real millimetres (Sep 2026;
+ * tabletop raised 20 → 50 mm on 4 Oct 2026).
  *  · tabletop — the bottom of the model floats this far ABOVE the QR.
  *  · wall     — the back of the model stands this far IN FRONT of the wall.
  * Real mm, not model mm: the gap is the same whatever the project scale.
  * Override on the phone for tuning with ?lift=<mm> (tabletop) / ?gap=<mm> (wall).
  */
-export const TABLETOP_LIFT_MM = 20;
+/** 50 mm (Helgi, 4 Oct 2026): the model floats clearly above the printed sheet. */
+export const TABLETOP_LIFT_MM = 50;
 export const WALL_OFFSET_MM = 20;
 
 /** The QR→model gap for a mode, honouring the ?lift= / ?gap= tuning overrides. */

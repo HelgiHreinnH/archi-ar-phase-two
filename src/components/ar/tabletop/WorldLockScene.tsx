@@ -3,7 +3,8 @@ import { placeModelOnQr, qrOffsetMm } from "@/lib/modelPlacement";
 import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
-import { QrPoseFilter, refineLockedPose, STEADY_FRAMES, STEADY_MAX_SD } from "@/lib/qrPoseFilter";
+import { QrPoseFilter, STEADY_FRAMES, STEADY_MAX_SD } from "@/lib/qrPoseFilter";
+import { glideProgress, lerpPose, type Pose } from "@/lib/poseGlide";
 import { applyRoomEnvironment, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { ModelHttpError, preloadModel, subscribeModelProgress } from "@/lib/arPreload";
 import { markAR } from "@/lib/arTiming";
@@ -26,10 +27,16 @@ import { watchCamera } from "@/lib/cameraRecovery";
  * (QrPoseFilter.isSteady: 8 readings within 3 mm, tracking NORMAL) the scene
  * locks by itself and reports onLocked — the ONLY thing that may show the
  * "placed" copy. If the readings never settle, it locks anyway after
- * LOCK_FALLBACK_MS of continuous sightings. After the lock SLAM holds the
- * model and QR sightings only refine it by a small blend (refineLockedPose),
- * never a snap. `replaceSignal` unlocks
- * ("Re-place"): the model follows the QR again and re-locks when steady.
+ * LOCK_FALLBACK_MS of continuous sightings.
+ *
+ * Hard lock (4 Oct 2026, Helgi: "it should not move at all, just lock in the
+ * position and stay there"): after the lock SLAM alone holds the model and QR
+ * sightings are IGNORED — no blending back toward the QR, no re-snapping.
+ * The one exception is when SLAM may have lost the room (tracking went
+ * LIMITED, or the camera was restarted): then the next steady QR reading
+ * re-anchors the model once, as a slow glide (poseGlide), and it is hard
+ * locked again. `replaceSignal` unlocks ("Re-place"): the model follows the
+ * QR again and re-locks when steady.
  *
  * Engine: @8thwall/engine-binary (free Distributed Engine Binary, Niantic
  * Spatial). Attribution is required by its licence — see WorldLockViewer.
@@ -59,8 +66,12 @@ const ENGINE_START_TIMEOUT_MS = 20_000;
 /** Lock anyway after this long placing with the QR in view (never stuck on "Hold steady"). */
 const LOCK_FALLBACK_MS = 2500;
 
-/** Steady readings this far off the locked pose (> 2 QR widths) in a row → re-place. */
-const FAR_READINGS_REPLACE = 15;
+/**
+ * After SLAM may have lost the room, a steady QR reading closer than this to
+ * the locked pose (fraction of a QR width: 0.07 × 150 mm ≈ 10 mm) leaves the
+ * model where it is; further than this it glides onto the QR.
+ */
+const REANCHOR_MIN_WIDTHS = 0.07;
 
 /** ?steady=<mm> tunes the lock gate on the phone (default 3 mm on the 150 mm QR). */
 function steadyGate(): number {
@@ -212,12 +223,27 @@ const WorldLockScene = ({
         let locked = false;
         let placingSince = 0;
         let trackingOk = true;
-        let farReadings = 0;
+        // Set when SLAM may have lost the room since the lock (tracking went
+        // LIMITED / camera restarted). Only then may the QR move the model.
+        let worldSuspect = false;
+        let glide: { from: Pose; to: Pose; start: number } | null = null;
+        const anchorPose = (): Pose => ({
+          position: anchor.position.clone(),
+          quaternion: anchor.quaternion.clone(),
+          width: anchor.scale.x,
+        });
+        const suspectWorld = (why: string) => {
+          if (!locked || worldSuspect) return;
+          worldSuspect = true;
+          filter.reset();
+          console.log(`[WorldLock] ${why} — will re-anchor on the next steady QR`);
+        };
         unlockRef.current = () => {
           if (!locked) return;
           locked = false;
           placingSince = 0;
-          farReadings = 0;
+          worldSuspect = false;
+          glide = null;
           filter.reset();
           console.log("[WorldLock] unlocked — re-placing on the QR");
           cb.current.onUnlocked?.();
@@ -231,32 +257,25 @@ const WorldLockScene = ({
           // Camera position: the facing check (wall model never into the wall).
           const cam = XR8.Threejs.xrScene().camera.position;
           if (locked) {
-            // SLAM holds the model. A good QR reading may only nudge it
-            // (blend, never snap) — and only while tracking is normal.
-            if (!trackingOk) return;
+            // Hard lock: SLAM holds the model; the QR is ignored...
+            if (!worldSuspect || !trackingOk || glide) return;
+            // ...unless SLAM may have lost the room. Then one steady reading
+            // re-anchors it, as a glide, and the hard lock resumes.
             const seen = filter.push({ position: detail.position, rotation: detail.rotation, width: qrWidth }, cam);
-            if (!seen) return;
-            const next = refineLockedPose(
-              T,
-              { position: anchor.position, quaternion: anchor.quaternion, width: anchor.scale.x },
-              seen,
-            );
-            if (!next) {
-              // Steadily seeing the QR far from the locked model means the
-              // world moved under it (e.g. SLAM re-initialised after the
-              // camera came back). Re-place: follow the QR and lock again.
-              farReadings = filter.isSteady(STEADY_FRAMES, steadyMaxSd) ? farReadings + 1 : 0;
-              if (farReadings >= FAR_READINGS_REPLACE) {
-                console.warn("[WorldLock] QR steadily far from the locked model — re-placing");
-                markAR("auto-replace", "8thwall");
-                unlockRef.current?.();
-              }
+            if (!seen || !filter.isSteady(STEADY_FRAMES, steadyMaxSd)) return;
+            worldSuspect = false;
+            const off = anchor.position.distanceTo(seen.position) / (anchor.scale.x || 1);
+            if (off < REANCHOR_MIN_WIDTHS) {
+              console.log("[WorldLock] room still matches the QR — model stays put");
               return;
             }
-            farReadings = 0;
-            anchor.position.copy(next.position);
-            anchor.quaternion.copy(next.quaternion);
-            anchor.scale.setScalar(next.width);
+            console.warn(`[WorldLock] re-anchoring after SLAM loss (${(off * QR_SIZE_MM).toFixed(0)} mm off)`);
+            markAR("auto-replace", "8thwall");
+            glide = {
+              from: anchorPose(),
+              to: { position: seen.position.clone(), quaternion: seen.quaternion.clone(), width: seen.width },
+              start: performance.now(),
+            };
             return;
           }
           const pose = filter.push({ position: detail.position, rotation: detail.rotation, width: qrWidth }, cam);
@@ -370,6 +389,7 @@ const WorldLockScene = ({
                     try { XR8.pause(); } catch { /* not running */ }
                     await new Promise((r) => setTimeout(r, 300));
                     XR8.resume();
+                    suspectWorld("camera restarted");
                   },
                 });
               }
@@ -402,6 +422,14 @@ const WorldLockScene = ({
             },
             // Phase 0: first frame drawn with the model on screen.
             onRender: () => {
+              if (glide && anchor) {
+                const k = glideProgress(performance.now(), glide.start);
+                const p = lerpPose(glide.from, glide.to, k);
+                anchor.position.copy(p.position);
+                anchor.quaternion.copy(p.quaternion);
+                anchor.scale.setScalar(p.width);
+                if (k >= 1) glide = null;
+              }
               if (anchor?.visible && model) markAR("model-visible", "8thwall");
             },
             onCameraStatusChange: (e: Any) => {
@@ -440,6 +468,7 @@ const WorldLockScene = ({
                 process: ({ detail }: Any) => {
                   console.log("[WorldLock] tracking", detail?.status, detail?.reason);
                   trackingOk = detail?.status !== "LIMITED";
+                  if (!trackingOk) suspectWorld(`tracking ${detail?.status} (${detail?.reason ?? ""})`);
                   cb.current.onTrackingStatus?.(detail?.status, detail?.reason);
                 },
               },
