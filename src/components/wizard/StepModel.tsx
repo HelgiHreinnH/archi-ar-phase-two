@@ -1,11 +1,12 @@
-import { lazy, Suspense, useState } from "react";
+import { Suspense, useState } from "react";
 import ModelUploader from "@/components/ModelUploader";
 import ModelPreview from "@/components/ModelPreview";
 import { AlertTriangle } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
+import { lazyWithReload } from "@/lib/staleDeploy";
 
-const ModelStill = lazy(() => import("@/components/ModelStill"));
+const ModelStill = lazyWithReload(() => import("@/components/ModelStill"));
 
 type Project = Tables<"projects">;
 

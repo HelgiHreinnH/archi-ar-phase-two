@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,9 +16,10 @@ import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { supabase } from "@/integrations/supabase/client";
 import { type MarkerPoint, getMarkerColor, normalizeMarkerData } from "@/lib/markerTypes";
+import { lazyWithReload } from "@/lib/staleDeploy";
 // Track A — lazy-load the 3D preview so the dashboard route doesn't pull in
 // model-viewer (~400KB) and three.js until ProjectOverview actually mounts.
-const ModelStill = lazy(() => import("@/components/ModelStill"));
+const ModelStill = lazyWithReload(() => import("@/components/ModelStill"));
 import SharePopover from "@/components/SharePopover";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";

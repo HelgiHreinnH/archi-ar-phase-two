@@ -8,6 +8,14 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Missing build files must 404, not fall through to index.html: a tab opened
+# before a deploy asks for old chunk names, and an HTML 200 made those imports
+# hang. With a real 404 the app's stale-deploy recovery reloads instead.
+[[redirects]]
+  from = "/assets/*"
+  to = "/assets/:splat"
+  status = 404
+
 # SPA fallback: /view/:shareId and every other route are served by the React app.
 [[redirects]]
   from = "/*"

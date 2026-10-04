@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Box, Rotate3d } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { thumbnailPath } from "@/lib/thumbnailPath";
+import { lazyWithReload } from "@/lib/staleDeploy";
 
-const ModelViewer3D = lazy(() => import("@/components/ModelViewer3D"));
+const ModelViewer3D = lazyWithReload(() => import("@/components/ModelViewer3D"));
 
 /**
  * Project image: a still render of the model, produced once at upload time.

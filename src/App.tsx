@@ -1,10 +1,11 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { lazyWithReload as lazy } from "./lib/staleDeploy";
 
 // Phase 3.1 — Route-level code-splitting. The public AR viewer at /view/:shareId
 // is the most performance-critical route — keeping dashboard, wizard, settings,
