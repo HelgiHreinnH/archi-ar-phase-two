@@ -22,7 +22,8 @@ interface ModelQualityCardProps {
  * The architect's choice, per project: run the phone-optimisation pipeline
  * (compressGlbGeometry — join/simplify/meshopt + material fixes) on upload,
  * or send the GLB exactly as exported. Tabletop/Wall: in the "Scale & Quality"
- * step, before the upload. Spatial: beside Details in step 1.
+ * step after the upload (applies to the next upload/replace). Spatial: beside
+ * Details in step 1.
  *
  * Persisted (`projects.optimize_model`, default true) rather than a session
  * toggle, so it's remembered for every future upload/replace on this project
@@ -88,7 +89,7 @@ const ModelQualityCard = ({ project, onUpdate, className }: ModelQualityCardProp
         <div className="space-y-1">
           {!!project.model_url && (
             <p className="text-[11px] text-muted-foreground">
-              Applies the next time you upload or replace the model — not retroactively.
+              Your model is already uploaded. A change here applies when you replace the model in step 1.
             </p>
           )}
           <SaveStatusLine status={status} />

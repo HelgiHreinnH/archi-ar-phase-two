@@ -33,13 +33,14 @@ const SECTION_LABELS: Record<SectionKey, string> = {
 };
 
 /**
- * Oct 2026: Tabletop/Wall start with "Scale & Quality" — presentation config +
- * Model quality — BEFORE the upload, because the optimize choice is applied
- * in the browser at upload time. Spatial has no presentation config, so it
- * keeps the 3-step flow with Model quality beside Details.
+ * Oct 2026 (Helgi): Tabletop/Wall get a "Scale & Quality" step after the
+ * model — presentation config + Model quality side by side. The optimize
+ * choice is applied at upload time (default on), so changing it here applies
+ * to the next upload/replace; the card says so. Spatial has no presentation
+ * config and keeps the 3-step flow with Model quality beside Details.
  */
 const sectionOrder = (mode: ExperienceMode): SectionKey[] =>
-  mode === "multipoint" ? ["model", "markers", "generate"] : ["setup", "model", "markers", "generate"];
+  mode === "multipoint" ? ["model", "markers", "generate"] : ["model", "setup", "markers", "generate"];
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -237,7 +238,6 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   // Returning projects open with every section they've already completed unlocked.
   const initialUnlocked = useMemo(() => {
     const hasDetails = !!(project.client_name || project.location || project.description);
-    if (!hasDetails && !hasModel) return 0;
     if (!hasDetails || !hasModel) return idx("model");
     if (!hasValidMarkers) return idx("markers");
     return idx("generate");
@@ -299,16 +299,16 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
     setPendingScroll(index);
   }, []);
 
-  const handleSetupSectionNext = useCallback(() => {
-    // Autosaving card: flush a pending edit in the background, never wait on it.
-    void configRef.current?.save().catch((err) => console.warn("[ExperienceWizard] config save failed:", err));
-    goTo(idx("model"));
-  }, [goTo, idx]);
-
   const handleModelSectionNext = useCallback(() => {
     // Details are optional and autosave: flush any pending edit in the
     // background and move on straight away, so the CTA never waits on the network.
     void detailsRef.current?.save().catch((err) => console.warn("[ExperienceWizard] details save failed:", err));
+    goTo(order[idx("model") + 1] === "setup" ? idx("setup") : idx("markers"));
+  }, [goTo, idx, order]);
+
+  const handleSetupSectionNext = useCallback(() => {
+    // Autosaving card: flush a pending edit in the background, never wait on it.
+    void configRef.current?.save().catch((err) => console.warn("[ExperienceWizard] config save failed:", err));
     goTo(idx("markers"));
   }, [goTo, idx]);
 
@@ -340,23 +340,8 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
       </div>
       </div>
 
-      {/* Tabletop/Wall · Scale & Quality — config (2 columns) + Model quality (1 column) */}
-      {mode !== "multipoint" && (
-      <FlowSection
-        index={idx("setup")}
-        title={SECTION_LABELS.setup}
-        description={`Set how the model appears on the ${surface} and how it's prepared for phones — before you upload.`}
-        sectionRef={setSectionRef(idx("setup"))}
-        cta={<NextButton label="Continue to 3D model" onClick={handleSetupSectionNext} />}
-      >
-        <ModeBanner mode={mode} />
-        <PresentationConfigCard ref={configRef} className="flow-span-2" project={project} mode={mode} onUpdate={onProjectUpdate} />
-        <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
-      </FlowSection>
-      )}
-
       {/* 3D model (2 columns) + details (1 column) */}
-      {unlocked >= idx("model") && (
+      {(
       <FlowSection
         index={idx("model")}
         title={SECTION_LABELS.model}
@@ -368,13 +353,13 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
         sectionRef={setSectionRef(idx("model"))}
         cta={
           <NextButton
-            label="Continue to markers"
+            label={mode === "multipoint" ? "Continue to markers" : "Continue to scale & quality"}
             onClick={handleModelSectionNext}
             blockedReason={hasModel ? undefined : "Upload a GLB model to continue"}
           />
         }
       >
-        {mode === "multipoint" && <ModeBanner mode={mode} />}
+        <ModeBanner mode={mode} />
         <Card className="flow-span-2">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -392,6 +377,20 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
         </Card>
         <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
         {mode === "multipoint" && <ModelQualityCard className="flow-col-3" project={project} onUpdate={onProjectUpdate} />}
+      </FlowSection>
+      )}
+
+      {/* Tabletop/Wall · Scale & Quality — config (2 columns) + Model quality (1 column) */}
+      {mode !== "multipoint" && unlocked >= idx("setup") && (
+      <FlowSection
+        index={idx("setup")}
+        title={SECTION_LABELS.setup}
+        description={`Set how the model appears on the ${surface} and how it's prepared for phones.`}
+        sectionRef={setSectionRef(idx("setup"))}
+        cta={<NextButton label="Continue to markers" onClick={handleSetupSectionNext} />}
+      >
+        <PresentationConfigCard ref={configRef} className="flow-span-2" project={project} mode={mode} onUpdate={onProjectUpdate} />
+        <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
       </FlowSection>
       )}
 
