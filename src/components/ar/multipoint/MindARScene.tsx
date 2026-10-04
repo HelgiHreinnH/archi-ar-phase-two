@@ -13,6 +13,7 @@ import { markAR } from "@/lib/arTiming";
 import { waitForCameraGrant } from "@/lib/arLaunch";
 import { loadMindAR } from "@/lib/mindarEngine";
 import { takePreloadedTrackingFile } from "@/lib/arPreload";
+import { restartVideoElementStream, watchCamera } from "@/lib/cameraRecovery";
 // Type-only import — erased at build, so it does not pull the npm three package
 // at runtime (the scene loads a self-hosted three.module.js). Used to type the
 // Fix 5/6 guidance helper without adding to the file's `any` surface.
@@ -312,6 +313,7 @@ const MindARScene = ({
     let occlusionTimers: (ReturnType<typeof setTimeout> | null)[] = [];
     let trackingBlobUrl: string | null = null;
     let videoObserver: MutationObserver | null = null;
+    let stopCameraWatch: (() => void) | null = null;
 
     const tabletop = mode === "tabletop";
     // Tabletop and wall are the same single-QR experience — one printed QR is
@@ -326,6 +328,7 @@ const MindARScene = ({
       sceneRef.current = null;
       document.getElementById("mindar-fill-style")?.remove();
       try { videoObserver?.disconnect(); } catch { /* noop */ }
+      try { stopCameraWatch?.(); } catch { /* noop */ }
       try { cleanupGyro?.(); } catch { /* noop */ }
       for (const t of occlusionTimers) if (t) clearTimeout(t);
       if (stallTimer) clearTimeout(stallTimer);
@@ -998,6 +1001,21 @@ const MindARScene = ({
         markAR("engine-ready", "mindar");
         setIsStarting(false);
         onReadyRef.current?.();
+
+        // Tabletop/Wall: bring the camera feed back after a screenshot, app
+        // switch or notification (4 Oct bug 7). MindAR keeps reading the same
+        // <video>, so tracking and the lock carry on. Spatial: unchanged.
+        if (singleQr) {
+          const container = containerRef.current;
+          stopCameraWatch = watchCamera({
+            label: "mindar",
+            getVideo: () => container?.querySelector("video") ?? null,
+            restart: async () => {
+              const v = container?.querySelector("video");
+              if (v) await restartVideoElementStream(v);
+            },
+          });
+        }
 
         // Bug 4 fix: Detection stall timeout — auto-degrade after 30s
         if (!singleQr && markerDataRef.current && maxTrack > 1) {

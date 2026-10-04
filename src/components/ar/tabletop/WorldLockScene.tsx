@@ -9,6 +9,7 @@ import { ModelHttpError, preloadModel, subscribeModelProgress } from "@/lib/arPr
 import { markAR } from "@/lib/arTiming";
 import { waitForCameraGrant } from "@/lib/arLaunch";
 import { loadXr8 } from "@/lib/xr8Engine";
+import { watchCamera } from "@/lib/cameraRecovery";
 
 /**
  * Tabletop / wall AR on the 8th Wall engine: image target + SLAM.
@@ -57,6 +58,9 @@ const ENGINE_START_TIMEOUT_MS = 20_000;
 
 /** Lock anyway after this long placing with the QR in view (never stuck on "Hold steady"). */
 const LOCK_FALLBACK_MS = 2500;
+
+/** Steady readings this far off the locked pose (> 2 QR widths) in a row → re-place. */
+const FAR_READINGS_REPLACE = 15;
 
 /** ?steady=<mm> tunes the lock gate on the phone (default 3 mm on the 150 mm QR). */
 function steadyGate(): number {
@@ -157,6 +161,8 @@ const WorldLockScene = ({
     let model: Any = null;
     let onResize: (() => void) | null = null;
     let engineStarted = false;
+    let stopCameraWatch: (() => void) | null = null;
+    let cameraVideo: HTMLVideoElement | null = null;
     let startTimer: ReturnType<typeof setTimeout> | null = null;
     const failStart = (why: string) => {
       if (cancelled || engineStarted) return;
@@ -206,10 +212,12 @@ const WorldLockScene = ({
         let locked = false;
         let placingSince = 0;
         let trackingOk = true;
+        let farReadings = 0;
         unlockRef.current = () => {
           if (!locked) return;
           locked = false;
           placingSince = 0;
+          farReadings = 0;
           filter.reset();
           console.log("[WorldLock] unlocked — re-placing on the QR");
           cb.current.onUnlocked?.();
@@ -233,7 +241,19 @@ const WorldLockScene = ({
               { position: anchor.position, quaternion: anchor.quaternion, width: anchor.scale.x },
               seen,
             );
-            if (!next) return;
+            if (!next) {
+              // Steadily seeing the QR far from the locked model means the
+              // world moved under it (e.g. SLAM re-initialised after the
+              // camera came back). Re-place: follow the QR and lock again.
+              farReadings = filter.isSteady(STEADY_FRAMES, steadyMaxSd) ? farReadings + 1 : 0;
+              if (farReadings >= FAR_READINGS_REPLACE) {
+                console.warn("[WorldLock] QR steadily far from the locked model — re-placing");
+                markAR("auto-replace", "8thwall");
+                unlockRef.current?.();
+              }
+              return;
+            }
+            farReadings = 0;
             anchor.position.copy(next.position);
             anchor.quaternion.copy(next.quaternion);
             anchor.scale.setScalar(next.width);
@@ -338,6 +358,21 @@ const WorldLockScene = ({
             onStart: () => {
               engineStarted = true;
               if (startTimer) clearTimeout(startTimer);
+              // Bring the feed back after a screenshot / app switch (4 Oct
+              // bug 7). XR8 already pauses/resumes on visibility; this covers
+              // a track that is ended or stuck muted while we're visible.
+              // pause()/resume() keeps the scene (and the model) in place.
+              if (!stopCameraWatch) {
+                stopCameraWatch = watchCamera({
+                  label: "8thwall",
+                  getVideo: () => cameraVideo,
+                  restart: async () => {
+                    try { XR8.pause(); } catch { /* not running */ }
+                    await new Promise((r) => setTimeout(r, 300));
+                    XR8.resume();
+                  },
+                });
+              }
               markAR("engine-ready", "8thwall");
               const { scene, camera, renderer } = XR8.Threejs.xrScene();
               // Environment lighting carries most of the look now; the
@@ -371,7 +406,10 @@ const WorldLockScene = ({
             },
             onCameraStatusChange: (e: Any) => {
               console.log("[WorldLock] camera status", e?.status, e?.reason ?? "", e?.permission ?? "");
-              if (e?.status === "hasVideo") markAR("camera-live", "8thwall");
+              if (e?.status === "hasVideo") {
+                markAR("camera-live", "8thwall");
+                cameraVideo = e.video ?? cameraVideo;
+              }
               if (e?.status === "failed") {
                 const why = e?.reason || e?.permission || "";
                 cb.current.onError?.(new Error(`Camera could not start${why ? ` (${why})` : ""}.`));
@@ -426,6 +464,7 @@ const WorldLockScene = ({
     return () => {
       cancelled = true;
       if (startTimer) clearTimeout(startTimer);
+      try { stopCameraWatch?.(); } catch { /* noop */ }
       requestModelRef.current = null;
       unlockRef.current = null;
       if (onResize) window.removeEventListener("resize", onResize);
