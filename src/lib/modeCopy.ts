@@ -20,3 +20,19 @@ export const MODE_COPY: Record<ExperienceMode, ModeCopy> = {
   wall: { label: "Wall", icon: LayoutPanelTop, surface: "wall" },
   multipoint: { label: "Spatial", icon: MapPin, surface: "space" },
 };
+
+/** Initial-rotation presets for Tabletop/Wall (compass on a table, degrees on a wall). */
+export const ROTATION_PRESETS = [
+  { value: 0, label: "N", icon: "↑" },
+  { value: 90, label: "E", icon: "→" },
+  { value: 180, label: "S", icon: "↓" },
+  { value: 270, label: "W", icon: "←" },
+] as const;
+
+/** "N · 0°" on a table, plain degrees on a wall — matches the rotation buttons. */
+export const rotationLabel = (deg: number | null | undefined, mode: ExperienceMode): string => {
+  const d = deg || 0;
+  if (mode === "wall") return `${d}°`;
+  const preset = ROTATION_PRESETS.find((p) => p.value === d);
+  return preset ? `${preset.label} · ${d}°` : `${d}°`;
+};

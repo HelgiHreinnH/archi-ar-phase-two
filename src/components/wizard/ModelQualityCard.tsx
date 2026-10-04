@@ -14,16 +14,16 @@ type Project = Tables<"projects">;
 interface ModelQualityCardProps {
   project: Project;
   onUpdate: () => void;
-  /** Grid placement (Spatial: `flow-col-3` beside Details; Tabletop/Wall: its own step). */
+  /** Grid placement (right-hand column of step 1, beside the upload). */
   className?: string;
 }
 
 /**
  * The architect's choice, per project: run the phone-optimisation pipeline
  * (compressGlbGeometry — join/simplify/meshopt + material fixes) on upload,
- * or send the GLB exactly as exported. Tabletop/Wall: in the "Scale & Quality"
- * step after the upload (applies to the next upload/replace). Spatial: beside
- * Details in step 1.
+ * or send the GLB exactly as exported. Oct 2026 (UI review): sits in the
+ * right-hand column of step 1, beside the upload, in every mode — so the
+ * choice is made before the file goes up.
  *
  * Persisted (`projects.optimize_model`, default true) rather than a session
  * toggle, so it's remembered for every future upload/replace on this project
@@ -89,7 +89,7 @@ const ModelQualityCard = ({ project, onUpdate, className }: ModelQualityCardProp
         <div className="space-y-1">
           {!!project.model_url && (
             <p className="text-[11px] text-muted-foreground">
-              Your model is already uploaded. A change here applies when you replace the model in step 1.
+              Your model is already uploaded. A change here applies the next time you replace it.
             </p>
           )}
           <SaveStatusLine status={status} />

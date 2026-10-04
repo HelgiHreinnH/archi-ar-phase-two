@@ -18,13 +18,13 @@ interface SettingsCardProps {
 }
 
 /**
- * Shared shell for the "Scale & Quality" step (Oct 2026): the presentation
- * config and Model quality cards sit side by side and must read as one set —
- * same header (icon · title · subtitle), same padding, equal height, and the
- * save status pinned to the bottom of both.
+ * Shared shell for the settings cards in the upload step (Oct 2026): the
+ * presentation config and Model quality cards stack in the right-hand column
+ * beside the upload and must read as one set — same header (icon · title ·
+ * subtitle), same padding, save status at the foot.
  */
 const SettingsCard = ({ icon: Icon, title, subtitle, action, footer, className = "", children }: SettingsCardProps) => (
-  <Card className={`flex h-full flex-col ${className}`}>
+  <Card className={`flex flex-col ${className}`}>
     <CardHeader className="pb-4">
       <CardTitle className="text-base flex items-center gap-2">
         <Icon className="h-4 w-4 text-primary" />

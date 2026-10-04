@@ -9,7 +9,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { preloadMindCompiler } from "@/lib/compileMindFile";
 import { MODE_COPY, toExperienceMode, type ExperienceMode } from "@/lib/modeCopy";
 import StepProgress from "@/components/wizard/StepProgress";
-import StepDetails, { type StepDetailsHandle } from "@/components/wizard/StepDetails";
 import StepModel from "@/components/wizard/StepModel";
 import ModelQualityCard from "@/components/wizard/ModelQualityCard";
 import PresentationConfigCard, { type PresentationConfigHandle } from "@/components/wizard/PresentationConfigCard";
@@ -23,24 +22,26 @@ interface ExperienceWizardProps {
   onProjectUpdate: () => void;
 }
 
-type SectionKey = "setup" | "model" | "markers" | "generate";
-
-const SECTION_LABELS: Record<SectionKey, string> = {
-  setup: "Scale & Quality",
-  model: "3D Model & Details",
-  markers: "Markers",
-  generate: "Generate",
-};
+type SectionKey = "model" | "markers" | "generate";
 
 /**
- * Oct 2026 (Helgi): Tabletop/Wall get a "Scale & Quality" step after the
- * model — presentation config + Model quality side by side. The optimize
- * choice is applied at upload time (default on), so changing it here applies
- * to the next upload/replace; the card says so. Spatial has no presentation
- * config and keeps the 3-step flow with Model quality beside Details.
+ * Oct 2026 UI review (Helgi), replacing the same-day 4-step Tabletop/Wall flow:
+ * - Step 1 is the upload plus, in the right-hand column, everything that
+ *   shapes it: presentation setup (Tabletop/Wall) and Model quality. The
+ *   optimize choice now sits beside the dropzone, before the file goes up.
+ * - Client / location / description left the wizard — they're project
+ *   details, edited from the dashboard card's ⋯ menu ("Project details…").
+ * - Tabletop/Wall: the single-QR "Markers" step only restated settings and
+ *   printing steps, so it merged into "Generate & print" → 2 steps.
+ * - Spatial keeps Markers as its own step (real coordinate work) → 3 steps.
  */
 const sectionOrder = (mode: ExperienceMode): SectionKey[] =>
-  mode === "multipoint" ? ["model", "markers", "generate"] : ["model", "setup", "markers", "generate"];
+  mode === "multipoint" ? ["model", "markers", "generate"] : ["model", "generate"];
+
+const sectionLabels = (mode: ExperienceMode): Record<SectionKey, string> =>
+  mode === "multipoint"
+    ? { model: "3D Model", markers: "Markers", generate: "Generate" }
+    : { model: "3D Model & Setup", markers: "Markers", generate: "Generate & Print" };
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -235,10 +236,11 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   const order = useMemo(() => sectionOrder(mode), [mode]);
   const idx = useCallback((key: SectionKey) => order.indexOf(key), [order]);
 
-  // Returning projects open with every section they've already completed unlocked.
+  // Returning projects open with every section they've already completed
+  // unlocked. Gated on the model (and Spatial markers) only — project details
+  // are optional and no longer part of the wizard.
   const initialUnlocked = useMemo(() => {
-    const hasDetails = !!(project.client_name || project.location || project.description);
-    if (!hasDetails || !hasModel) return idx("model");
+    if (!hasModel) return idx("model");
     if (!hasValidMarkers) return idx("markers");
     return idx("generate");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,17 +254,16 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   const [activeSection, setActiveSection] = useState(0);
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
   const sectionEls = useRef<(HTMLElement | null)[]>([]);
-  const detailsRef = useRef<StepDetailsHandle>(null);
   const configRef = useRef<PresentationConfigHandle>(null);
 
+  const labels = useMemo(() => sectionLabels(mode), [mode]);
   const steps = useMemo(() => order.map((key, i) => ({
-    label: SECTION_LABELS[key],
+    label: labels[key],
     completed:
-      key === "setup" ? unlocked > i :
       key === "model" ? hasModel && unlocked > i :
       key === "markers" ? hasValidMarkers && unlocked > i :
       project.status === "active",
-  })), [order, hasModel, hasValidMarkers, unlocked, project.status]);
+  })), [order, labels, hasModel, hasValidMarkers, unlocked, project.status]);
 
   // Scroll once the target section has rendered (it may have just unlocked).
   useEffect(() => {
@@ -300,16 +301,10 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   }, []);
 
   const handleModelSectionNext = useCallback(() => {
-    // Details are optional and autosave: flush any pending edit in the
-    // background and move on straight away, so the CTA never waits on the network.
-    void detailsRef.current?.save().catch((err) => console.warn("[ExperienceWizard] details save failed:", err));
-    goTo(order[idx("model") + 1] === "setup" ? idx("setup") : idx("markers"));
-  }, [goTo, idx, order]);
-
-  const handleSetupSectionNext = useCallback(() => {
-    // Autosaving card: flush a pending edit in the background, never wait on it.
+    // The setup card autosaves: flush a pending edit in the background and
+    // move on straight away, so the CTA never waits on the network.
     void configRef.current?.save().catch((err) => console.warn("[ExperienceWizard] config save failed:", err));
-    goTo(idx("markers"));
+    goTo(idx("model") + 1);
   }, [goTo, idx]);
 
   const handleMarkersDetected = useCallback(async (markers: MarkerPoint[]) => {
@@ -340,20 +335,20 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
       </div>
       </div>
 
-      {/* 3D model (2 columns) + details (1 column) */}
-      {(
+      {/* 3D model (2 columns) + setup column (1 column): presentation setup
+          (Tabletop/Wall) stacked above Model quality */}
       <FlowSection
         index={idx("model")}
-        title={SECTION_LABELS.model}
+        title={labels.model}
         description={
-          mode === "wall"
-            ? "Upload the model that will hang on the wall, and describe the project."
-            : "Upload your model and describe the project."
+          mode === "multipoint"
+            ? "Upload your model and choose how it's prepared for phones."
+            : `Upload your model and set how it appears on the ${surface}.`
         }
         sectionRef={setSectionRef(idx("model"))}
         cta={
           <NextButton
-            label={mode === "multipoint" ? "Continue to markers" : "Continue to scale & quality"}
+            label={mode === "multipoint" ? "Continue to markers" : "Continue to generate"}
             onClick={handleModelSectionNext}
             blockedReason={hasModel ? undefined : "Upload a GLB model to continue"}
           />
@@ -375,35 +370,20 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
             />
           </CardContent>
         </Card>
-        <StepDetails ref={detailsRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
-        {mode === "multipoint" && <ModelQualityCard className="flow-col-3" project={project} onUpdate={onProjectUpdate} />}
+        <div className="flex flex-col gap-4">
+          {mode !== "multipoint" && (
+            <PresentationConfigCard ref={configRef} project={project} mode={mode} onUpdate={onProjectUpdate} />
+          )}
+          <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
+        </div>
       </FlowSection>
-      )}
 
-      {/* Tabletop/Wall · Scale & Quality — config (2 columns) + Model quality (1 column) */}
-      {mode !== "multipoint" && unlocked >= idx("setup") && (
-      <FlowSection
-        index={idx("setup")}
-        title={SECTION_LABELS.setup}
-        description={`Set how the model appears on the ${surface} and how it's prepared for phones.`}
-        sectionRef={setSectionRef(idx("setup"))}
-        cta={<NextButton label="Continue to markers" onClick={handleSetupSectionNext} />}
-      >
-        <PresentationConfigCard ref={configRef} className="flow-span-2" project={project} mode={mode} onUpdate={onProjectUpdate} />
-        <ModelQualityCard project={project} onUpdate={onProjectUpdate} />
-      </FlowSection>
-      )}
-
-      {/* Markers — rendered once reached */}
-      {unlocked >= idx("markers") && (
+      {/* Spatial · Markers — rendered once reached */}
+      {mode === "multipoint" && unlocked >= idx("markers") && (
       <FlowSection
         index={idx("markers")}
-        title={SECTION_LABELS.markers}
-        description={
-          mode === "multipoint"
-            ? "Set where each printed marker sits in the room."
-            : `Review how the QR code on the ${surface} anchors your model.`
-        }
+        title={labels.markers}
+        description="Set where each printed marker sits in the room."
         sectionRef={setSectionRef(idx("markers"))}
         cta={
           <NextButton
@@ -426,8 +406,12 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
       {unlocked >= idx("generate") && (
       <FlowSection
         index={idx("generate")}
-        title={SECTION_LABELS.generate}
-        description="Check the list and generate your AR experience."
+        title={labels.generate}
+        description={
+          mode === "multipoint"
+            ? "Check the list and generate your AR experience."
+            : `Generate your AR experience, then print the QR code and place it on the ${surface}.`
+        }
         sectionRef={setSectionRef(idx("generate"))}
       >
         <StepGenerate

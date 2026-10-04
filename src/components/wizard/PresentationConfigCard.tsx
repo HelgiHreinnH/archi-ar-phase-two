@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHand
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Compass } from "lucide-react";
-import { MODE_COPY, type ExperienceMode } from "@/lib/modeCopy";
+import { Compass, QrCode } from "lucide-react";
+import { MODE_COPY, ROTATION_PRESETS, type ExperienceMode } from "@/lib/modeCopy";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
@@ -18,12 +18,6 @@ const SCALE_PRESETS = [
   { value: "1:200", label: "1:200", description: "Site plan / master planning" },
 ] as const;
 
-const ROTATION_PRESETS = [
-  { value: 0, label: "N", icon: "↑" },
-  { value: 90, label: "E", icon: "→" },
-  { value: 180, label: "S", icon: "↓" },
-  { value: 270, label: "W", icon: "←" },
-] as const;
 
 type Project = Tables<"projects">;
 
@@ -43,16 +37,20 @@ interface PresentationConfigCardProps {
 const AUTOSAVE_DELAY_MS = 800;
 
 /**
- * Tabletop/Wall presentation settings: scale, QR size, initial rotation.
- * Oct 2026: moved out of Details into the "Scale & Quality" step, which comes
- * BEFORE the upload (so the Model quality choice beside it applies to it).
- * Autosaves like Details.
+ * Tabletop/Wall presentation settings: scale and initial rotation.
+ * Oct 2026 (UI review): sits in the right-hand column of step 1, beside the
+ * upload, stacked above Model quality. Narrow column → single-column layout.
+ *
+ * The QR size is NOT a choice: the print sheet and the AR engine both assume
+ * a 150 × 150 mm code (generateTabletopPDF QR_PRINT_SIZE_MM, markerSizeMm).
+ * The old Small/Medium/Large picker saved `qr_size` but nothing read it, and it
+ * contradicted the "print at exactly 150 mm" instructions — so it's shown as a
+ * fixed fact instead. `projects.qr_size` is left untouched in the DB.
  */
 const PresentationConfigCard = forwardRef<PresentationConfigHandle, PresentationConfigCardProps>(
   ({ project, mode, onUpdate, className }, ref) => {
     const [form, setForm] = useState({
       scale: project.scale || "1:1",
-      qr_size: project.qr_size || "medium",
       initial_rotation: project.initial_rotation || 0,
     });
     const [status, setStatus] = useState<SaveStatus>("idle");
@@ -70,7 +68,7 @@ const PresentationConfigCard = forwardRef<PresentationConfigHandle, Presentation
       setStatus("saving");
       const { error } = await supabase
         .from("projects")
-        .update({ scale: f.scale, qr_size: f.qr_size, initial_rotation: f.initial_rotation })
+        .update({ scale: f.scale, initial_rotation: f.initial_rotation })
         .eq("id", project.id);
       if (error) {
         dirtyRef.current = true;
@@ -100,11 +98,11 @@ const PresentationConfigCard = forwardRef<PresentationConfigHandle, Presentation
       <SettingsCard
         className={className}
         icon={copy.icon}
-        title={`${copy.label} configuration`}
+        title={`${copy.label} setup`}
         subtitle={`How the model sits on the ${copy.surface} when it loads.`}
         footer={<SaveStatusLine status={status} />}
       >
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="space-y-5">
           {/* Scale */}
           <div className="space-y-2">
             <Label>Presentation scale</Label>
@@ -122,22 +120,8 @@ const PresentationConfigCard = forwardRef<PresentationConfigHandle, Presentation
             </Select>
           </div>
 
-          {/* QR Size */}
-          <div className="space-y-2">
-            <Label>QR marker size</Label>
-            <p className="text-xs text-muted-foreground">Printed size of the code</p>
-            <Select value={form.qr_size} onValueChange={(v) => update({ qr_size: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="small">Small (10 × 10 cm)</SelectItem>
-                <SelectItem value="medium">Medium (15 × 15 cm)</SelectItem>
-                <SelectItem value="large">Large (20 × 20 cm)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Rotation — compass on a table; plain degrees on a wall. */}
-          <div className="space-y-2 sm:col-span-2">
+          <div className="space-y-2">
             <Label className="flex items-center gap-1.5">
               <Compass className="h-3.5 w-3.5" />
               Initial rotation
@@ -147,7 +131,7 @@ const PresentationConfigCard = forwardRef<PresentationConfigHandle, Presentation
                 ? "Rotate the model in 90° steps for how it should sit on the wall when it loads."
                 : "Which direction should the model face when it loads?"}
             </p>
-            <div className="grid grid-cols-4 gap-2 max-w-sm">
+            <div className="grid grid-cols-4 gap-2">
               {ROTATION_PRESETS.map((preset) => (
                 <Button
                   key={preset.value}
@@ -168,6 +152,15 @@ const PresentationConfigCard = forwardRef<PresentationConfigHandle, Presentation
                 </Button>
               ))}
             </div>
+          </div>
+
+          {/* QR size — fixed, see the note above. */}
+          <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-xs">
+            <QrCode className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+            <p className="text-muted-foreground">
+              <span className="font-medium text-foreground">QR code: 150 × 150 mm.</span>{" "}
+              The print sheet is already at this size — print it at 100%.
+            </p>
           </div>
         </div>
       </SettingsCard>

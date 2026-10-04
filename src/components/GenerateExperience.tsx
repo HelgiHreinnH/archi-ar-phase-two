@@ -13,6 +13,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
+import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import QRCode from "qrcode";
 
 import {
@@ -93,11 +94,11 @@ const GenerateExperience = ({
   // ── Checklist ──
   const checks: CheckItem[] = isTabletop
     ? [
-        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB model above" },
-        { label: "Scale configured", passed: !!project.scale, hint: "Set the model scale" },
+        // Scale/rotation always have defaults, so the model is the only real gate.
+        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB model in step 1" },
       ]
     : [
-        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB model above" },
+        { label: "3D model uploaded", passed: hasModel, hint: "Upload a GLB model in step 1" },
         { label: `Marker coordinates set (${markerData?.length ?? 0} points)`, passed: hasValidMarkers, hint: "Enter coordinates for at least 3 points" },
         { label: "Spacing quality sufficient", passed: hasValidMarkers, hint: "Ensure points form a valid configuration" },
       ];
@@ -113,6 +114,27 @@ const GenerateExperience = ({
     if (shareUrl) {
       navigator.clipboard.writeText(shareUrl);
       toast({ title: "Link copied to clipboard" });
+    }
+  };
+
+  // Same sheet as the card ⋯ menu "Download QR print sheet" — prefer the
+  // stored QR image so the printed code matches the one shared with the client.
+  const [printing, setPrinting] = useState(false);
+  const downloadPrintSheet = async () => {
+    if (!shareUrl) return;
+    setPrinting(true);
+    try {
+      let storedQrUrl: string | null = null;
+      if (project.qr_code_url) {
+        const { data } = await supabase.storage.from("project-assets").createSignedUrl(project.qr_code_url, 300);
+        storedQrUrl = data?.signedUrl ?? null;
+      }
+      await downloadTabletopPrintSheet(project.name, shareUrl, mode === "wall" ? "wall" : "table", storedQrUrl);
+    } catch (err) {
+      console.error("[GenerateExperience] print sheet failed:", err);
+      toast({ title: "Print sheet download failed", variant: "destructive" });
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -300,6 +322,24 @@ const GenerateExperience = ({
               Downloads
             </h3>
 
+            {/* Tabletop / Wall: the 150 mm print sheet is the thing to print. */}
+            {isTabletop && (
+              <>
+                <Button
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={downloadPrintSheet}
+                  disabled={printing}
+                >
+                  {printing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+                  Download print sheet (PDF)
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  The sheet has the QR code at exactly 150 × 150 mm — print it at 100% (actual size).
+                </p>
+              </>
+            )}
+
             {/* QR Code Download — both modes */}
             {shareUrl && (
               <Button
@@ -309,17 +349,8 @@ const GenerateExperience = ({
                 onClick={downloadQrCode}
               >
                 <Download className="h-3 w-3" />
-                Download QR Code
+                Download QR code (PNG)
               </Button>
-            )}
-
-            {/* Tabletop / Wall: single QR code — no markers needed */}
-            {isTabletop && (
-              <p className="text-xs text-muted-foreground">
-                {mode === "wall"
-                  ? "Print the QR code at exactly 150 × 150 mm and mount it flat on the wall — the model loads anchored to it. The Print Sheet (PDF) on the overview is already at the correct size."
-                  : "Print the QR code at exactly 150 × 150 mm and lay it flat on the table — the model loads anchored to it. The Print Sheet (PDF) on the overview is already at the correct size."}
-              </p>
             )}
 
             {/* Multipoint: Marker PDFs + .mind file */}

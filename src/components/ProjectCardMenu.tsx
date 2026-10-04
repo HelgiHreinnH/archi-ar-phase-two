@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  MoreHorizontal, ExternalLink, Share2, Link2, FileText, Pencil, Copy, Archive, ArchiveRestore, Trash2, Loader2,
+  MoreHorizontal, ExternalLink, Share2, Link2, FileText, Pencil, Copy, Archive, ArchiveRestore, Trash2, Loader2, ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -32,7 +33,13 @@ interface ProjectCardMenuProps {
   allNames: ReadonlyArray<string>;
 }
 
-type OpenDialog = null | "share" | "rename" | "archive" | "delete";
+type OpenDialog = null | "share" | "rename" | "details" | "archive" | "delete";
+
+const detailsOf = (p: Project) => ({
+  client_name: p.client_name || "",
+  location: p.location || "",
+  description: p.description || "",
+});
 
 /**
  * The ⋯ menu in the top-right corner of an experience card (Dashboard and
@@ -44,6 +51,9 @@ const ProjectCardMenu = ({ project, allNames }: ProjectCardMenuProps) => {
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [busy, setBusy] = useState(false);
   const [newName, setNewName] = useState(project.name);
+  // Client / location / description — moved here from the upload wizard
+  // (Oct 2026 UI review): optional project info, added whenever it suits.
+  const [details, setDetails] = useState(() => detailsOf(project));
 
   const archived = isArchived(project);
   const live = project.status === "active" && !!project.share_link;
@@ -87,6 +97,21 @@ const ProjectCardMenu = ({ project, allNames }: ProjectCardMenuProps) => {
     await refresh();
     setDialog(null);
     toast({ title: "Renamed", description: name });
+  });
+
+  const saveDetails = () => run("Save details", async () => {
+    const { error } = await supabase
+      .from("projects")
+      .update({
+        client_name: details.client_name.trim() || null,
+        location: details.location.trim() || null,
+        description: details.description.trim() || null,
+      })
+      .eq("id", project.id);
+    if (error) throw error;
+    await refresh();
+    setDialog(null);
+    toast({ title: "Project details saved" });
   });
 
   const duplicate = () => run("Duplicate", async () => {
@@ -158,6 +183,9 @@ const ProjectCardMenu = ({ project, allNames }: ProjectCardMenuProps) => {
           <DropdownMenuItem onSelect={() => { setNewName(project.name); setDialog("rename"); }}>
             <Pencil className="mr-2 h-4 w-4" /> Rename…
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => { setDetails(detailsOf(project)); setDialog("details"); }}>
+            <ClipboardList className="mr-2 h-4 w-4" /> Project details…
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={duplicate}>
             <Copy className="mr-2 h-4 w-4" /> Duplicate
           </DropdownMenuItem>
@@ -201,6 +229,55 @@ const ProjectCardMenu = ({ project, allNames }: ProjectCardMenuProps) => {
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
               <Button type="submit" disabled={busy || !newName.trim()}>Save</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dialog === "details"} onOpenChange={(o) => setDialog(o ? "details" : null)}>
+        <DialogContent className="sm:max-w-md" onClick={stop}>
+          <DialogHeader>
+            <DialogTitle>Project details</DialogTitle>
+            <DialogDescription>Optional. Helps you find this experience later — shown on its card.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => { e.preventDefault(); void saveDetails(); }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor={`client-${project.id}`}>Client name</Label>
+              <Input
+                id={`client-${project.id}`}
+                value={details.client_name}
+                onChange={(e) => setDetails((d) => ({ ...d, client_name: e.target.value }))}
+                placeholder="Lindgren Family"
+                autoFocus
+                maxLength={120}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`location-${project.id}`}>Location</Label>
+              <Input
+                id={`location-${project.id}`}
+                value={details.location}
+                onChange={(e) => setDetails((d) => ({ ...d, location: e.target.value }))}
+                placeholder="Strandvägen 7, Stockholm"
+                maxLength={200}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`description-${project.id}`}>Description</Label>
+              <Textarea
+                id={`description-${project.id}`}
+                value={details.description}
+                onChange={(e) => setDetails((d) => ({ ...d, description: e.target.value }))}
+                placeholder="Full interior redesign of living and dining area…"
+                rows={3}
+              />
+            </div>
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button type="submit" disabled={busy}>Save</Button>
             </DialogFooter>
           </form>
         </DialogContent>
