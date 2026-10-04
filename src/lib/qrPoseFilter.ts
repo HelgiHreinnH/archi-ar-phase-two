@@ -36,6 +36,16 @@ export const POSE_ALPHA = 0.35;
 const HISTORY = 15;
 
 /**
+ * Automatic lock (Oct 2026): the QR counts as steady when the last
+ * STEADY_FRAMES accepted readings sit within STEADY_MAX_SD QR widths of each
+ * other (standard deviation of position). 0.02 × 150 mm = 3 mm — the same
+ * gate the MindAR lock uses (MindARScene VARIANCE_THRESHOLD). On 8th Wall the
+ * readings are world-space, so SLAM already removes the hand's own motion.
+ */
+export const STEADY_FRAMES = 8;
+export const STEADY_MAX_SD = 0.02;
+
+/**
  * Gravity-aligned orientation for a raw QR rotation. Returns the corrected
  * quaternion and how far (degrees) the raw reading was tilted off the plane
  * we expect, or null if the reading is degenerate.
@@ -91,7 +101,11 @@ export class QrPoseFilter {
   private position: Three = null;
   private quaternion: Three = null;
   private width = 0;
+  /** Raw accepted positions (before smoothing), newest last — for isSteady. */
+  private recent: { x: number; y: number; z: number }[] = [];
   rejected = 0;
+  /** Accepted readings since the last reset. */
+  accepted = 0;
 
   constructor(private T: Three, private mode: string) {}
 
@@ -100,6 +114,20 @@ export class QrPoseFilter {
     this.position = null;
     this.quaternion = null;
     this.width = 0;
+    this.recent = [];
+    this.accepted = 0;
+  }
+
+  /**
+   * True when the recent readings agree closely enough to lock on. `maxSd` is
+   * in QR widths (STEADY_MAX_SD = 3 mm on the 150 mm QR).
+   */
+  isSteady(frames = STEADY_FRAMES, maxSd = STEADY_MAX_SD): boolean {
+    if (this.recent.length < frames || !(this.width > 0)) return false;
+    const r = this.recent.slice(-frames);
+    const m = r.reduce((a, p) => ({ x: a.x + p.x / r.length, y: a.y + p.y / r.length, z: a.z + p.z / r.length }), { x: 0, y: 0, z: 0 });
+    const sd = Math.sqrt(r.reduce((a, p) => a + (p.x - m.x) ** 2 + (p.y - m.y) ** 2 + (p.z - m.z) ** 2, 0) / r.length);
+    return sd / this.width < maxSd;
   }
 
   /** Returns the smoothed pose after this reading, or null if it was discarded. */
@@ -121,6 +149,9 @@ export class QrPoseFilter {
     if (this.widths.length > HISTORY) this.widths.shift();
 
     const p = new T.Vector3(r.position.x, r.position.y, r.position.z);
+    this.accepted++;
+    this.recent.push({ x: p.x, y: p.y, z: p.z });
+    if (this.recent.length > HISTORY) this.recent.shift();
     if (!this.position) {
       this.position = p;
       this.quaternion = aligned.quaternion;

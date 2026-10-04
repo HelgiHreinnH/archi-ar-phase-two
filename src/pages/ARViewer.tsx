@@ -17,6 +17,7 @@ import { ModelLoadError } from "@/lib/modelLoadError";
 import { markAR, setARContext, logARTimingSummary, resetARSessionMarks } from "@/lib/arTiming";
 import ARTimingOverlay from "@/components/ar/shared/ARTimingOverlay";
 import QrPreCamera from "@/components/ar/qr/QrPreCamera";
+import MindARQrViewer from "@/components/ar/qr/MindARQrViewer";
 import { beginARLaunchFromTap } from "@/lib/arLaunch";
 import { modelCacheKeyFor, preloadQrExperience, subscribeModelProgress } from "@/lib/arPreload";
 import { QR_SIZE_MM } from "@/components/ar/tabletop/WorldLockScene";
@@ -288,15 +289,13 @@ const ARViewer = () => {
     preloadQrExperience({
       engine: preloadEngine,
       shareId,
-      // The MindAR viewer that consumes a preloaded GLB lands in the next
-      // step; until then only the 8th Wall path takes the model from here.
-      modelUrl: preloadEngine === "8thwall" ? preloadModelUrl : null,
+      modelUrl: preloadModelUrl,
       modelCacheKey: modelCacheKeyFor(shareId, project.updated_at),
       qrCodeUrl: project.qr_code_url ?? null,
       mindFileUrl: project.mind_file_url ?? null,
       qrSizeMm: QR_SIZE_MM,
     });
-    if (preloadEngine !== "8thwall" || !preloadModelUrl) return;
+    if (!preloadModelUrl) return;
     return subscribeModelProgress(preloadModelUrl, setPreloadProgress);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id, isMultipoint, shareId, viewState, preloadEngine, preloadModelUrl]);
@@ -598,8 +597,26 @@ const ARViewer = () => {
             onModelError={(err) => handleARError(err)}
             onEngineError={(err) => {
               console.warn("[ARViewer] 8th Wall unavailable, falling back to MindAR:", err);
+              setARContext("fallback", "8thwall→mindar");
               setWorldEngineOn(false);
             }}
+          />
+        );
+      }
+      // Tabletop/Wall on MindAR (free-tier default): same status voice and
+      // chrome as the 8th Wall viewer. Spatial stays on MultipointViewer.
+      if (!isMultipoint) {
+        return (
+          <MindARQrViewer
+            key={`qr-${resetKey}`}
+            project={project}
+            shareId={shareId ?? ""}
+            imageTargetSrc={imageTargetSrc}
+            modelUrl={publicModelUrl}
+            modelScale={scaleNum}
+            initialRotation={project.initial_rotation || 0}
+            onClose={() => setViewState("ended")}
+            onError={(err) => handleARError(err)}
           />
         );
       }

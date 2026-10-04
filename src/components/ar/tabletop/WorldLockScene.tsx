@@ -3,7 +3,7 @@ import { placeModelOnQr, qrOffsetMm } from "@/lib/modelPlacement";
 import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
-import { QrPoseFilter } from "@/lib/qrPoseFilter";
+import { QrPoseFilter, STEADY_FRAMES, STEADY_MAX_SD } from "@/lib/qrPoseFilter";
 import { applyRoomEnvironment, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { ModelHttpError, preloadModel, subscribeModelProgress } from "@/lib/arPreload";
 import { markAR } from "@/lib/arTiming";
@@ -20,9 +20,13 @@ import { loadXr8 } from "@/lib/xr8Engine";
  * QR's world pose; after that the SLAM camera moves and the model stays where
  * it is in the room — walk around it, look away, come back.
  *
- * `locked`: while false the model keeps following fresh QR sightings (so the
- * first placement can settle); when true, QR updates are ignored and the model
- * is fixed in the room.
+ * Lock (Oct 2026, automatic): while unlocked the model follows fresh QR
+ * sightings (placing). Once the model is in and the QR readings are steady
+ * (QrPoseFilter.isSteady: 8 readings within 3 mm, tracking NORMAL) the scene
+ * locks by itself and reports onLocked — the ONLY thing that may show the
+ * "placed" copy. If the readings never settle, it locks anyway after
+ * LOCK_FALLBACK_MS of continuous sightings. `replaceSignal` unlocks
+ * ("Re-place"): the model follows the QR again and re-locks when steady.
  *
  * Engine: @8thwall/engine-binary (free Distributed Engine Binary, Niantic
  * Spatial). Attribution is required by its licence — see WorldLockViewer.
@@ -40,6 +44,24 @@ const GLB_MAGIC = 0x46546c67;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
+
+/**
+ * If the engine hasn't reached onStart this long after XR8.run, give up and
+ * let the viewer fall back to MindAR (e.g. a device 8th Wall can't run SLAM
+ * on: it throws "No valid session manager" and never starts — the viewer sat
+ * on "Starting…" forever).
+ */
+const ENGINE_START_TIMEOUT_MS = 20_000;
+
+/** Lock anyway after this long placing with the QR in view (never stuck on "Hold steady"). */
+const LOCK_FALLBACK_MS = 2500;
+
+/** ?steady=<mm> tunes the lock gate on the phone (default 3 mm on the 150 mm QR). */
+function steadyGate(): number {
+  const raw = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("steady") : null;
+  const mm = raw ? Number(raw) : NaN;
+  return Number.isFinite(mm) && mm > 0 && mm < 100 ? mm / QR_SIZE_MM : STEADY_MAX_SD;
+}
 
 /** Restyle 8th Wall's own motion-permission prompt to match Archi AR. */
 function injectPromptStyle() {
@@ -63,8 +85,14 @@ interface WorldLockSceneProps {
   mode: string;
   modelScale: number;
   initialRotation?: number;
-  locked: boolean;
+  /** Bump to unlock and re-place: follow the QR again, re-lock when steady. */
+  replaceSignal?: number;
+  /** The engine fixed the model in the room (steady QR → lock). */
+  onLocked?: () => void;
+  onUnlocked?: () => void;
   onReady?: () => void;
+  /** The QR image target is loaded and the engine is scanning for it. */
+  onScanning?: () => void;
   onTargetFound?: () => void;
   onTargetLost?: () => void;
   /** First time the model is placed on the QR. */
@@ -83,8 +111,11 @@ const WorldLockScene = ({
   mode,
   modelScale,
   initialRotation = 0,
-  locked,
+  replaceSignal = 0,
+  onLocked,
+  onUnlocked,
   onReady,
+  onScanning,
   onTargetFound,
   onTargetLost,
   onPlaced,
@@ -94,15 +125,16 @@ const WorldLockScene = ({
   onError,
 }: WorldLockSceneProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lockedRef = useRef(locked);
-  const cb = useRef({ onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError });
+  const cb = useRef({ onReady, onScanning, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError, onLocked, onUnlocked });
   useEffect(() => {
-    lockedRef.current = locked;
-    if (locked) markAR("model-locked", "8thwall");
-  }, [locked]);
+    cb.current = { onReady, onScanning, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError, onLocked, onUnlocked };
+  }, [onReady, onScanning, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError, onLocked, onUnlocked]);
+
+  // Set by the engine effect: drop the lock and follow the QR again.
+  const unlockRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    cb.current = { onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError };
-  }, [onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError]);
+    if (replaceSignal) unlockRef.current?.();
+  }, [replaceSignal]);
 
   // Latest model URL without restarting the engine when it is re-signed.
   const modelUrlRef = useRef(modelUrl);
@@ -122,6 +154,14 @@ const WorldLockScene = ({
     let started = false;
     let model: Any = null;
     let onResize: (() => void) | null = null;
+    let engineStarted = false;
+    let startTimer: ReturnType<typeof setTimeout> | null = null;
+    const failStart = (why: string) => {
+      if (cancelled || engineStarted) return;
+      engineStarted = true; // report once
+      if (startTimer) clearTimeout(startTimer);
+      cb.current.onError?.(new Error(why));
+    };
     const moduleName = "archi-world-lock";
 
     (async () => {
@@ -160,8 +200,20 @@ const WorldLockScene = ({
 
         // Gravity-aligned, outlier-rejecting, smoothed QR pose (qrPoseFilter).
         const filter = new QrPoseFilter(T, mode);
+        const steadyMaxSd = steadyGate();
+        let locked = false;
+        let placingSince = 0;
+        let trackingOk = true;
+        unlockRef.current = () => {
+          if (!locked) return;
+          locked = false;
+          placingSince = 0;
+          filter.reset();
+          console.log("[WorldLock] unlocked — re-placing on the QR");
+          cb.current.onUnlocked?.();
+        };
         const setPose = (detail: Any) => {
-          if (!anchor || lockedRef.current) return;
+          if (!anchor || locked) return;
           // 1 local unit = the QR's width in the scene. For a 3:4 portrait
           // target, scale = its height and scaledWidth = 0.75, so
           // scaledWidth × scale = the printed QR width (it fills the width).
@@ -175,6 +227,19 @@ const WorldLockScene = ({
           if (!placed && model) {
             placed = true;
             cb.current.onPlaced?.();
+          }
+          // Automatic lock: model in, readings steady, SLAM tracking normal.
+          if (model) {
+            const t = performance.now();
+            if (!placingSince) placingSince = t;
+            const steady = trackingOk && filter.isSteady(STEADY_FRAMES, steadyMaxSd);
+            const fallback = t - placingSince > LOCK_FALLBACK_MS && filter.accepted >= STEADY_FRAMES * 2;
+            if (steady || fallback) {
+              locked = true;
+              markAR("model-locked", steady ? "8thwall steady" : "8thwall fallback");
+              console.log(`[WorldLock] locked (${steady ? "steady" : "fallback"}) after ${filter.accepted} readings, ${filter.rejected} rejected`);
+              cb.current.onLocked?.();
+            }
           }
           if (model && !sizeLogged) {
             sizeLogged = true;
@@ -250,6 +315,8 @@ const WorldLockScene = ({
             onAttach: ({ orientation }: Any) => sizeCanvas(orientation),
             onDeviceOrientationChange: ({ orientation }: Any) => sizeCanvas(orientation),
             onStart: () => {
+              engineStarted = true;
+              if (startTimer) clearTimeout(startTimer);
               markAR("engine-ready", "8thwall");
               const { scene, camera, renderer } = XR8.Threejs.xrScene();
               // Environment lighting carries most of the look now; the
@@ -291,12 +358,15 @@ const WorldLockScene = ({
             },
             onException: (e: Any) => {
               console.error("[WorldLock] engine exception", e);
+              // Before onStart an exception means the engine can't run here.
+              failStart(`The AR engine could not start (${e?.message ?? e}).`);
             },
             listeners: [
               { event: "reality.imageloading", process: () => console.log("[WorldLock] QR target loading") },
               { event: "reality.imagescanning", process: () => {
                 console.log("[WorldLock] QR target ready — scanning");
                 markAR("target-ready", "8thwall");
+                cb.current.onScanning?.();
               } },
               { event: "reality.imagefound", process: ({ detail }: Any) => {
                 console.log("[WorldLock] QR found", JSON.stringify({ p: detail.position, s: detail.scale, w: detail.scaledWidth }));
@@ -310,6 +380,7 @@ const WorldLockScene = ({
                 event: "reality.trackingstatus",
                 process: ({ detail }: Any) => {
                   console.log("[WorldLock] tracking", detail?.status, detail?.reason);
+                  trackingOk = detail?.status !== "LIMITED";
                   cb.current.onTrackingStatus?.(detail?.status, detail?.reason);
                 },
               },
@@ -323,6 +394,7 @@ const WorldLockScene = ({
         if (cancelled || !canvasRef.current) return;
         XR8.run({ canvas: canvasRef.current });
         started = true;
+        startTimer = setTimeout(() => failStart("The AR engine did not start in time."), ENGINE_START_TIMEOUT_MS);
       } catch (err) {
         if (cancelled) return;
         console.error("[WorldLock] init error", err);
@@ -332,7 +404,9 @@ const WorldLockScene = ({
 
     return () => {
       cancelled = true;
+      if (startTimer) clearTimeout(startTimer);
       requestModelRef.current = null;
+      unlockRef.current = null;
       if (onResize) window.removeEventListener("resize", onResize);
       if (XR8 && started) {
         try { XR8.stop(); } catch { /* noop */ }

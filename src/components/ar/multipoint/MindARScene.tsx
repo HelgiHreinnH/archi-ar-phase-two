@@ -67,6 +67,16 @@ interface MindARSceneProps {
    * observed inter-marker distances against the Rhino coordinate definitions.
    */
   onAnchorSample?: (samples: AnchorSample[]) => void;
+  /**
+   * Tabletop/Wall (Oct 2026): the lock fired — the model is now visible at
+   * its fixed pose. The ONLY event that may show "placed" copy. Spatial
+   * doesn't pass it.
+   */
+  onLocked?: () => void;
+  /** Tabletop/Wall: the model is parsed and on the QR anchor, with its displayed size. */
+  onModelPlaced?: (info: { displayedSizeM?: { width: number; depth: number; height: number } }) => void;
+  /** Tabletop/Wall "Re-place": bump to drop the lock and lock again on the QR. */
+  replaceSignal?: number;
 }
 
 /** A single directional hint toward an undetected marker (Fix 5). */
@@ -227,6 +237,8 @@ interface SceneHandle {
   ThreeLib: any;
   attachModel: (model: any) => void;
   detachModel: (model: any) => void;
+  /** Back to tracking with the current model (Tabletop/Wall "Re-place"). */
+  replace: () => void;
 }
 
 const MindARScene = ({
@@ -245,6 +257,9 @@ const MindARScene = ({
   awaitPrefetch = false,
   onScanGuidance,
   onAnchorSample,
+  onLocked,
+  onModelPlaced,
+  replaceSignal = 0,
 }: MindARSceneProps) => {
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -262,6 +277,8 @@ const MindARScene = ({
   const onErrorRef = useRef(onError);
   const onScanGuidanceRef = useRef(onScanGuidance);
   const onAnchorSampleRef = useRef(onAnchorSample);
+  const onLockedRef = useRef(onLocked);
+  const onModelPlacedRef = useRef(onModelPlaced);
   // Data the long-lived scene reads at call time. Held in refs so a new array
   // identity (ARViewer re-derives markerData on every render) or a re-signed
   // model URL never tears down the camera.
@@ -275,6 +292,8 @@ const MindARScene = ({
     onErrorRef.current = onError;
     onScanGuidanceRef.current = onScanGuidance;
     onAnchorSampleRef.current = onAnchorSample;
+    onLockedRef.current = onLocked;
+    onModelPlacedRef.current = onModelPlaced;
     markerDataRef.current = markerData;
     modelUrlRef.current = modelUrl;
   }, [onTargetFound, onTargetLost, onReady, onError, onScanGuidance, onAnchorSample, markerData, modelUrl]);
@@ -650,6 +669,7 @@ const MindARScene = ({
           model.visible = true;
           anchorState = "locked";
           markAR("model-locked", "mindar");
+          onLockedRef.current?.();
 
           console.log(
             "[MindARScene] Model locked.",
@@ -1057,7 +1077,15 @@ const MindARScene = ({
         });
 
         // Publish the live scene so Effect B can hand over the model.
-        sceneRef.current = { ThreeLib, renderer, attachModel, detachModel };
+        sceneRef.current = {
+          ThreeLib,
+          renderer,
+          attachModel,
+          detachModel,
+          // Re-attaching the same model resets it to tracking (hidden on the
+          // QR anchor); the lock fires again on the next steady readings.
+          replace: () => { if (model) attachModel(model); },
+        };
         setSceneEpoch((e) => e + 1);
       } catch (err) {
         if (cancelled) return;
@@ -1072,6 +1100,11 @@ const MindARScene = ({
       teardown();
     };
   }, [imageTargetSrc, maxTrack, mode]);
+
+  // Tabletop/Wall "Re-place" (Spatial never bumps it).
+  useEffect(() => {
+    if (replaceSignal) sceneRef.current?.replace();
+  }, [replaceSignal]);
 
   // ════════════════════════════════════════════════════════════════════
   // Effect B — load the GLB and attach it to anchor 0 of the live scene.
@@ -1146,6 +1179,7 @@ const MindARScene = ({
             markerSizeMm: MARKER_SIZE_MM,
             offsetMm: qrOffsetMm(mode),
           });
+          onModelPlacedRef.current?.({ displayedSizeM: placement.displayedSizeM });
           console.log(
             `[MindARScene] Model ${placement.realSizeM.toFixed(2)} m ` +
             `(${placement.unitMm === 1000 ? "metres" : "millimetres"} in file), scale 1:${modelScale}, ` +

@@ -66,4 +66,20 @@ describe("QrPoseFilter", () => {
     expect(out.position.x).toBeGreaterThan(0);
     expect(out.position.x).toBeLessThan(1);
   });
+
+  it("is steady only after enough readings that agree within 3 mm (QR widths)", () => {
+    const f = new QrPoseFilter(T, "tabletop");
+    // QR 0.15 units wide: 3 mm ≈ 0.02 widths ≈ 0.003 units.
+    for (let i = 0; i < 7; i++) f.push(read(0, 0, 0.15, i % 2 ? 0.0005 : -0.0005));
+    expect(f.isSteady()).toBe(false); // only 7 readings
+    f.push(read(0, 0, 0.15, 0.0005));
+    expect(f.isSteady()).toBe(true);
+    // A hand still moving: readings 1 cm apart.
+    const g = new QrPoseFilter(T, "tabletop");
+    for (let i = 0; i < 10; i++) g.push(read(0, 0, 0.15, i * 0.01));
+    expect(g.isSteady()).toBe(false);
+    g.reset();
+    expect(g.isSteady()).toBe(false);
+    expect(g.accepted).toBe(0);
+  });
 });

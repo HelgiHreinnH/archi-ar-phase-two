@@ -16,7 +16,9 @@ const ARTimingOverlay = () => {
   return (
     <div
       className="pointer-events-none fixed left-2 z-[60] max-w-[62vw] rounded-md bg-black/70 px-2 py-1.5 font-mono text-[9px] leading-[1.35] text-white/90"
-      style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 72px)" }}
+      // Top-left under the status card: clear of the launch button, the
+      // re-place/screenshot controls and the scale readout.
+      style={{ top: "calc(env(safe-area-inset-top, 0px) + 112px)" }}
       aria-hidden="true"
     >
       <div className="text-white/60">

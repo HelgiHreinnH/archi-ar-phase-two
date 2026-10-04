@@ -25,6 +25,12 @@ interface LaunchRingProps {
   /** Heading + body for B2, already mode-aware (QR surface vs. Spatial markers). */
   aimTitle: string;
   aimBody: string;
+  /**
+   * Optional copy override for every state (Tabletop/Wall single status
+   * voice, qrLaunchStatus). Spatial passes neither and keeps its copy.
+   */
+  title?: string;
+  body?: string;
 }
 
 const PRIMARY = "hsl(var(--primary))";
@@ -79,7 +85,7 @@ function Brackets() {
   );
 }
 
-const LaunchRing = ({ state, progress, cameraReady, aimTitle, aimBody }: LaunchRingProps) => {
+const LaunchRing = ({ state, progress, cameraReady, aimTitle, aimBody, title: titleOverride, body: bodyOverride }: LaunchRingProps) => {
   const pctLabel = progress != null ? `${Math.round(progress)}%` : "…";
 
   let title: string;
@@ -94,6 +100,8 @@ const LaunchRing = ({ state, progress, cameraReady, aimTitle, aimBody }: LaunchR
     title = aimTitle;
     body = aimBody;
   }
+  if (titleOverride != null) title = titleOverride;
+  if (bodyOverride != null) body = bodyOverride;
 
   return (
     <div
