@@ -5,6 +5,7 @@ import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
 import { QrPoseFilter } from "@/lib/qrPoseFilter";
 import { applyRoomEnvironment, fetchWithProgress, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
+import { markAR } from "@/lib/arTiming";
 
 /**
  * Tabletop / wall AR on the 8th Wall engine: image target + SLAM.
@@ -122,7 +123,10 @@ const WorldLockScene = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lockedRef = useRef(locked);
   const cb = useRef({ onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError });
-  useEffect(() => { lockedRef.current = locked; }, [locked]);
+  useEffect(() => {
+    lockedRef.current = locked;
+    if (locked) markAR("model-locked", "8thwall");
+  }, [locked]);
   useEffect(() => {
     cb.current = { onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError };
   }, [onReady, onTargetFound, onTargetLost, onPlaced, onModelLoaded, onModelProgress, onTrackingStatus, onError]);
@@ -154,6 +158,7 @@ const WorldLockScene = ({
         // "three" import (import map), so geometry types match.
         (window as Any).THREE = T;
         XR8 = await loadXr8();
+        markAR("engine-script", "8thwall");
         if (cancelled || !canvasRef.current) return;
 
         const sizeCanvas = (orientation?: number) => {
@@ -220,6 +225,7 @@ const WorldLockScene = ({
           loader.setMeshoptDecoder(MeshoptDecoder);
 
           const res = await fetchWithProgress(url, (f) => cb.current.onModelProgress?.(f));
+          markAR("glb-downloaded");
           if (!res.ok) throw new ModelLoadError(`The 3D model could not be downloaded (HTTP ${res.status}).`);
           const buf = res.buffer;
           if (buf.byteLength < 4 || new DataView(buf).getUint32(0, true) !== GLB_MAGIC) {
@@ -240,6 +246,7 @@ const WorldLockScene = ({
           console.log(`[WorldLock] model ${placement.realSizeM.toFixed(2)} m, 1:${modelScale}`);
           freezeModelMatrices(model);
           anchor.add(model);
+          markAR("model-parsed", "8thwall");
           cb.current.onModelLoaded?.({ displayedSizeM: placement.displayedSizeM });
           // If the QR was already seen before the model arrived, it's placed now.
           if (anchor.visible && !placed) { placed = true; cb.current.onPlaced?.(); }
@@ -261,6 +268,7 @@ const WorldLockScene = ({
             onAttach: ({ orientation }: Any) => sizeCanvas(orientation),
             onDeviceOrientationChange: ({ orientation }: Any) => sizeCanvas(orientation),
             onStart: () => {
+              markAR("engine-ready", "8thwall");
               const { scene, camera, renderer } = XR8.Threejs.xrScene();
               // Environment lighting carries most of the look now; the
               // ambient is only a floor for unlit corners.
@@ -287,8 +295,13 @@ const WorldLockScene = ({
               };
               requestModelRef.current();
             },
+            // Phase 0: first frame drawn with the model on screen.
+            onRender: () => {
+              if (anchor?.visible && model) markAR("model-visible", "8thwall");
+            },
             onCameraStatusChange: (e: Any) => {
               console.log("[WorldLock] camera status", e?.status, e?.reason ?? "", e?.permission ?? "");
+              if (e?.status === "hasVideo") markAR("camera-live", "8thwall");
               if (e?.status === "failed") {
                 const why = e?.reason || e?.permission || "";
                 cb.current.onError?.(new Error(`Camera could not start${why ? ` (${why})` : ""}.`));
@@ -299,9 +312,13 @@ const WorldLockScene = ({
             },
             listeners: [
               { event: "reality.imageloading", process: () => console.log("[WorldLock] QR target loading") },
-              { event: "reality.imagescanning", process: () => console.log("[WorldLock] QR target ready — scanning") },
+              { event: "reality.imagescanning", process: () => {
+                console.log("[WorldLock] QR target ready — scanning");
+                markAR("target-ready", "8thwall");
+              } },
               { event: "reality.imagefound", process: ({ detail }: Any) => {
                 console.log("[WorldLock] QR found", JSON.stringify({ p: detail.position, s: detail.scale, w: detail.scaledWidth }));
+                markAR("qr-seen", "8thwall");
                 setPose(detail); cb.current.onTargetFound?.();
               } },
               { event: "reality.imageupdated", process: ({ detail }: Any) => setPose(detail) },

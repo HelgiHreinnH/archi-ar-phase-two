@@ -9,6 +9,7 @@ import {
 import { teardownThree, disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import { applyRoomEnvironment, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
+import { markAR } from "@/lib/arTiming";
 // Type-only import — erased at build, so it does not pull the npm three package
 // at runtime (the scene loads a self-hosted three.module.js). Used to type the
 // Fix 5/6 guidance helper without adding to the file's `any` surface.
@@ -326,6 +327,7 @@ const MindARScene = ({
     let stallTimer: ReturnType<typeof setTimeout> | null = null;
     let occlusionTimers: (ReturnType<typeof setTimeout> | null)[] = [];
     let trackingBlobUrl: string | null = null;
+    let videoObserver: MutationObserver | null = null;
 
     const tabletop = mode === "tabletop";
     // Tabletop and wall are the same single-QR experience — one printed QR is
@@ -339,6 +341,7 @@ const MindARScene = ({
       tornDown = true;
       sceneRef.current = null;
       document.getElementById("mindar-fill-style")?.remove();
+      try { videoObserver?.disconnect(); } catch { /* noop */ }
       try { cleanupGyro?.(); } catch { /* noop */ }
       for (const t of occlusionTimers) if (t) clearTimeout(t);
       if (stallTimer) clearTimeout(stallTimer);
@@ -369,6 +372,7 @@ const MindARScene = ({
         }
 
         await loadMindAR();
+        markAR("engine-script", "mindar");
         if (cancelled) return;
 
         const MINDAR = (window as any).MINDAR;
@@ -424,7 +428,25 @@ const MindARScene = ({
           throw new Error("The AR tracking file is invalid. Ask the designer to regenerate this experience.");
         }
         trackingBlobUrl = URL.createObjectURL(new Blob([trackingBuf], { type: "application/octet-stream" }));
+        markAR("target-ready", "mind");
         if (!containerRef.current) return;
+
+        // Phase 0: MindAR plays the camera video inside start() BEFORE it loads
+        // the target and warms up TF.js, so "camera-live" and "engine-ready"
+        // are two different moments — the 4 Oct test lost ~40 s between them.
+        {
+          const container = containerRef.current;
+          const watch = (v: HTMLVideoElement) => {
+            const hit = () => markAR("camera-live", "mindar");
+            if (!v.paused && v.readyState >= 2) hit();
+            else v.addEventListener("playing", hit, { once: true });
+          };
+          videoObserver = new MutationObserver(() => {
+            const v = container.querySelector("video");
+            if (v) { watch(v); videoObserver?.disconnect(); }
+          });
+          videoObserver.observe(container, { childList: true, subtree: true });
+        }
 
         const mindarThree = new MINDAR.IMAGE.MindARThree({
           container: containerRef.current,
@@ -605,6 +627,7 @@ const MindARScene = ({
           // Fix 2: onTargetFound — DON'T reset when locked
           anchor.onTargetFound = () => {
             foundOnce[i] = true;
+            if (i === 0 && singleQr) markAR("qr-seen", "mindar");
             if (anchorState === "locked") {
               anchorVisibleWhileLocked[i] = true;
               anchorPoseMatrices[i] = anchor.group.matrix.clone();
@@ -653,6 +676,7 @@ const MindARScene = ({
           // Reveal the model now — first visible frame = correct locked frame.
           model.visible = true;
           anchorState = "locked";
+          markAR("model-locked", "mindar");
 
           console.log(
             "[MindARScene] Model locked.",
@@ -973,6 +997,7 @@ const MindARScene = ({
           if (startTimer) clearTimeout(startTimer);
         }
         if (cancelled) { teardown(); return; }
+        markAR("engine-ready", "mindar");
         setIsStarting(false);
         onReadyRef.current?.();
 
@@ -1050,6 +1075,7 @@ const MindARScene = ({
           }
 
           renderer.render(scene, camera);
+          if (anchorState === "locked" && model?.visible) markAR("model-visible", "mindar");
         });
 
         // Publish the live scene so Effect B can hand over the model.
@@ -1172,6 +1198,7 @@ const MindARScene = ({
           model.position.z = -center.z * s;
         }
 
+        markAR("model-parsed", "mindar");
         handle.attachModel(model);
         attached = model;
       } catch (loadError) {

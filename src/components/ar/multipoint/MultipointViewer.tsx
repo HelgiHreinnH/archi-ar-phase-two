@@ -7,6 +7,7 @@ import MindARScene, { type ScanHint } from "./MindARScene";
 import LaunchRing, { type LaunchRingState } from "./LaunchRing";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
+import { markAR } from "@/lib/arTiming";
 
 type MarkerStatus = "searching" | "detected" | "locked";
 
@@ -144,6 +145,7 @@ const MultipointViewer = ({
             const cached = await getCachedAsset(modelCacheKey);
             if (cached) {
               modelPrefetchSettled.current = true;
+              markAR("glb-downloaded", "idb cache");
               setPrefetchProgress(100);
               setPrefetchedModel(cached);
               console.log(
@@ -162,6 +164,7 @@ const MultipointViewer = ({
           if (!res.body || typeof res.body.getReader !== "function") {
             const buffer = await res.arrayBuffer();
             modelPrefetchSettled.current = true;
+            markAR("glb-downloaded");
             setPrefetchProgress(100);
             setPrefetchedModel(buffer);
             if (modelCacheKey) await setCachedAsset(modelCacheKey, buffer);
@@ -196,6 +199,7 @@ const MultipointViewer = ({
             offset += c.length;
           }
           modelPrefetchSettled.current = true;
+          markAR("glb-downloaded");
           setPrefetchProgress(100);
           setPrefetchedModel(buffer.buffer);
           if (modelCacheKey) {

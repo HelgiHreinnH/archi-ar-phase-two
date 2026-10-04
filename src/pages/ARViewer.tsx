@@ -14,6 +14,11 @@ import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
 import WorldLockViewer from "@/components/ar/tabletop/WorldLockViewer";
 import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
+import { markAR, setARContext, logARTimingSummary, resetARSessionMarks } from "@/lib/arTiming";
+import ARTimingOverlay from "@/components/ar/shared/ARTimingOverlay";
+
+// Phase 0 timing: this chunk being evaluated = the app bundle is in.
+markAR("app-start");
 
 type Project = Tables<"projects">;
 // "briefing" is deliberately absent. It was a 2-second branded holding screen
@@ -74,6 +79,7 @@ const ARViewer = () => {
             const looksSigned = !mind || /^https?:\/\//.test(mind);
             if (looksSigned && Date.now() - parsed.at < PUBLIC_PROJECT_CACHE_TTL_MS) {
               dlog("public-project served from sessionStorage");
+              markAR("project-fetched", "session cache");
               return parsed.data;
             }
           }
@@ -84,6 +90,7 @@ const ARViewer = () => {
         body: { shareId },
       });
       if (fnError || !data) throw new Error("Experience not found or unavailable");
+      markAR("project-fetched");
 
       if (sessionCacheKey && typeof sessionStorage !== "undefined") {
         try {
@@ -134,6 +141,7 @@ const ARViewer = () => {
   const launchAR = useCallback((opts?: { fromTap?: boolean }) => {
     const fromTap = opts?.fromTap ?? true;
     dlog("launchAR — going straight to camera", { fromTap });
+    markAR("tap", fromTap ? undefined : "auto-launch");
 
     // iOS 13+ requires DeviceOrientationEvent.requestPermission() inside the
     // tap's user-activation window, so fire it synchronously, first. On the
@@ -233,6 +241,18 @@ const ARViewer = () => {
     () => typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("engine") === "8thwall",
   );
+
+  // Phase 0: label the timing line with what is actually running.
+  useEffect(() => {
+    if (!project?.mode) return;
+    setARContext("mode", project.mode);
+    setARContext("engine", project.mode === "tabletop" || project.mode === "wall"
+      ? (worldEngineOn ? "8thwall" : "mindar")
+      : "mindar");
+  }, [project?.mode, worldEngineOn]);
+  useEffect(() => {
+    if (viewState === "ended") logARTimingSummary(true);
+  }, [viewState]);
 
   const handleReset = useCallback(() => {
     setMarkers(getInitialMarkers());
@@ -400,7 +420,7 @@ const ARViewer = () => {
     ? parseFloat(project.scale.split(":")[1]) || 1
     : 1;
 
-  switch (viewState) {
+  const body = (() => { switch (viewState) {
     case "landing":
       return <ARLanding project={project} onLaunchAR={() => launchAR({ fromTap: true })} />;
 
@@ -494,6 +514,7 @@ const ARViewer = () => {
         <ARSessionEnd
           project={project}
           onViewAgain={() => {
+            resetARSessionMarks();
             setResetKey((k) => k + 1);
             launchAR({ fromTap: true });
           }}
@@ -544,7 +565,14 @@ const ARViewer = () => {
           shareId={shareId}
         />
       );
-  }
+  } })();
+
+  return (
+    <>
+      {body}
+      <ARTimingOverlay />
+    </>
+  );
 };
 
 export default ARViewer;
