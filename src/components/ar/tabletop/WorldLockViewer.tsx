@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Lock, Unlock, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import WorldLockScene, { QR_SIZE_MM } from "./WorldLockScene";
-import { buildQrImageTarget, type Xr8ImageTargetData } from "@/lib/xr8QrTarget";
+import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
+import { modelCacheKeyFor, preloadQrTarget } from "@/lib/arPreload";
 import { ModelLoadError } from "@/lib/modelLoadError";
 
 /**
@@ -19,6 +20,7 @@ interface WorldLockViewerProps {
     name: string;
     mode: string;
     qr_code_url?: string | null;
+    updated_at?: string | null;
   };
   shareId: string;
   modelUrl: string | null;
@@ -59,7 +61,8 @@ const WorldLockViewer = ({
 
   useEffect(() => {
     let cancelled = false;
-    buildQrImageTarget(project.qr_code_url, shareId, QR_SIZE_MM)
+    // Built on the pre-camera screen already (arPreload); this joins it.
+    preloadQrTarget(project.qr_code_url, shareId, QR_SIZE_MM)
       .then((t) => { if (!cancelled) setTarget(t); })
       .catch((e) => { if (!cancelled) onEngineError(e instanceof Error ? e : new Error(String(e))); });
     return () => { cancelled = true; };
@@ -102,6 +105,7 @@ const WorldLockViewer = ({
         <WorldLockScene
           target={target}
           modelUrl={modelUrl}
+          modelCacheKey={modelCacheKeyFor(shareId, project.updated_at)}
           mode={project.mode}
           modelScale={modelScale}
           initialRotation={initialRotation}

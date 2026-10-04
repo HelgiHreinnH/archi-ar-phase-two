@@ -4,9 +4,11 @@ import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
 import { QrPoseFilter } from "@/lib/qrPoseFilter";
-import { applyRoomEnvironment, fetchWithProgress, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
+import { applyRoomEnvironment, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
+import { ModelHttpError, preloadModel, subscribeModelProgress } from "@/lib/arPreload";
 import { markAR } from "@/lib/arTiming";
 import { waitForCameraGrant } from "@/lib/arLaunch";
+import { loadXr8 } from "@/lib/xr8Engine";
 
 /**
  * Tabletop / wall AR on the 8th Wall engine: image target + SLAM.
@@ -26,8 +28,6 @@ import { waitForCameraGrant } from "@/lib/arLaunch";
  * Spatial). Attribution is required by its licence — see WorldLockViewer.
  */
 
-export const XR8_ENGINE_URL =
-  "https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1.0.0/dist/xr.js";
 const THREE_ESM_URL = "/assets/three/three.module.js";
 const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
 const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
@@ -40,37 +40,6 @@ const GLB_MAGIC = 0x46546c67;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
-
-let enginePromise: Promise<Any> | null = null;
-
-/** Load the 8th Wall engine once (with the SLAM chunk) and resolve XR8. */
-export function loadXr8(): Promise<Any> {
-  if (enginePromise) return enginePromise;
-  enginePromise = new Promise<Any>((resolve, reject) => {
-    const w = window as Any;
-    const ready = async () => {
-      try {
-        if (!w.XR8.XrController && w.XR8.loadChunk) await w.XR8.loadChunk("slam");
-        if (!w.XR8.XrController) throw new Error("8th Wall SLAM module did not load.");
-        resolve(w.XR8);
-      } catch (e) {
-        reject(e);
-      }
-    };
-    if (w.XR8) { void ready(); return; }
-    window.addEventListener("xrloaded", () => void ready(), { once: true });
-    const s = document.createElement("script");
-    s.src = XR8_ENGINE_URL;
-    s.async = true;
-    s.crossOrigin = "anonymous";
-    // Read by xr.js from document.currentScript: world tracking + image targets.
-    s.setAttribute("data-preload-chunks", "slam");
-    s.onerror = () => reject(new Error("Could not load the AR engine. Check your connection."));
-    document.head.appendChild(s);
-  });
-  enginePromise.catch(() => { enginePromise = null; });
-  return enginePromise;
-}
 
 /** Restyle 8th Wall's own motion-permission prompt to match Archi AR. */
 function injectPromptStyle() {
@@ -89,6 +58,8 @@ function injectPromptStyle() {
 interface WorldLockSceneProps {
   target: Xr8ImageTargetData;
   modelUrl: string | null;
+  /** IndexedDB key for the GLB (arPreload.modelCacheKeyFor). */
+  modelCacheKey?: string | null;
   mode: string;
   modelScale: number;
   initialRotation?: number;
@@ -108,6 +79,7 @@ interface WorldLockSceneProps {
 const WorldLockScene = ({
   target,
   modelUrl,
+  modelCacheKey = null,
   mode,
   modelScale,
   initialRotation = 0,
@@ -134,6 +106,8 @@ const WorldLockScene = ({
 
   // Latest model URL without restarting the engine when it is re-signed.
   const modelUrlRef = useRef(modelUrl);
+  const modelCacheKeyRef = useRef(modelCacheKey);
+  modelCacheKeyRef.current = modelCacheKey;
   // Set by the engine effect once the scene is live; loads the model if it
   // isn't loaded yet (the URL can arrive after the camera has started).
   const requestModelRef = useRef<(() => void) | null>(null);
@@ -225,10 +199,17 @@ const WorldLockScene = ({
           loader.setDRACOLoader(draco);
           loader.setMeshoptDecoder(MeshoptDecoder);
 
-          const res = await fetchWithProgress(url, (f) => cb.current.onModelProgress?.(f));
-          markAR("glb-downloaded");
-          if (!res.ok) throw new ModelLoadError(`The 3D model could not be downloaded (HTTP ${res.status}).`);
-          const buf = res.buffer;
+          // Usually already downloading since the pre-camera screen (arPreload).
+          const pending = preloadModel(url, modelCacheKeyRef.current);
+          const unsub = subscribeModelProgress(url, (f) => cb.current.onModelProgress?.(f ?? 0));
+          let buf: ArrayBuffer;
+          try {
+            buf = await pending;
+          } catch (e) {
+            throw new ModelLoadError(e instanceof ModelHttpError ? e.message : "The 3D model could not be downloaded.");
+          } finally {
+            unsub();
+          }
           if (buf.byteLength < 4 || new DataView(buf).getUint32(0, true) !== GLB_MAGIC) {
             throw new ModelLoadError("The 3D model file is not a valid GLB.");
           }

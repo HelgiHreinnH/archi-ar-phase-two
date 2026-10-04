@@ -11,6 +11,8 @@ import { ModelLoadError } from "@/lib/modelLoadError";
 import { applyRoomEnvironment, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { markAR } from "@/lib/arTiming";
 import { waitForCameraGrant } from "@/lib/arLaunch";
+import { loadMindAR } from "@/lib/mindarEngine";
+import { takePreloadedTrackingFile } from "@/lib/arPreload";
 // Type-only import — erased at build, so it does not pull the npm three package
 // at runtime (the scene loads a self-hosted three.module.js). Used to type the
 // Fix 5/6 guidance helper without adding to the file's `any` surface.
@@ -94,8 +96,6 @@ const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
 // Models uploaded since Sep 2026 are meshopt-compressed in the browser.
 const MESHOPT_DECODER_URL = "/assets/three/jsm/libs/meshopt_decoder.module.js";
 const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
-const MINDAR_THREE_URL =
-  "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 
 /**
  * Physical size of the printed AR marker in millimetres.
@@ -216,42 +216,6 @@ const ANCHOR_VISIBLE_WINDOW = 4;
 
 /** GLB magic number: ASCII "glTF" = 0x676C5446 (little-endian: 0x46546C67) */
 const GLB_MAGIC = 0x46546C67;
-
-async function loadMindAR(): Promise<void> {
-  if ((window as any).MINDAR?.IMAGE?.MindARThree) return;
-  try {
-    await import(/* @vite-ignore */ MINDAR_THREE_URL);
-  } catch (err) {
-    // Audit C-1: A failed dynamic import for the MindAR runtime is most often
-    // either an SRI mismatch (the modulepreload integrity hash in index.html
-    // no longer matches the CDN bytes) or a network/CORS issue. Disambiguate
-    // by probing the URL so we can surface a precise, actionable error.
-    const { MindARSRIError, isLikelySRIFailure, findBrokenModuleDependency } =
-      await import("@/lib/sriError");
-
-    // The runtime imports "three" and "three/addons/renderers/CSS3DRenderer.js"
-    // through the import map. A missing self-hosted file is served as index.html
-    // by the SPA, which fails module parsing and looks identical to an SRI
-    // mismatch — check that first so the error names the real cause.
-    const broken = await findBrokenModuleDependency([
-      "/assets/three/three.module.js",
-      "/assets/three/jsm/renderers/CSS3DRenderer.js",
-    ]);
-    if (broken) {
-      throw new Error(`AR engine dependency is missing or not a module: ${broken}`);
-    }
-
-    const reachable = await isLikelySRIFailure(MINDAR_THREE_URL);
-    if (reachable) {
-      throw new MindARSRIError(MINDAR_THREE_URL,
-        "MindAR runtime integrity check failed. The CDN file may have been updated upstream.");
-    }
-    throw err instanceof Error ? err : new Error(String(err));
-  }
-  if (!(window as any).MINDAR?.IMAGE?.MindARThree) {
-    throw new Error("MindAR module loaded but runtime not found on window.MINDAR");
-  }
-}
 
 /**
  * Handle published by the scene effect (Effect A) once the camera is live.
@@ -413,16 +377,24 @@ const MindARScene = ({
         // The viewer already warmed it with force-cache, so this is normally a
         // cache hit; MindAR then reads it from a blob URL — one download, and a
         // bad file fails loudly here instead of hanging start().
-        let trackingRes: Response;
-        try {
-          trackingRes = await fetch(imageTargetSrc, { cache: "force-cache" });
-        } catch {
-          throw new Error("Could not download the AR tracking file. Check your connection and try again.");
+        // Tabletop/Wall preload this on the pre-camera screen (arPreload);
+        // Spatial has no preload and fetches here, exactly as before.
+        const preloadedTracking = await (takePreloadedTrackingFile(imageTargetSrc)?.catch(() => null) ?? null);
+        let trackingBuf: ArrayBuffer;
+        if (preloadedTracking) {
+          trackingBuf = preloadedTracking;
+        } else {
+          let trackingRes: Response;
+          try {
+            trackingRes = await fetch(imageTargetSrc, { cache: "force-cache" });
+          } catch {
+            throw new Error("Could not download the AR tracking file. Check your connection and try again.");
+          }
+          if (!trackingRes.ok) {
+            throw new Error(`The AR tracking file could not be downloaded (HTTP ${trackingRes.status}). The link may have expired — reload the page.`);
+          }
+          trackingBuf = await trackingRes.arrayBuffer();
         }
-        if (!trackingRes.ok) {
-          throw new Error(`The AR tracking file could not be downloaded (HTTP ${trackingRes.status}). The link may have expired — reload the page.`);
-        }
-        const trackingBuf = await trackingRes.arrayBuffer();
         if (cancelled) return;
         const firstByte = trackingBuf.byteLength > 0 ? new Uint8Array(trackingBuf)[0] : -1;
         if (trackingBuf.byteLength < 16 || firstByte === 0x3c /* "<" — an HTML page, not a .mind */) {

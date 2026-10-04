@@ -18,6 +18,8 @@ import { markAR, setARContext, logARTimingSummary, resetARSessionMarks } from "@
 import ARTimingOverlay from "@/components/ar/shared/ARTimingOverlay";
 import QrPreCamera from "@/components/ar/qr/QrPreCamera";
 import { beginARLaunchFromTap } from "@/lib/arLaunch";
+import { modelCacheKeyFor, preloadQrExperience, subscribeModelProgress } from "@/lib/arPreload";
+import { QR_SIZE_MM } from "@/components/ar/tabletop/WorldLockScene";
 
 // Phase 0 timing: this chunk being evaluated = the app bundle is in.
 markAR("app-start");
@@ -275,6 +277,30 @@ const ARViewer = () => {
     if (viewState === "ended") logARTimingSummary(true);
   }, [viewState]);
 
+  // Tabletop/Wall preload: while the pre-camera screen is up, fetch the engine,
+  // the tracking target and the model, so the tap lands on warm assets.
+  const preloadEngine = worldEngineOn ? "8thwall" : "mindar";
+  const preloadModelUrl = project?.model_url ?? null;
+  const [preloadProgress, setPreloadProgress] = useState<number | null>(null);
+  useEffect(() => {
+    if (!project || isMultipoint || !shareId) return;
+    if (viewState !== "landing" && viewState !== "detecting") return;
+    preloadQrExperience({
+      engine: preloadEngine,
+      shareId,
+      // The MindAR viewer that consumes a preloaded GLB lands in the next
+      // step; until then only the 8th Wall path takes the model from here.
+      modelUrl: preloadEngine === "8thwall" ? preloadModelUrl : null,
+      modelCacheKey: modelCacheKeyFor(shareId, project.updated_at),
+      qrCodeUrl: project.qr_code_url ?? null,
+      mindFileUrl: project.mind_file_url ?? null,
+      qrSizeMm: QR_SIZE_MM,
+    });
+    if (preloadEngine !== "8thwall" || !preloadModelUrl) return;
+    return subscribeModelProgress(preloadModelUrl, setPreloadProgress);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id, isMultipoint, shareId, viewState, preloadEngine, preloadModelUrl]);
+
   const handleReset = useCallback(() => {
     setMarkers(getInitialMarkers());
     setResetKey((k) => k + 1);
@@ -454,6 +480,7 @@ const ARViewer = () => {
             mode={project.mode}
             scale={project.scale}
             clientName={project.client_name}
+            modelProgress={preloadProgress}
             onLaunch={() => launchFromTap({ resign: false })}
           />
         );
