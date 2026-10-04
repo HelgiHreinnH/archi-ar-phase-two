@@ -3,7 +3,7 @@ import { placeModelOnQr, qrOffsetMm } from "@/lib/modelPlacement";
 import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
-import { QrPoseFilter, STEADY_FRAMES, STEADY_MAX_SD } from "@/lib/qrPoseFilter";
+import { QrPoseFilter, refineLockedPose, STEADY_FRAMES, STEADY_MAX_SD } from "@/lib/qrPoseFilter";
 import { applyRoomEnvironment, freezeModelMatrices, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { ModelHttpError, preloadModel, subscribeModelProgress } from "@/lib/arPreload";
 import { markAR } from "@/lib/arTiming";
@@ -25,7 +25,9 @@ import { loadXr8 } from "@/lib/xr8Engine";
  * (QrPoseFilter.isSteady: 8 readings within 3 mm, tracking NORMAL) the scene
  * locks by itself and reports onLocked — the ONLY thing that may show the
  * "placed" copy. If the readings never settle, it locks anyway after
- * LOCK_FALLBACK_MS of continuous sightings. `replaceSignal` unlocks
+ * LOCK_FALLBACK_MS of continuous sightings. After the lock SLAM holds the
+ * model and QR sightings only refine it by a small blend (refineLockedPose),
+ * never a snap. `replaceSignal` unlocks
  * ("Re-place"): the model follows the QR again and re-locks when steady.
  *
  * Engine: @8thwall/engine-binary (free Distributed Engine Binary, Niantic
@@ -213,13 +215,32 @@ const WorldLockScene = ({
           cb.current.onUnlocked?.();
         };
         const setPose = (detail: Any) => {
-          if (!anchor || locked) return;
+          if (!anchor) return;
           // 1 local unit = the QR's width in the scene. For a 3:4 portrait
           // target, scale = its height and scaledWidth = 0.75, so
           // scaledWidth × scale = the printed QR width (it fills the width).
           const qrWidth = (detail.scaledWidth ?? 0.75) * (detail.scale ?? 1);
-          const pose = filter.push({ position: detail.position, rotation: detail.rotation, width: qrWidth });
-          if (!pose) return; // outlier (steep angle / glare / half in frame)
+          // Camera position: the facing check (wall model never into the wall).
+          const cam = XR8.Threejs.xrScene().camera.position;
+          if (locked) {
+            // SLAM holds the model. A good QR reading may only nudge it
+            // (blend, never snap) — and only while tracking is normal.
+            if (!trackingOk) return;
+            const seen = filter.push({ position: detail.position, rotation: detail.rotation, width: qrWidth }, cam);
+            if (!seen) return;
+            const next = refineLockedPose(
+              T,
+              { position: anchor.position, quaternion: anchor.quaternion, width: anchor.scale.x },
+              seen,
+            );
+            if (!next) return;
+            anchor.position.copy(next.position);
+            anchor.quaternion.copy(next.quaternion);
+            anchor.scale.setScalar(next.width);
+            return;
+          }
+          const pose = filter.push({ position: detail.position, rotation: detail.rotation, width: qrWidth }, cam);
+          if (!pose) return; // outlier (steep angle / glare / half in frame / facing away)
           anchor.position.copy(pose.position);
           anchor.quaternion.copy(pose.quaternion);
           anchor.scale.setScalar(pose.width);

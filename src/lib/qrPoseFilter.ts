@@ -43,6 +43,16 @@ const HISTORY = 15;
  * readings are world-space, so SLAM already removes the hand's own motion.
  */
 export const STEADY_FRAMES = 8;
+
+/**
+ * After the lock (Oct 2026): SLAM holds the model; a fresh QR reading may
+ * only nudge it — blend LOCKED_REFINE_ALPHA of the way per reading (~1 s to
+ * settle at 30 readings/s), never snap. A reading more than
+ * MAX_REFINE_WIDTHS QR widths (30 cm on the 150 mm QR) from the locked pose
+ * is not the same QR placement and is ignored.
+ */
+export const LOCKED_REFINE_ALPHA = 0.03;
+export const MAX_REFINE_WIDTHS = 2;
 export const STEADY_MAX_SD = 0.02;
 
 /**
@@ -89,6 +99,39 @@ export function gravityAlign(
   return { quaternion: new T.Quaternion().setFromRotationMatrix(m), tiltDeg };
 }
 
+/** The QR's +Z (out of the printed face) points to the camera's side. */
+export function facesCamera(
+  T: Three,
+  quaternion: Three,
+  position: { x: number; y: number; z: number },
+  camera: { x: number; y: number; z: number },
+): boolean {
+  const normal = new T.Vector3(0, 0, 1).applyQuaternion(quaternion);
+  const toCam = new T.Vector3(camera.x - position.x, camera.y - position.y, camera.z - position.z);
+  return normal.dot(toCam) > 0;
+}
+
+/**
+ * Locked-model refinement: blend `current` toward `target` by `alpha`
+ * (position, heading and size). Null if the target is too far away to be a
+ * refinement of the same placement (see MAX_REFINE_WIDTHS).
+ */
+export function refineLockedPose(
+  T: Three,
+  current: { position: Three; quaternion: Three; width: number },
+  target: { position: Three; quaternion: Three; width: number },
+  alpha = LOCKED_REFINE_ALPHA,
+  maxWidths = MAX_REFINE_WIDTHS,
+): { position: Three; quaternion: Three; width: number } | null {
+  const off = current.position.distanceTo(target.position);
+  if (!(current.width > 0) || off > maxWidths * current.width) return null;
+  return {
+    position: current.position.clone().lerp(target.position, alpha),
+    quaternion: current.quaternion.clone().slerp(target.quaternion, alpha),
+    width: current.width + (target.width - current.width) * alpha,
+  };
+}
+
 function median(values: number[]): number {
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
@@ -130,11 +173,20 @@ export class QrPoseFilter {
     return sd / this.width < maxSd;
   }
 
-  /** Returns the smoothed pose after this reading, or null if it was discarded. */
-  push(r: QrReading): { position: Three; quaternion: Three; width: number } | null {
+  /**
+   * Returns the smoothed pose after this reading, or null if it was discarded.
+   * `cameraPosition` (world) enables the facing check: a wall QR's normal must
+   * point toward the camera (else the model would be placed INTO the wall),
+   * and a table QR must be seen from above.
+   */
+  push(r: QrReading, cameraPosition?: { x: number; y: number; z: number }): { position: Three; quaternion: Three; width: number } | null {
     const T = this.T;
     const aligned = gravityAlign(T, r.rotation, this.mode);
     if (!aligned || aligned.tiltDeg > MAX_TILT_DEG || !(r.width > 0)) {
+      this.rejected++;
+      return null;
+    }
+    if (cameraPosition && !facesCamera(T, aligned.quaternion, r.position, cameraPosition)) {
       this.rejected++;
       return null;
     }

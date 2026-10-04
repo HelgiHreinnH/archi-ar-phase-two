@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as T from "three";
-import { gravityAlign, QrPoseFilter } from "./qrPoseFilter";
+import { gravityAlign, QrPoseFilter, refineLockedPose } from "./qrPoseFilter";
 
 const deg = (d: number) => (d * Math.PI) / 180;
 
@@ -83,3 +83,59 @@ describe("QrPoseFilter", () => {
     expect(g.accepted).toBe(0);
   });
 });
+
+describe("wall facing guard", () => {
+  // Wall QR facing +Z (identity), centred at the origin.
+  const wallRead = (flip: boolean) => {
+    const q = flip
+      ? new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), Math.PI)
+      : new T.Quaternion();
+    return { position: { x: 0, y: 0, z: 0 }, rotation: { x: q.x, y: q.y, z: q.z, w: q.w }, width: 0.15 };
+  };
+  const camera = { x: 0, y: 0, z: 1.2 }; // standing 1.2 m in front of the wall
+
+  it("accepts a wall QR that faces the camera", () => {
+    const f = new QrPoseFilter(T, "wall");
+    expect(f.push(wallRead(false), camera)).not.toBeNull();
+  });
+
+  it("rejects a flipped reading that would put the model into the wall", () => {
+    const f = new QrPoseFilter(T, "wall");
+    expect(f.push(wallRead(true), camera)).toBeNull();
+    expect(f.rejected).toBe(1);
+  });
+
+  it("rejects a table QR 'seen' from below the table", () => {
+    const f = new QrPoseFilter(T, "tabletop");
+    const q = new T.Quaternion().setFromAxisAngle(new T.Vector3(1, 0, 0), -Math.PI / 2);
+    const r = { position: { x: 0, y: 0, z: 0 }, rotation: { x: q.x, y: q.y, z: q.z, w: q.w }, width: 0.15 };
+    expect(f.push(r, { x: 0, y: 0.5, z: 0.3 })).not.toBeNull();
+    expect(new QrPoseFilter(T, "tabletop").push(r, { x: 0, y: -0.5, z: 0.3 })).toBeNull();
+  });
+});
+
+describe("refineLockedPose", () => {
+  const pose = (x: number, yawDeg: number, width = 0.15) => ({
+    position: new T.Vector3(x, 0, 0),
+    quaternion: new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), deg(yawDeg)),
+    width,
+  });
+
+  it("nudges toward a fresh reading, never snaps", () => {
+    const out = refineLockedPose(T, pose(0, 0), pose(0.01, 10), 0.03)!;
+    expect(out.position.x).toBeCloseTo(0.0003, 6); // 3 % of 1 cm
+    expect(out.quaternion.angleTo(pose(0, 0).quaternion)).toBeCloseTo(deg(0.3), 4);
+  });
+
+  it("converges over about a second of readings", () => {
+    let p = pose(0, 0);
+    for (let i = 0; i < 30; i++) p = refineLockedPose(T, p, pose(0.01, 0))!;
+    expect(p.position.x).toBeGreaterThan(0.005);
+    expect(p.position.x).toBeLessThan(0.01);
+  });
+
+  it("ignores a reading that can't be the same placement (> 2 QR widths away)", () => {
+    expect(refineLockedPose(T, pose(0, 0), pose(0.5, 0))).toBeNull();
+  });
+});
+
