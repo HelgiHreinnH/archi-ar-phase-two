@@ -88,7 +88,7 @@ export default function SpatialLab() {
 
   // ── Load project ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (!LAB) { setPhase("unsupported"); setMessage("This page only runs on a Spatial lab site (8thwall / zappar / immersal.designingforusers.com)."); return; }
+    if (!LAB) { setPhase("unsupported"); setMessage("This page only runs on a Spatial lab site (8thwall / zappar / immersal.ar.felles.dk)."); return; }
     if (!shareId) return;
     (async () => {
       const { data, error } = await supabase.functions.invoke("get-public-project", { body: { shareId } });

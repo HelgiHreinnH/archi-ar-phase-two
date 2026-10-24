@@ -38,7 +38,7 @@ dep). Don't override them ad hoc.
 | `npm run build` | Production build to `dist/` |
 
 ## Deployment
-`main` deploys to [designingforusers.com](https://designingforusers.com) via
+`main` deploys to [ar.felles.dk](https://ar.felles.dk) via
 Netlify. Pull requests get deploy previews. Build settings live in `netlify.toml`.
 
 See `CLAUDE.md` for the working rules and `MIGRATION.md` for the Supabase

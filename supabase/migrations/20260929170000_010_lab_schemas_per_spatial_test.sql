@@ -1,9 +1,9 @@
 -- 010 · TEMPORARY lab isolation for the Spatial engine bake-off (29 Sep 2026).
 --
 -- One Postgres schema + one private storage bucket per test track:
---   lab_8thwall / lab-8thwall    ← archi-ar-8thwall  (8thwall.designingforusers.com)
---   lab_zappar  / lab-zappar     ← archi-ar-zappar   (zappar.designingforusers.com)
---   lab_immersal / lab-immersal  ← archi-ar-immersal (immersal.designingforusers.com)
+--   lab_8thwall / lab-8thwall    ← archi-ar-8thwall  (8thwall.ar.felles.dk)
+--   lab_zappar  / lab-zappar     ← archi-ar-zappar   (zappar.ar.felles.dk)
+--   lab_immersal / lab-immersal  ← archi-ar-immersal (immersal.ar.felles.dk)
 -- Each Netlify project sets VITE_LAB_ENGINE, and src/lib/lab.ts routes all
 -- test reads/writes to that schema and bucket. public.* and the production
 -- buckets are untouched; login (auth) and public.projects stay shared.

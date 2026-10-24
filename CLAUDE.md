@@ -37,7 +37,7 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
   zero-tap is not achievable in a browser.
 
 ## Deploy
-`main` -> Netlify -> designingforusers.com. PRs get deploy previews.
+`main` -> Netlify -> ar.felles.dk. PRs get deploy previews.
 Build config is in `netlify.toml`, install flags in `.npmrc` — both in git, so
 local, CI and Netlify agree. Nothing important lives only in a hosting dashboard.
 

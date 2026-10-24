@@ -5,7 +5,7 @@
  *   archi-ar-8thwall  → "8thwall"  → schema lab_8thwall,  bucket lab-8thwall
  *   archi-ar-zappar   → "zappar"   → schema lab_zappar,   bucket lab-zappar
  *   archi-ar-immersal → "immersal" → schema lab_immersal, bucket lab-immersal
- * Production (designingforusers.com) leaves it unset → LAB is null and
+ * Production (ar.felles.dk) leaves it unset → LAB is null and
  * nothing here is used. See migration 010. Delete this file (and the lab
  * schemas) once the winning engine is merged into main.
  */

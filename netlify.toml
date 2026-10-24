@@ -1,5 +1,5 @@
 # Netlify configuration — Archi AR
-# main -> designingforusers.com (production). PRs get deploy previews.
+# main -> ar.felles.dk (production). PRs get deploy previews.
 
 [build]
   command = "npm run build"

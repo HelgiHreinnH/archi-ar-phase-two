@@ -1,5 +1,5 @@
 // Audit L-1 (May 2026): use the production custom domain.
-const PUBLISHED_APP_URL = "https://designingforusers.com";
+const PUBLISHED_APP_URL = "https://ar.felles.dk";
 
 /**
  * Origins that must NOT be baked into a shared QR code.
