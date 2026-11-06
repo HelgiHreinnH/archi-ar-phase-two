@@ -1,20 +1,18 @@
 # Archi AR — External Supabase Migration Runbook
 
 **Target:** dedicated Supabase project `njrytsladmfhbttsitmn` (eu-central-1)
-**Source:** Lovable Cloud project `hjaqqfuebfpxpbyldcso` (no longer read by the app)
+**Source:** previous hosted project `hjaqqfuebfpxpbyldcso` (no longer read by the app)
 **Created:** May 12, 2026 (companion to the Notion migration guide and Performance Audit)
 
-> **Status: completed (22 Sep 2026).** The app reads `njrytsladmfhbttsitmn`,
-> Lovable is out of the toolchain, and `supabase/migrations/` (001-011) is applied
-> through the Supabase GitHub integration. This file is kept as the historical
+> **Status: completed (22 Sep 2026).** The app reads `njrytsladmfhbttsitmn`, and
+> `supabase/migrations/` (001-011) is applied through the Supabase GitHub integration.
+> Production is served from `https://ar.felles.dk` (Netlify, auto-deploy from `main`). This file is kept as the historical
 > cut-over runbook and as a reference for rebuilding the backend. Current working
 > rules live in `CLAUDE.md`; the steps below are not a to-do list.
 
-The runbook was written for a manual cut-over off Lovable Cloud. It could not be
-executed from inside the Lovable editor because Lovable manages `.env`,
-`src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts`, and
-the `project_id` line in `supabase/config.toml` and reverts any changes to those
-files, so the cut-over happened after the project was ejected.
+The runbook describes the manual cut-over from the previous hosted Supabase project
+to the dedicated one: schema, storage, edge functions, auth settings and the three
+`VITE_SUPABASE_*` variables.
 
 ---
 
@@ -23,7 +21,7 @@ files, so the cut-over happened after the project was ejected.
 - Supabase CLI installed and logged in: `supabase login`
 - Access token + service-role key for project ref `njrytsladmfhbttsitmn`
   (service-role key is needed to curl-test edge functions post-deploy)
-- The repo checked out **outside Lovable** (or a copy you can edit freely)
+- A local checkout of the repo
 - **Node 18+** (for `supabase gen types`)
 - **Postgres 15+ client tools** (`pg_dump`, `psql`) — only required if you do the optional data migration in §5
 - DNS / domain admin access if redirect URLs or custom domain need updating
@@ -136,13 +134,13 @@ the browser with a `CORS error` in the network tab and no on-screen feedback.
 
 ## 4. Update the application code
 
-Historical: these files could not be edited from inside Lovable, so they were changed in the ejected copy. They now hold:
+These files now hold the values for the dedicated project:
 
 ### `.env`
 
 ```
 VITE_SUPABASE_URL=https://njrytsladmfhbttsitmn.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qcnl0c2xhZG1maGJ0dHNpdG1uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MDE0NTcsImV4cCI6MjA5NDE3NzQ1N30.nvuw9jFwoiWeRz-3S0lNMLTpBTmIASTKxyPFuGhfB3w
+VITE_SUPABASE_PUBLISHABLE_KEY=<publishable/anon key from Supabase → Project Settings → API>
 VITE_SUPABASE_PROJECT_ID=njrytsladmfhbttsitmn
 ```
 
@@ -197,8 +195,8 @@ After cut-over, walk through the full happy path against `njrytsladmfhbttsitmn`:
 ## 7. Rollback
 
 If anything breaks, revert the three env vars in step 4 to the old values and
-redeploy. The old Lovable project keeps running unchanged at
-`https://hjaqqfuebfpxpbyldcso.supabase.co`.
+redeploy (in Netlify: Site configuration → Environment variables). This only works
+while the previous project (`https://hjaqqfuebfpxpbyldcso.supabase.co`) still exists.
 
 **Caveat:** any data created on the new project between cut-over and rollback
 is lost on the flip-back. Capture a `pg_dump` of the new project (and a storage

@@ -1,6 +1,6 @@
-# Lovable-era migrations (archived 22 Sep 2026)
+# Legacy migrations (archived 22 Sep 2026)
 
-These 13 files were written by Lovable against the Lovable Cloud project
+These 13 files were written against the previous hosted project
 `hjaqqfuebfpxpbyldcso` between Feb and Jul 2026. They are kept for history only.
 
 They are deliberately **outside `supabase/migrations/`**. The Supabase GitHub

@@ -1,7 +1,6 @@
 # CLAUDE.md — Archi AR
 
-Working guide for AI sessions in this repo. Written 21 Sep 2026, when Lovable was
-removed from the toolchain.
+Working guide for AI sessions in this repo. Written 21 Sep 2026.
 
 ## What this is
 WebAR presentation platform for architects: upload a model from Rhino, generate a
@@ -43,7 +42,7 @@ local, CI and Netlify agree. Nothing important lives only in a hosting dashboard
 
 ## Backend
 Dedicated Supabase project `archi-ar` / `njrytsladmfhbttsitmn` (eu-central-1). The
-app has read it since the 22 Sep 2026 cut-over; the old Lovable Cloud project
+app has read it since the 22 Sep 2026 cut-over; the previous hosted project
 (`hjaqqfuebfpxpbyldcso`) is no longer used. `MIGRATION.md` is kept as the
 historical cut-over runbook and as a reference for rebuilding the backend.
 
@@ -65,8 +64,8 @@ applied to `njrytsladmfhbttsitmn` on push to `main`. Two rules follow from that:
 - **Never add a migration dated before the latest applied one.** `db push` treats it as
   missing and tries to run it out of order.
 
-The 13 Lovable-era migrations (Feb–Jul 2026, written against the Lovable Cloud project)
-are archived in `migrations/lovable-archive/`, deliberately outside `supabase/`. Nine
+The 13 legacy migrations (Feb–Jul 2026, written against the previous hosted project)
+are archived in `migrations/legacy-archive/`, deliberately outside `supabase/`. Nine
 contain unguarded `CREATE` statements and would fail against the current schema. Do not
 move them back.
 

@@ -2,7 +2,7 @@
 -- Archi AR — combined initial migration for a NEW dedicated Supabase project.
 --
 -- Target project ref: njrytsladmfhbttsitmn  (eu-central-1)
--- Source of truth:    Lovable Cloud project hjaqqfuebfpxpbyldcso, May 12, 2026
+-- Source of truth:    previous hosted project hjaqqfuebfpxpbyldcso, May 12, 2026
 --
 -- This file consolidates Migrations 1–10 from the Notion migration guide
 -- PLUS deltas that landed after the guide was written:
