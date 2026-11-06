@@ -1,15 +1,20 @@
 # Archi AR — External Supabase Migration Runbook
 
 **Target:** dedicated Supabase project `njrytsladmfhbttsitmn` (eu-central-1)
-**Source:** Lovable Cloud project `hjaqqfuebfpxpbyldcso`
+**Source:** Lovable Cloud project `hjaqqfuebfpxpbyldcso` (no longer read by the app)
 **Created:** May 12, 2026 (companion to the Notion migration guide and Performance Audit)
 
-This runbook is for a **future manual cut-over** off Lovable Cloud. It cannot be
+> **Status: completed (22 Sep 2026).** The app reads `njrytsladmfhbttsitmn`,
+> Lovable is out of the toolchain, and `supabase/migrations/` (001-011) is applied
+> through the Supabase GitHub integration. This file is kept as the historical
+> cut-over runbook and as a reference for rebuilding the backend. Current working
+> rules live in `CLAUDE.md`; the steps below are not a to-do list.
+
+The runbook was written for a manual cut-over off Lovable Cloud. It could not be
 executed from inside the Lovable editor because Lovable manages `.env`,
 `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts`, and
-the `project_id` line in `supabase/config.toml` and will revert any changes to
-those files. The cut-over has to happen after the project is ejected (or run on
-a fork hosted outside Lovable).
+the `project_id` line in `supabase/config.toml` and reverts any changes to those
+files, so the cut-over happened after the project was ejected.
 
 ---
 
@@ -109,8 +114,8 @@ In the Supabase dashboard for `njrytsladmfhbttsitmn`:
    - Enable **Email**
    - Enable **Confirm email** (users must verify before sign-in)
 2. **Authentication → URL Configuration**
-   - Set **Site URL** to your deployment URL (e.g. `https://archi-ar.lovable.app` or your custom domain)
-   - Add `https://archi-ar.lovable.app/**` and your custom domain wildcard to the **Redirect URLs** allowlist
+   - Set **Site URL** to the production URL, `https://ar.felles.dk`
+   - Add `https://ar.felles.dk/**` (and any deploy-preview wildcard you need) to the **Redirect URLs** allowlist
 3. **Authentication → Policies / Password**
    - Enable **leaked-password protection (HIBP)**
    - Set **minimum password length** ≥ 8
@@ -131,7 +136,7 @@ the browser with a `CORS error` in the network tab and no on-screen feedback.
 
 ## 4. Update the application code
 
-These files **cannot be edited from inside Lovable** — do them in your ejected copy:
+Historical: these files could not be edited from inside Lovable, so they were changed in the ejected copy. They now hold:
 
 ### `.env`
 

@@ -23,9 +23,8 @@ npm install
 npm run dev
 ```
 
-`.npmrc` carries the install flags this project needs (`legacy-peer-deps` for the
-three/model-viewer peer conflict, `ignore-scripts` for jsdom's optional `canvas`
-dep). Don't override them ad hoc.
+`.npmrc` carries the install flag this project needs (`legacy-peer-deps` for the
+three/model-viewer peer conflict). Don't override it ad hoc.
 
 ## Scripts
 

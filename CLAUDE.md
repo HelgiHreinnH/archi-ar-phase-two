@@ -42,9 +42,10 @@ Build config is in `netlify.toml`, install flags in `.npmrc` — both in git, so
 local, CI and Netlify agree. Nothing important lives only in a hosting dashboard.
 
 ## Backend
-Migrating off Lovable Cloud Supabase (`hjaqqfuebfpxpbyldcso`) to the dedicated
-project `archi-ar` / `njrytsladmfhbttsitmn` (eu-central-1). `MIGRATION.md` is the
-runbook. Until that is done, the app still reads the Lovable-managed instance.
+Dedicated Supabase project `archi-ar` / `njrytsladmfhbttsitmn` (eu-central-1). The
+app has read it since the 22 Sep 2026 cut-over; the old Lovable Cloud project
+(`hjaqqfuebfpxpbyldcso`) is no longer used. `MIGRATION.md` is kept as the
+historical cut-over runbook and as a reference for rebuilding the backend.
 
 ## Documentation
 Code-adjacent `.md` stays in the repo (this file, `MIGRATION.md`, READMEs).
