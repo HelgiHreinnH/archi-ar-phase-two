@@ -51,6 +51,9 @@ Code-adjacent `.md` stays in the repo (this file, `MIGRATION.md`, READMEs).
 Reading material — audits, decision docs, session notes — goes to Notion, which is
 the source of truth for documentation.
 
+Project hub: [Archi AR - Project (Notion)](https://app.notion.com/p/2c03395b0b4981c1ae68c6753ec21aae). Update its top block (status,
+links, latest session) at the end of a working session.
+
 ## Database migrations
 The Supabase GitHub integration is connected: everything in `supabase/migrations/` is
 applied to `njrytsladmfhbttsitmn` on push to `main`. Two rules follow from that:

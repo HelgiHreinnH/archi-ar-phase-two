@@ -43,3 +43,7 @@ Netlify. Pull requests get deploy previews. Build settings live in `netlify.toml
 
 See `CLAUDE.md` for the working rules and `MIGRATION.md` for the Supabase
 migration runbook.
+
+## Documentation
+Project documentation (specs, decisions, audits, session notes) lives in Notion:
+[Archi AR - Project](https://app.notion.com/p/2c03395b0b4981c1ae68c6753ec21aae).
