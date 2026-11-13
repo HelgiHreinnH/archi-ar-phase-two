@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, ClipboardPaste, Check, AlertTriangle, Info, Plus, Trash2 } from "lucide-react";
+import { MapPin, ClipboardPaste, Check, AlertTriangle, Info, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -113,6 +113,7 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const seededRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const quality = computeSpacingQuality(markers);
 
@@ -165,9 +166,37 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
     setDirty(true);
   }, []);
 
-  const handleJsonPaste = () => {
+  const handleJsonPaste = () => importJsonText(jsonInput, "paste");
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Clear immediately, so picking the same file twice still fires onChange
+    // (re-exporting from Rhino under the same name is the normal case).
+    e.target.value = "";
+    if (!file) return;
+
+    // A marker file is a few hundred bytes. Anything large is the wrong file.
+    if (file.size > 1_000_000) {
+      toast({
+        title: "That file is too big",
+        description: "A marker JSON is usually well under a kilobyte — did you pick the GLB by mistake?",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      const parsed = JSON.parse(jsonInput);
+      importJsonText(await file.text(), "file");
+    } catch {
+      toast({ title: "Could not read that file", variant: "destructive" });
+    }
+  };
+
+  // Shared by the file picker and the paste box, so both accept exactly the
+  // same formats and fail the same way.
+  const importJsonText = (text: string, source: "file" | "paste") => {
+    try {
+      const parsed = JSON.parse(text);
 
       // Try array format first: [{ "index": 1, "x": 0, "y": 0, "z": 0 }, ...]
       if (Array.isArray(parsed)) {
@@ -177,7 +206,10 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
         setDirty(true);
         setShowJsonPaste(false);
         setJsonInput("");
-        toast({ title: `${normalized.length} markers imported` });
+        toast({
+          title: `${normalized.length} markers imported`,
+          description: "Check the values, then press Save.",
+        });
         return;
       }
 
@@ -188,14 +220,17 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
         setDirty(true);
         setShowJsonPaste(false);
         setJsonInput("");
-        toast({ title: "3 markers imported (legacy format)" });
+        toast({
+          title: "3 markers imported (legacy format)",
+          description: "Check the values, then press Save.",
+        });
         return;
       }
 
       throw new Error("Unrecognized format");
     } catch (e: any) {
       toast({
-        title: "Invalid JSON format",
+        title: source === "file" ? "Could not read that file" : "Invalid JSON format",
         description: 'Expected: [{ "index": 1, "x": 0, "y": 0, "z": 0 }, ...] or legacy { "A": {...}, "B": {...}, "C": {...} }',
         variant: "destructive",
       });
@@ -228,9 +263,20 @@ const MarkerCoordinateEditor = ({ projectId, markerData, onUpdate }: MarkerCoord
             Marker Configuration
           </CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowJsonPaste(!showJsonPaste)}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="mr-1 h-3 w-3" />
+              Upload JSON
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowJsonPaste(!showJsonPaste)}>
               <ClipboardPaste className="mr-1 h-3 w-3" />
-              Paste JSON
+              Paste
             </Button>
             {dirty && (
               <Button size="sm" onClick={handleSave} disabled={saving}>
