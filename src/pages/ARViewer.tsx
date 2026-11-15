@@ -117,8 +117,8 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop" && project?.mode !== "wall";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
-  // All modes use MindAR image tracking by default (8th Wall only behind
-  // `?engine=8thwall`, see worldEngineOn below).
+  // Spatial uses MindAR; Tabletop/Wall default to 8th Wall with MindAR as
+  // fallback (see worldEngineOn below).
   // Tabletop's single tracking target is the printed QR code itself; projects
   // generated before QR anchoring have no .mind and fall back to model-viewer.
   const projectHasMindFile = !!project?.mind_file_url;
@@ -255,15 +255,13 @@ const ARViewer = () => {
 
   const [resetKey, setResetKey] = useState(0);
 
-  // Tabletop/wall engine (26 Sep 2026, free vs paid proposal): MindAR by
-  // default — the model is locked to the printed QR while the QR is in view.
-  // The 8th Wall world-lock viewer (image target + SLAM, "Lock model") is kept
-  // for testing only and is reached with `?engine=8thwall`; if that engine
-  // can't start, it still falls back to MindAR. `?engine=mindar` is accepted
-  // for old links and simply means the default.
+  // Tabletop/wall engine (15 Nov 2026): the 8th Wall world-lock viewer (image
+  // target + SLAM) is the default — phone-tested, the model stays fixed in the
+  // room. MindAR is the automatic fallback if 8th Wall can't start, and
+  // `?engine=mindar` forces it for A/B checks. Spatial is unaffected.
   const [worldEngineOn, setWorldEngineOn] = useState(
-    () => typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("engine") === "8thwall",
+    () => typeof window === "undefined" ||
+      new URLSearchParams(window.location.search).get("engine") !== "mindar",
   );
 
   // Phase 0: label the timing line with what is actually running.
@@ -603,7 +601,7 @@ const ARViewer = () => {
           />
         );
       }
-      // Tabletop/Wall on MindAR (free-tier default): same status voice and
+      // Tabletop/Wall on MindAR (fallback / ?engine=mindar): same status voice and
       // chrome as the 8th Wall viewer. Spatial stays on MultipointViewer.
       if (!isMultipoint) {
         return (
