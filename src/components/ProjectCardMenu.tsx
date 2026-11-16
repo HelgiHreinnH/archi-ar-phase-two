@@ -22,7 +22,7 @@ import { toast } from "@/hooks/use-toast";
 import { friendlyError } from "@/lib/plans";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
-import { ARCHIVED, duplicateProject, isArchived, restoredStatus } from "@/lib/projectActions";
+import { ARCHIVED, deleteProject, duplicateProject, isArchived, restoredStatus } from "@/lib/projectActions";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Project = Tables<"projects">;
@@ -140,8 +140,7 @@ const ProjectCardMenu = ({ project, allNames }: ProjectCardMenuProps) => {
   });
 
   const remove = () => run("Delete", async () => {
-    const { error } = await supabase.from("projects").delete().eq("id", project.id);
-    if (error) throw error;
+    await deleteProject(project.id);
     await refresh();
     setDialog(null);
     toast({ title: "Experience deleted" });

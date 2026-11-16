@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
-import { copyName, restoredStatus, isArchived } from "./projectActions";
+import { collectFiles, copyName, restoredStatus, isArchived } from "./projectActions";
 
 describe("project actions", () => {
   it("names copies without stacking suffixes", () => {
@@ -24,5 +24,41 @@ describe("project actions", () => {
   it("detects archived", () => {
     expect(isArchived({ status: "archived" })).toBe(true);
     expect(isArchived({ status: "active" })).toBe(false);
+  });
+});
+
+describe("collectFiles", () => {
+  // The shape a real Spatial project leaves in storage (16 Nov 2026).
+  const tree: Record<string, { name: string; id: string | null }[]> = {
+    "p1": [
+      { name: "qr_code.png", id: "a" },
+      { name: "targets.mind", id: "b" },
+      { name: "thumbnail-v2.jpg", id: "c" },
+      { name: "markers", id: null },
+      { name: "mwj7ihau", id: null },
+    ],
+    "p1/markers": [{ name: "marker_1.png", id: "d" }, { name: "marker_2.png", id: "e" }],
+    "p1/mwj7ihau": [{ name: "koekken_archiar.glb", id: "f" }],
+  };
+  const list = async (path: string) => tree[path] ?? [];
+
+  it("walks sub-folders: models and marker images sit one level down", async () => {
+    expect((await collectFiles(list, "p1")).sort()).toEqual([
+      "p1/markers/marker_1.png",
+      "p1/markers/marker_2.png",
+      "p1/mwj7ihau/koekken_archiar.glb",
+      "p1/qr_code.png",
+      "p1/targets.mind",
+      "p1/thumbnail-v2.jpg",
+    ]);
+  });
+
+  it("returns nothing for a project without files", async () => {
+    expect(await collectFiles(list, "p2")).toEqual([]);
+  });
+
+  it("stops at the depth limit instead of walking forever", async () => {
+    const loop = async () => [{ name: "again", id: null }];
+    expect(await collectFiles(loop, "p", 3)).toEqual([]);
   });
 });
