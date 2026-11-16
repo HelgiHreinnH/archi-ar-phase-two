@@ -7,9 +7,9 @@ WebAR presentation platform for architects: upload a model from Rhino, generate 
 printed marker, share an AR experience with a client by QR code. No native app.
 
 ## Stack (locked)
-Vite + React 18 + TS + Tailwind + shadcn/Radix · MindAR.js 1.2.5 (Spatial, and
-fallback for Tabletop/Wall) · 8th Wall engine binary 1.0.0 (Tabletop/Wall: QR image
-target + SLAM, "Lock model"; `WorldLockScene.tsx`) · three 0.170 (PINNED — see .npmrc) ·
+Vite + React 18 + TS + Tailwind + shadcn/Radix · MindAR.js 1.2.5 (Spatial only) ·
+8th Wall engine binary 1.0.0 (Tabletop/Wall: QR image target + SLAM, auto lock;
+`WorldLockScene.tsx`) · three 0.170 (PINNED — see .npmrc) ·
 Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS.
 
 ## Rules
@@ -32,6 +32,10 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
   `WorldLockViewer.tsx`. §1.2 restricts paid products whose value derives
   substantially from the engine — accepted risk (Helgi, 23 Sep 2026); get it
   cleared with Niantic Spatial before scaling. Never modify or rehost altered builds.
+- **Tabletop/Wall have one engine.** The MindAR fallback was removed on 16 Nov 2026
+  (image tracking + gyro hold cannot keep a model on the QR once the phone moves).
+  If 8th Wall can't start, the client sees `AREngineUnavailable` — do not add a
+  silent second engine back. Tabletop/Wall generation no longer compiles a `.mind`.
 - One tap is the floor. `getUserMedia` and native AR both require user activation;
   zero-tap is not achievable in a browser.
 

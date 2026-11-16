@@ -1,5 +1,5 @@
 /**
- * One status voice for Tabletop/Wall (Oct 2026), shared by both engines.
+ * One status voice for Tabletop/Wall (Oct 2026).
  *
  * 4 Oct test, bugs 2 and 3: three messages contradicted each other for 55 s
  * ("Starting camera…", "Aim at the QR code", "Looking for the QR code…"), and
@@ -40,12 +40,6 @@ export interface QrStatusCopyInput {
   mode: string;
   /** 0–100, or null when unknown. */
   modelProgress: number | null;
-  /**
-   * True when the engine holds the model in the room on its own when the QR
-   * leaves the frame (8th Wall SLAM, or MindAR with motion access for the
-   * gyro hold). False: MindAR without motion — honest "keep the QR in view".
-   */
-  holdsInRoom: boolean;
   /** Engine hint, e.g. 8th Wall "too much motion". Replaces the body. */
   hint?: string | null;
 }
@@ -73,16 +67,15 @@ export function qrStatusCopy(i: QrStatusCopyInput): QrStatusCopy {
       c = { title: "Hold steady…", body: "Keep the QR in view for a moment." };
       break;
     case "placed":
-      c = i.holdsInRoom
-        ? { title: "Look around, the model stays put", body: "" }
-        : { title: "Model placed", body: "Keep the QR in view as you move." };
+      // 8th Wall world tracking holds the model in the room once it is locked.
+      c = { title: "Look around, the model stays put", body: "" };
       break;
   }
   if (i.hint && i.phase !== "starting") c = { ...c, body: i.hint };
   return c;
 }
 
-/** "Scale 1:50 · 0.89 × 0.86 m, 0.6 m high" — the same readout on both engines. */
+/** "Scale 1:50 · 0.89 × 0.86 m, 0.6 m high". */
 export function formatScaleReadout(
   modelScale: number,
   size: { width: number; depth: number; height: number } | null | undefined,

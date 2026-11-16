@@ -7,7 +7,6 @@ vi.mock("@/lib/assetCache", () => ({
   setCachedAsset: vi.fn(async (k: string, d: ArrayBuffer) => { idb.set(k, d); }),
 }));
 vi.mock("@/lib/xr8Engine", () => ({ loadXr8: vi.fn(() => Promise.resolve({})) }));
-vi.mock("@/lib/mindarEngine", () => ({ loadMindAR: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/lib/xr8QrTarget", () => ({ buildQrImageTarget: vi.fn(async () => ({ name: "archi-qr" })) }));
 
 import {

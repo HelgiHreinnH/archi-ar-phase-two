@@ -248,9 +248,11 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
 
   const [unlocked, setUnlocked] = useState(initialUnlocked);
 
-  // Warm the MindAR compiler while the architect fills in details/uploads, so
-  // "Generate" starts compiling immediately instead of downloading ~2 MB first.
-  useEffect(() => { preloadMindCompiler(); }, []);
+  // Spatial only: warm the MindAR compiler while the architect fills in
+  // details/uploads, so "Generate" starts compiling immediately instead of
+  // downloading ~2 MB first. Tabletop/Wall compile nothing (8th Wall builds its
+  // target from the QR at view time).
+  useEffect(() => { if (mode === "multipoint") preloadMindCompiler(); }, [mode]);
   const [activeSection, setActiveSection] = useState(0);
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
   const sectionEls = useRef<(HTMLElement | null)[]>([]);

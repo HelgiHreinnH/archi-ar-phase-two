@@ -5,18 +5,19 @@ import { friendlyError } from "@/lib/plans";
 import type { Tables } from "@/integrations/supabase/types";
 import QRCode from "qrcode";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
-import { compileMindFile } from "@/lib/compileMindFile";
 
 type Project = Tables<"projects">;
 
+// No "compiling" step: Tabletop/Wall run on 8th Wall, which builds its image
+// target from the stored QR at view time (xr8QrTarget). The MindAR .mind
+// compile was removed with the MindAR fallback on 16 Nov 2026.
 export type TabletopStep =
-  | "idle" | "qr" | "compiling" | "uploading" | "activating" | "done" | "error";
+  | "idle" | "qr" | "uploading" | "activating" | "done" | "error";
 
 const STEP_PROGRESS: Record<TabletopStep, number> = {
   idle: 0,
-  qr: 15,
-  compiling: 50,
-  uploading: 75,
+  qr: 25,
+  uploading: 60,
   activating: 90,
   done: 100,
   error: 0,
@@ -24,15 +25,14 @@ const STEP_PROGRESS: Record<TabletopStep, number> = {
 
 export const TABLETOP_PIPELINE = [
   { key: "qr" as const, label: "QR Code" },
-  { key: "compiling" as const, label: "Compile" },
   { key: "uploading" as const, label: "Upload" },
   { key: "activating" as const, label: "Activate" },
 ] as const;
 
 /**
  * QR render parameters. The SAME parameters must be used everywhere the QR is
- * rendered (upload, print sheet), because the compiled .mind tracking target
- * must match the printed image pixel-for-pixel for MindAR to anchor on it.
+ * rendered (upload, print sheet, the xr8QrTarget re-render), because the 8th
+ * Wall tracking target must match the printed image pixel-for-pixel.
  */
 export const TABLETOP_QR_OPTIONS = {
   width: 600,
@@ -44,18 +44,12 @@ export const TABLETOP_QR_OPTIONS = {
 export function useTabletopGeneration(project: Project, onGenerated: () => void) {
   const [generating, setGenerating] = useState(false);
   const [step, setStep] = useState<TabletopStep>("idle");
-  const [compileProgress, setCompileProgress] = useState(0);
 
-  const progress =
-    step === "compiling"
-      ? STEP_PROGRESS.qr +
-        (compileProgress / 100) * (STEP_PROGRESS.compiling - STEP_PROGRESS.qr)
-      : STEP_PROGRESS[step];
+  const progress = STEP_PROGRESS[step];
 
   const generate = useCallback(async () => {
     setGenerating(true);
     setStep("idle");
-    setCompileProgress(0);
 
     try {
       const shareId = project.share_link || crypto.randomUUID();
@@ -72,51 +66,19 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
         qrCanvas.toBlob((b) => resolve(b!), "image/png");
       });
 
-      // ── Compile .mind tracking target from the QR image ──
-      setStep("compiling");
-      const qrImage = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = qrCanvas.toDataURL("image/png");
-      });
-      const { blob: mindBlob } = await compileMindFile([qrImage], (p) =>
-        setCompileProgress(p)
-      );
-      console.log(`[tabletop] .mind compiled from QR — ${(mindBlob.size / 1024).toFixed(1)} KB`);
-
-      // ── Upload QR + .mind ──
+      // ── Upload the QR ──
+      // The stored image is the tracking source: the 8th Wall viewer builds its
+      // image target from it when the client opens the link.
       setStep("uploading");
       const qrPath = `${projectPath}/qr_code.png`;
-      const mindPath = `${projectPath}/targets.mind`;
-      const [qrUpload, mindUpload] = await Promise.all([
-        supabase.storage
-          .from("project-assets")
-          .upload(qrPath, qrBlob, { contentType: "image/png", upsert: true }),
-        supabase.storage
-          .from("project-assets")
-          .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true }),
-      ]);
-      if (qrUpload.error) throw qrUpload.error;
-      if (mindUpload.error) throw mindUpload.error;
-
-      // ── Verify .mind reachability before activating (same gate as multipoint) ──
-      const { data: signedMind, error: signErr } = await supabase.storage
+      const qrUpload = await supabase.storage
         .from("project-assets")
-        .createSignedUrl(mindPath, 60);
-      if (signErr || !signedMind?.signedUrl) {
-        throw new Error("Failed to verify .mind file: signing returned no URL");
-      }
-      const headRes = await fetch(signedMind.signedUrl, { method: "HEAD" });
-      if (!headRes.ok) {
-        throw new Error(`Failed to verify .mind file: HEAD returned ${headRes.status}`);
-      }
-      const contentLength = parseInt(headRes.headers.get("content-length") || "0", 10);
-      if (contentLength < 1024) {
-        throw new Error(`.mind file appears empty or invalid (${contentLength} bytes)`);
-      }
+        .upload(qrPath, qrBlob, { contentType: "image/png", upsert: true });
+      if (qrUpload.error) throw qrUpload.error;
 
       // ── Activate ──
+      // mind_file_url is left as it is: experiences generated before 16 Nov
+      // 2026 still carry a .mind path, which nothing reads for Tabletop/Wall.
       setStep("activating");
       const { error } = await supabase
         .from("projects")
@@ -124,7 +86,6 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
           share_link: shareId,
           status: "active",
           qr_code_url: qrPath,
-          mind_file_url: mindPath,
         })
         .eq("id", project.id);
       if (error) throw error;

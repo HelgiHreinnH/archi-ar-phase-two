@@ -71,7 +71,7 @@ const GenerateExperience = ({
   markerData,
   onGenerated,
 }: GenerateExperienceProps) => {
-  const isTabletop = mode !== "multipoint"; // treat wall like tabletop (same QR + .mind pipeline)
+  const isTabletop = mode !== "multipoint"; // treat wall like tabletop (same QR pipeline, no .mind)
 
   const tabletop = useTabletopGeneration(project, onGenerated);
   const multipoint = useMultipointGeneration(project, markerData, onGenerated);
