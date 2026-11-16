@@ -37,29 +37,23 @@ describe("qrLaunchPhase", () => {
 describe("qrStatusCopy", () => {
   it("only the placed phase says the model stays put", () => {
     for (const phase of ["starting", "aim", "found-loading", "placing"] as const) {
-      const c = qrStatusCopy({ phase, mode: "tabletop", modelProgress: 50, holdsInRoom: true });
+      const c = qrStatusCopy({ phase, mode: "tabletop", modelProgress: 50 });
       expect(`${c.title} ${c.body}`).not.toMatch(/stays put/i);
     }
-    expect(qrStatusCopy({ phase: "placed", mode: "tabletop", modelProgress: 100, holdsInRoom: true }).title)
+    expect(qrStatusCopy({ phase: "placed", mode: "tabletop", modelProgress: 100 }).title)
       .toBe("Look around, the model stays put");
   });
 
-  it("is honest on MindAR without motion access", () => {
-    const c = qrStatusCopy({ phase: "placed", mode: "tabletop", modelProgress: 100, holdsInRoom: false });
-    expect(c.title).not.toMatch(/stays put/i);
-    expect(c.body).toMatch(/QR in view/);
-  });
-
   it("names the surface and shows the download %", () => {
-    expect(qrStatusCopy({ phase: "aim", mode: "wall", modelProgress: null, holdsInRoom: true }).body).toMatch(/wall/);
-    expect(qrStatusCopy({ phase: "found-loading", mode: "tabletop", modelProgress: 64.4, holdsInRoom: true }).body)
+    expect(qrStatusCopy({ phase: "aim", mode: "wall", modelProgress: null }).body).toMatch(/wall/);
+    expect(qrStatusCopy({ phase: "found-loading", mode: "tabletop", modelProgress: 64.4 }).body)
       .toBe("Loading your model… 64%");
   });
 
   it("an engine hint replaces the body, never the starting screen", () => {
-    expect(qrStatusCopy({ phase: "placing", mode: "tabletop", modelProgress: 100, holdsInRoom: true, hint: "Move a little slower." }).body)
+    expect(qrStatusCopy({ phase: "placing", mode: "tabletop", modelProgress: 100, hint: "Move a little slower." }).body)
       .toBe("Move a little slower.");
-    expect(qrStatusCopy({ phase: "starting", mode: "tabletop", modelProgress: 0, holdsInRoom: true, hint: "x" }).body).toBe("");
+    expect(qrStatusCopy({ phase: "starting", mode: "tabletop", modelProgress: 0, hint: "x" }).body).toBe("");
   });
 });
 

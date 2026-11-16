@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { placeModelOnQr, qrOffsetMm } from "@/lib/modelPlacement";
 import { disposeScene } from "@/lib/threeDispose";
 import { ModelLoadError } from "@/lib/modelLoadError";
+import { CameraStartError } from "@/lib/cameraStartError";
 import type { Xr8ImageTargetData } from "@/lib/xr8QrTarget";
 import { QrPoseFilter, STEADY_FRAMES, STEADY_MAX_SD } from "@/lib/qrPoseFilter";
 import { glideProgress, lerpPose, type Pose } from "@/lib/poseGlide";
@@ -57,9 +58,9 @@ type Any = any;
 
 /**
  * If the engine hasn't reached onStart this long after XR8.run, give up and
- * let the viewer fall back to MindAR (e.g. a device 8th Wall can't run SLAM
- * on: it throws "No valid session manager" and never starts — the viewer sat
- * on "Starting…" forever).
+ * report it — ARViewer shows the engine-error screen (e.g. a device 8th Wall
+ * can't run SLAM on: it throws "No valid session manager" and never starts —
+ * the viewer sat on "Starting…" forever).
  */
 const ENGINE_START_TIMEOUT_MS = 20_000;
 
@@ -443,7 +444,7 @@ const WorldLockScene = ({
               }
               if (e?.status === "failed") {
                 const why = e?.reason || e?.permission || "";
-                cb.current.onError?.(new Error(`Camera could not start${why ? ` (${why})` : ""}.`));
+                cb.current.onError?.(new CameraStartError(why));
               }
             },
             onException: (e: Any) => {

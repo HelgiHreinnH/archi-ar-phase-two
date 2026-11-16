@@ -4,10 +4,10 @@
  * on warm assets instead of starting the downloads (4 Oct test: the engine
  * only began loading after the viewer mounted).
  *
- *  · the engine — 8th Wall xr.js + xr-slam.js, or MindAR + TF.js
+ *  · the engine — 8th Wall xr.js + xr-slam.js
  *  · three.js + GLTFLoader/Draco/meshopt modules (self-hosted)
  *  · the GLB (IndexedDB first, then a streamed download with progress)
- *  · the tracking target — the QR image target (8th Wall) or the .mind (MindAR)
+ *  · the tracking target — the 8th Wall QR image target, built from the QR
  *
  * Every entry is memoised and shared: the viewer that mounts after the tap
  * picks up the same promise, so nothing downloads twice. Keys ignore the
@@ -17,10 +17,7 @@
 import { buildQrImageTarget, type Xr8ImageTargetData } from "@/lib/xr8QrTarget";
 import { buildAssetKey, getCachedAsset, setCachedAsset } from "@/lib/assetCache";
 import { loadXr8 } from "@/lib/xr8Engine";
-import { loadMindAR } from "@/lib/mindarEngine";
 import { markAR } from "@/lib/arTiming";
-
-export type QrEngine = "8thwall" | "mindar";
 
 /** Signed URL → stable key (path only; the token changes on every re-sign). */
 export function assetKey(url: string): string {
@@ -128,7 +125,10 @@ export function subscribeModelProgress(url: string, l: (p: number | null) => voi
 
 const trackingFiles = new Map<string, Promise<ArrayBuffer>>();
 
-/** The MindAR .mind file, fetched once (MindARScene validates it). */
+/**
+ * A MindAR .mind file, fetched once (MindARScene validates it). Spatial only:
+ * Tabletop/Wall no longer have a .mind (16 Nov 2026).
+ */
 export function preloadTrackingFile(url: string): Promise<ArrayBuffer> {
   const key = assetKey(url);
   let p = trackingFiles.get(key);
@@ -178,24 +178,22 @@ const THREE_MODULES = [
 
 let threePreload: Promise<unknown> | null = null;
 
-export function preloadEngine(engine: QrEngine): void {
+/** The Tabletop/Wall engine (8th Wall) and the three modules it renders with. */
+export function preloadEngine(): void {
   if (!threePreload) {
     threePreload = Promise.all(THREE_MODULES.map((u) => import(/* @vite-ignore */ u))).catch(() => {
       threePreload = null;
     });
   }
   // Errors here are not fatal: the scene's own load call reports them.
-  if (engine === "8thwall") void loadXr8().catch(() => {});
-  else void loadMindAR().catch(() => {});
+  void loadXr8().catch(() => {});
 }
 
 export interface QrPreloadInput {
-  engine: QrEngine;
   shareId: string;
   modelUrl: string | null;
   modelCacheKey: string | null;
   qrCodeUrl: string | null;
-  mindFileUrl: string | null;
   qrSizeMm: number;
   /** ?q= was in the link. */
   sizedLink?: boolean;
@@ -203,13 +201,9 @@ export interface QrPreloadInput {
 
 /** Everything for one Tabletop/Wall experience. Safe to call repeatedly. */
 export function preloadQrExperience(i: QrPreloadInput): void {
-  preloadEngine(i.engine);
+  preloadEngine();
   if (i.modelUrl) void preloadModel(i.modelUrl, i.modelCacheKey).catch(() => {});
-  if (i.engine === "8thwall") {
-    void preloadQrTarget(i.qrCodeUrl, i.shareId, i.qrSizeMm, i.sizedLink).catch(() => {});
-  } else if (i.mindFileUrl) {
-    void preloadTrackingFile(i.mindFileUrl).catch(() => {});
-  }
+  void preloadQrTarget(i.qrCodeUrl, i.shareId, i.qrSizeMm, i.sizedLink).catch(() => {});
 }
 
 /** Test hook. */

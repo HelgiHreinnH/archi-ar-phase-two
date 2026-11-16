@@ -13,8 +13,11 @@ import QrViewerChrome from "@/components/ar/qr/QrViewerChrome";
  * on it and follows it while the readings settle → the scene locks it in the
  * room by itself (onLocked) → walk around it, look away, come back.
  * "Re-place" unlocks: the model follows the QR again and re-locks when
- * steady. Status copy comes from qrLaunchStatus — the same voice as the
- * MindAR viewer.
+ * steady. Status copy comes from qrLaunchStatus.
+ *
+ * This is the only Tabletop/Wall viewer: the MindAR fallback was removed on
+ * 16 Nov 2026. An engine that cannot start is reported through onEngineError
+ * and ARViewer shows AREngineUnavailable (or the camera screen).
  */
 
 interface WorldLockViewerProps {
@@ -35,7 +38,7 @@ interface WorldLockViewerProps {
   onClose: () => void;
   /** Model failed to load — ARViewer's recovery flow. */
   onModelError: (err: Error) => void;
-  /** Engine couldn't start on this device — fall back to MindAR. */
+  /** Engine or camera couldn't start on this device — ARViewer shows why. */
   onEngineError: (err: Error) => void;
 }
 
@@ -130,7 +133,6 @@ const WorldLockViewer = ({
         mode={project.mode}
         projectName={project.name}
         modelProgress={modelProgress}
-        holdsInRoom
         hint={hint}
         scaleReadout={formatScaleReadout(modelScale, shownSize)}
         onClose={onClose}

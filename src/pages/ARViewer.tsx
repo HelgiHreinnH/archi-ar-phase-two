@@ -9,15 +9,16 @@ import ARLanding from "@/components/ar/shared/ARLanding";
 import ARPermission from "@/components/ar/shared/ARPermission";
 import ARSessionEnd from "@/components/ar/shared/ARSessionEnd";
 import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRecovery";
+import AREngineUnavailable from "@/components/ar/shared/AREngineUnavailable";
 import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
 import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
 import WorldLockViewer from "@/components/ar/tabletop/WorldLockViewer";
 import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
+import { CameraStartError } from "@/lib/cameraStartError";
 import { markAR, setARContext, logARTimingSummary, resetARSessionMarks } from "@/lib/arTiming";
 import ARTimingOverlay from "@/components/ar/shared/ARTimingOverlay";
 import QrPreCamera from "@/components/ar/qr/QrPreCamera";
-import MindARQrViewer from "@/components/ar/qr/MindARQrViewer";
 import { beginARLaunchFromTap } from "@/lib/arLaunch";
 import { modelCacheKeyFor, preloadQrExperience, subscribeModelProgress } from "@/lib/arPreload";
 import { QR_SIZE_MM } from "@/components/ar/tabletop/WorldLockScene";
@@ -32,7 +33,10 @@ type Project = Tables<"projects">;
 // permission call out of its user-activation window. See launchAR.
 // "ended" is the screen after the viewer closes the camera (future home of
 // viewer feedback — see ARSessionEnd).
-type ViewerState = "landing" | "permission-denied" | "sri-error" | "detecting" | "model-viewer" | "ended";
+// "engine-error": the 8th Wall engine could not start for a Tabletop/Wall
+// experience. There is no second engine behind it (16 Nov 2026) — the client
+// gets a clear screen with a retry instead of a degraded tracker.
+type ViewerState = "landing" | "permission-denied" | "sri-error" | "engine-error" | "detecting" | "model-viewer" | "ended";
 type MarkerStatus = "searching" | "detected" | "locked";
 
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
@@ -118,10 +122,10 @@ const ARViewer = () => {
   const markerData = project ? normalizeMarkerData(project.marker_data) : null;
   const isMultipoint = project?.mode !== "tabletop" && project?.mode !== "wall";
   const markerCount = isMultipoint ? (markerData?.length ?? 3) : 1;
-  // Spatial uses MindAR; Tabletop/Wall default to 8th Wall with MindAR as
-  // fallback (see worldEngineOn below).
-  // Tabletop's single tracking target is the printed QR code itself; projects
-  // generated before QR anchoring have no .mind and fall back to model-viewer.
+  // Spatial runs on MindAR and needs its compiled .mind file. Tabletop/Wall
+  // run on 8th Wall only (16 Nov 2026: the MindAR fallback was removed — image
+  // tracking cannot hold a model in the room); their tracking target is built
+  // at view time from the printed QR, so they need no .mind.
   const projectHasMindFile = !!project?.mind_file_url;
 
   // Dynamic marker status state
@@ -160,19 +164,9 @@ const ARViewer = () => {
     // called by the tap handler itself — see launchFromTap.
     if (fromTap && isMultipoint) requestMotionPermission();
 
-    // Tabletop WITHOUT a compiled tracking file (legacy projects generated
-    // before QR anchoring was restored): fall back to model-viewer's native
-    // SLAM placement — the model is user-placed, not QR-anchored. This path
-    // genuinely needs the model up front, so it keeps its loading gate below.
-    if (!isMultipoint && !projectHasMindFile) {
-      dlog("launchAR → model-viewer (tabletop legacy fallback, no .mind)");
-      setViewState("model-viewer");
-      return;
-    }
-
-    // Tabletop with .mind + wall + spatial: MindAR image tracking. For tabletop
-    // and wall the single target is the printed QR code — the model's centre
-    // locks onto it so it never floats freely in the room.
+    // Tabletop/Wall: 8th Wall (QR image target + SLAM) — the model's centre
+    // locks onto the printed QR and then stays fixed in the room.
+    // Spatial: MindAR image tracking on the location markers.
     setMarkers(getInitialMarkers());
     dlog("launchAR → detecting", { isMultipoint, markerCount });
     setViewState("detecting");
@@ -190,15 +184,14 @@ const ARViewer = () => {
     void refetch().catch((e) => {
       dlog("refetch failed (continuing with cached URLs):", e);
     });
-  }, [isMultipoint, projectHasMindFile, getInitialMarkers, refetch, markerCount, sessionCacheKey]);
+  }, [isMultipoint, getInitialMarkers, refetch, markerCount, sessionCacheKey]);
 
   // Sept 2026: open straight into the camera. Scanning the printed QR already
   // expressed the intent — the landing page's "Launch AR Camera" tap was a
   // second ask. getUserMedia does not need a tap (the OS shows its own camera
-  // prompt the first time); only iOS motion access does, and tabletop no longer
-  // depends on it while the QR is in view. Legacy projects without a .mind
-  // still land first (native AR needs a tap). `?landing=1` forces the landing
-  // page for testing/sharing.
+  // prompt the first time); only iOS motion access does. Spatial projects
+  // without a .mind still land first. `?landing=1` forces the landing page for
+  // testing/sharing.
   const autoLaunched = useRef(false);
   const forceLanding = typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("landing") === "1";
@@ -207,7 +200,7 @@ const ARViewer = () => {
     if (!project || !projectHasMindFile || viewState !== "landing") return;
     // Oct 2026: Tabletop/Wall no longer auto-launch — they get the single tap
     // on QrPreCamera (iOS motion access needs a gesture; without it there is
-    // no world lock / gyro hold). Spatial keeps auto-launch unchanged.
+    // no world lock). Spatial keeps auto-launch unchanged.
     if (!isMultipoint) return;
     if (modelUrlError) return; // the recovery screen owns this case
     autoLaunched.current = true;
@@ -256,30 +249,26 @@ const ARViewer = () => {
 
   const [resetKey, setResetKey] = useState(0);
 
-  // Tabletop/wall engine (15 Nov 2026): the 8th Wall world-lock viewer (image
-  // target + SLAM) is the default — phone-tested, the model stays fixed in the
-  // room. MindAR is the automatic fallback if 8th Wall can't start, and
-  // `?engine=mindar` forces it for A/B checks. Spatial is unaffected.
-  const [worldEngineOn, setWorldEngineOn] = useState(
-    () => typeof window === "undefined" ||
-      new URLSearchParams(window.location.search).get("engine") !== "mindar",
-  );
+  // Tabletop/Wall engine: the 8th Wall world-lock viewer (image target + SLAM),
+  // and nothing else. MindAR was the default (26 Sep), then the automatic
+  // fallback (15 Nov), and was removed on 16 Nov 2026: its "lock" is a gyro
+  // hold, which sees rotation but not movement, so the model slid off the QR
+  // as soon as the phone moved (15 Nov phone test). If 8th Wall cannot start,
+  // the client gets the engine-error screen. Spatial is unaffected (MindAR).
+  const [engineErrorMessage, setEngineErrorMessage] = useState<string | null>(null);
 
   // Phase 0: label the timing line with what is actually running.
   useEffect(() => {
     if (!project?.mode) return;
     setARContext("mode", project.mode);
-    setARContext("engine", project.mode === "tabletop" || project.mode === "wall"
-      ? (worldEngineOn ? "8thwall" : "mindar")
-      : "mindar");
-  }, [project?.mode, worldEngineOn]);
+    setARContext("engine", project.mode === "tabletop" || project.mode === "wall" ? "8thwall" : "mindar");
+  }, [project?.mode]);
   useEffect(() => {
     if (viewState === "ended") logARTimingSummary(true);
   }, [viewState]);
 
   // Tabletop/Wall preload: while the pre-camera screen is up, fetch the engine,
   // the tracking target and the model, so the tap lands on warm assets.
-  const preloadEngine = worldEngineOn ? "8thwall" : "mindar";
   // Printed QR size, carried in the scanned link (?q=50|100|150). No ?q = a QR
   // printed before multi-size support: 150 mm, the stored plain image.
   const linkQrSize = qrSizeFromSearch(typeof window !== "undefined" ? window.location.search : "");
@@ -291,19 +280,17 @@ const ARViewer = () => {
     if (!project || isMultipoint || !shareId) return;
     if (viewState !== "landing" && viewState !== "detecting") return;
     preloadQrExperience({
-      engine: preloadEngine,
       shareId,
       modelUrl: preloadModelUrl,
       modelCacheKey: modelCacheKeyFor(shareId, project.updated_at),
       qrCodeUrl: project.qr_code_url ?? null,
-      mindFileUrl: project.mind_file_url ?? null,
       qrSizeMm,
       sizedLink,
     });
     if (!preloadModelUrl) return;
     return subscribeModelProgress(preloadModelUrl, setPreloadProgress);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id, isMultipoint, shareId, viewState, preloadEngine, preloadModelUrl, qrSizeMm, sizedLink]);
+  }, [project?.id, isMultipoint, shareId, viewState, preloadModelUrl, qrSizeMm, sizedLink]);
 
   const handleReset = useCallback(() => {
     setMarkers(getInitialMarkers());
@@ -334,7 +321,7 @@ const ARViewer = () => {
     setViewState("permission-denied");
   }, []);
 
-  // Multipoint tracking source: always the .mind file
+  // Spatial tracking source: always the .mind file
   const imageTargetSrc = project?.mind_file_url || undefined;
 
   // Model URL comes pre-signed from the edge function (buckets are private)
@@ -475,9 +462,8 @@ const ARViewer = () => {
 
   const body = (() => { switch (viewState) {
     case "landing":
-      // Tabletop/Wall: the single tap screen (unless ?landing=1, or a legacy
-      // project that can only open native device AR).
-      if (!isMultipoint && !forceLanding && (projectHasMindFile || worldEngineOn)) {
+      // Tabletop/Wall: the single tap screen (unless ?landing=1).
+      if (!isMultipoint && !forceLanding) {
         return (
           <QrPreCamera
             projectName={project.name}
@@ -497,9 +483,9 @@ const ARViewer = () => {
           onCancel={() => setViewState("landing")}
           onRetry={() => launchFromTap()}
           errorMessage={arErrorMessage}
-          // Tabletop can degrade to native device AR (model-viewer) if the
-          // in-browser camera path fails — user-placed instead of QR-anchored,
-          // but better than a dead end.
+          // Tabletop/Wall can degrade to the 3D preview / native device AR
+          // (model-viewer) if the in-browser camera path fails — user-placed
+          // instead of QR-anchored, but better than a dead end.
           onFallback={!isMultipoint ? () => setViewState("model-viewer") : undefined}
           fallbackLabel={!isMultipoint ? "Use device AR instead" : undefined}
         />
@@ -556,6 +542,25 @@ const ARViewer = () => {
       );
     }
 
+    case "engine-error":
+      // Tabletop/Wall only: 8th Wall could not start (engine script blocked or
+      // offline, start timeout, unsupported browser). Retry re-runs the whole
+      // launch from this tap; the failed engine/target loads are not memoised.
+      return (
+        <AREngineUnavailable
+          projectName={project.name}
+          errorDetail={engineErrorMessage}
+          onRetry={() => {
+            resetARSessionMarks();
+            setEngineErrorMessage(null);
+            setResetKey((k) => k + 1);
+            launchFromTap();
+          }}
+          onPreview={() => setViewState("model-viewer")}
+          onBack={() => setViewState("landing")}
+        />
+      );
+
     case "model-viewer":
       if (!isModelReady) {
         return (
@@ -589,7 +594,7 @@ const ARViewer = () => {
       );
 
     case "detecting":
-      if (!isMultipoint && worldEngineOn) {
+      if (!isMultipoint) {
         return (
           <WorldLockViewer
             key={`wl-${resetKey}`}
@@ -603,32 +608,21 @@ const ARViewer = () => {
             onClose={() => setViewState("ended")}
             onModelError={(err) => handleARError(err)}
             onEngineError={(err) => {
-              console.warn("[ARViewer] 8th Wall unavailable, falling back to MindAR:", err);
-              setARContext("fallback", "8thwall→mindar");
-              setWorldEngineOn(false);
+              // The camera itself failed (denied, in use): the permission
+              // screen explains that better than an engine message.
+              if (err instanceof CameraStartError) {
+                handleARError(err);
+                return;
+              }
+              console.warn("[ARViewer] 8th Wall could not start:", err);
+              setARContext("engine-error", err.message);
+              setEngineErrorMessage(err.message);
+              setViewState("engine-error");
             }}
           />
         );
       }
-      // Tabletop/Wall on MindAR (fallback / ?engine=mindar): same status voice and
-      // chrome as the 8th Wall viewer. Spatial stays on MultipointViewer.
-      if (!isMultipoint) {
-        return (
-          <MindARQrViewer
-            key={`qr-${resetKey}`}
-            project={project}
-            shareId={shareId ?? ""}
-            imageTargetSrc={imageTargetSrc}
-            modelUrl={publicModelUrl}
-            modelScale={scaleNum}
-            qrSizeMm={qrSizeMm}
-            initialRotation={project.initial_rotation || 0}
-            onClose={() => setViewState("ended")}
-            onError={(err) => handleARError(err)}
-          />
-        );
-      }
-      // No model gate here: the camera and tracking start immediately and the
+      // Spatial. No model gate here: the camera and tracking start immediately and the
       // model attaches to the live scene whenever its URL/buffer lands
       // (MindARScene Effect B). Only the model-viewer path above needs the
       // model before it can render anything.

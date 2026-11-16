@@ -41,7 +41,10 @@
          integrity makes the browser verify the hash before the module is reused
          by the later import. Recompute when bumping `mind-ar` version.
          Oct 2026: skipped on ?engine=8thwall links, where the MindAR + TF.js
-         bundle only competed with the 8th Wall engine download on 4G. -->
+         bundle only competed with the 8th Wall engine download on 4G.
+         Nov 2026: MindAR now serves Spatial only (Tabletop/Wall are 8th Wall
+         only). The mode is not known here, so the preload still runs on plain
+         /view links; the ?engine=8thwall switch is kept for the Spatial tests. -->
     <script>
       (function () {
         var q = new URLSearchParams(location.search);

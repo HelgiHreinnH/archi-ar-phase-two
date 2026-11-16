@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from "react";
-// LEGACY ONLY. Every current tabletop/wall/spatial experience runs through
-// MindAR + Three.js with a GLB, anchored to the QR code / markers. This
-// model-viewer + Quick Look path is kept solely so tabletop/wall projects
-// generated before QR anchoring (no .mind file) keep working until their
-// owner regenerates them. New USDZ files can no longer be uploaded.
+// FALLBACK ONLY. Tabletop/Wall run on 8th Wall (WorldLockViewer), Spatial on
+// MindAR. This model-viewer path (3D preview + native device AR where the OS
+// offers it) is reached only from the error screens — "Open the 3D preview
+// instead" when the AR engine can't start, "Use device AR instead" when the
+// camera is refused. New USDZ files can no longer be uploaded.
 // Phase 3.3 — Lazy-load <model-viewer>. The multi-point AR path never uses it
 // (it goes through XR8/MindAR), so keeping ~200KB out of that bundle is free.
 import { ArrowLeft, Box, Info, ChevronDown, AlertTriangle } from "lucide-react";
