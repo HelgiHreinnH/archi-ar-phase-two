@@ -3,7 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { friendlyError } from "@/lib/plans";
 import type { Tables } from "@/integrations/supabase/types";
-import QRCode from "qrcode";
+import { spatialQrSvg } from "@/lib/spatial/qr";
+import { canvasToBlob, svgToCanvas } from "@/lib/spatial/raster";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 import { compileMindFile } from "@/lib/compileMindFile";
 
@@ -29,10 +30,18 @@ export const TABLETOP_PIPELINE = [
   { key: "activating" as const, label: "Activate" },
 ] as const;
 
+/** Pixel size of the stored tracking QR (designed round badge). */
+export const TABLETOP_QR_PX = 1440;
+
 /**
- * QR render parameters. The SAME parameters must be used everywhere the QR is
- * rendered (upload, print sheet), because the compiled .mind tracking target
- * must match the printed image pixel-for-pixel for MindAR to anchor on it.
+ * LEGACY plain-QR render parameters. Since the round QR design (16 Nov 2026) new
+ * experiences store the designed badge as qr_code.png and everything reads that
+ * stored image. These options remain only as the re-render fallback for
+ * experiences generated BEFORE the image was stored / before the round design —
+ * for those the plain QR is still the correct target.
+ *
+ * The printed image must always be the exact image the tracking target was built
+ * from, pixel-for-pixel, for MindAR / 8th Wall to anchor on it.
  */
 export const TABLETOP_QR_OPTIONS = {
   width: 600,
@@ -66,11 +75,11 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
       // The printed QR is both the launch link AND the AR anchor: the model's
       // centre locks onto the centre of this image in the AR view.
       setStep("qr");
-      const qrCanvas = document.createElement("canvas");
-      await QRCode.toCanvas(qrCanvas, shareUrl, TABLETOP_QR_OPTIONS);
-      const qrBlob = await new Promise<Blob>((resolve) => {
-        qrCanvas.toBlob((b) => resolve(b!), "image/png");
-      });
+      // Designed round QR (same design as Spatial, locked 16 Nov 2026). The whole
+      // square image is the tracking target: 1440 px = 3 × the 480 px 8th Wall
+      // target width, so the nearest-neighbour downscale there stays clean.
+      const qrCanvas = await svgToCanvas(spatialQrSvg(shareUrl, "round"), TABLETOP_QR_PX, TABLETOP_QR_PX);
+      const qrBlob = await canvasToBlob(qrCanvas);
 
       // ── Compile .mind tracking target from the QR image ──
       setStep("compiling");

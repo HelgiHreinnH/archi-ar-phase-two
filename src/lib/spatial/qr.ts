@@ -1,7 +1,7 @@
 /**
- * Spatial QR renderer — three outputs, all custom SVG built from the
- * `qrcode` module matrix (error correction H). Spatial only: Tabletop/Wall
- * keep TABLETOP_QR_OPTIONS because there the QR is the tracking target.
+ * Designed QR renderer — custom SVG built from the `qrcode` module matrix
+ * (error correction H). Used by Spatial (all outputs) and, as the "round" badge,
+ * as the stored tracking target for Tabletop/Wall (useTabletopGeneration).
  *
  *   round  — "designed" badge: square code inside concentric arcs (variant A2)
  *   subtle — just the code: blue rounded finders, logo centre, no arcs
