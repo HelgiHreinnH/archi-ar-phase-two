@@ -1,15 +1,15 @@
 /**
- * Generate print-ready A4 PDFs for marker placement sheets.
+ * Print-ready A4 PDFs for Spatial (multipoint) markers and the client QR page.
+ * Layouts live in spatial/sheets.ts (locked design, 16 Nov 2026).
  * Supports N markers with dynamic numbering.
  */
 import jsPDF from "jspdf";
-import QRCode from "qrcode";
-import { generateMarkerCanvas } from "@/lib/generateMarkers";
-import { type MarkerPoint, getSafeMarkerColor, hexToRgb } from "@/lib/markerTypes";
+import { type MarkerPoint, getSafeMarkerColor } from "@/lib/markerTypes";
+import { markerSheetSvg, qrPageSvg } from "@/lib/spatial/sheets";
+import { loadSheetFontCss, svgToCanvas } from "@/lib/spatial/raster";
 
 const A4_W = 210;
 const A4_H = 297;
-const MARGIN = 15;
 
 function safeFileName(value: string): string {
   return value.trim().replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "project";
@@ -28,102 +28,47 @@ function savePdf(doc: jsPDF, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+const PAGE_PX_W = 2480; // A4 @ 300 dpi
+const PAGE_PX_H = 3508;
+
+/** Rasterise one finished page SVG at 300 dpi and place it full-bleed on the current PDF page. */
+async function addPageImage(doc: jsPDF, svg: string): Promise<void> {
+  const canvas = await svgToCanvas(svg, PAGE_PX_W, PAGE_PX_H);
+  doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, A4_W, A4_H, undefined, "FAST");
+}
+
+/**
+ * One location-marker sheet (Spatial, locked v7): title + logo, disc at exactly
+ * 150 mm (= MARKER_SIZE_MM in MindARScene), X/Y/Z, origin row, placement steps,
+ * round QR. The disc is drawn from the same SVG as the tracked marker image.
+ */
 async function addMarkerPage(
   doc: jsPDF,
   marker: MarkerPoint,
   projectName: string,
   shareUrl: string
 ): Promise<void> {
-  const color = getSafeMarkerColor(marker.index);
-  const [cr, cg, cb] = hexToRgb(color.bg);
-  const contentW = A4_W - MARGIN * 2;
-  let y = MARGIN;
+  const fontCss = await loadSheetFontCss();
+  const svg = markerSheetSvg(
+    {
+      index: marker.index,
+      x: marker.x,
+      y: marker.y,
+      z: marker.z,
+      label: marker.label,
+      projectName,
+      color: getSafeMarkerColor(marker.index).bg,
+      shareUrl,
+    },
+    fontCss
+  );
+  await addPageImage(doc, svg);
+}
 
-  // Header bar
-  doc.setFillColor(cr, cg, cb);
-  doc.rect(0, 0, A4_W, 18, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.text(projectName.toUpperCase(), MARGIN, 12);
-  doc.text(`MARKER ${marker.index}`, A4_W - MARGIN, 12, { align: "right" });
-
-  y = 26;
-
-  // Point label
-  doc.setTextColor(50, 50, 50);
-  doc.setFontSize(18);
-  doc.setFont("helvetica", "bold");
-  doc.text(`Point ${marker.index} — ${marker.label || `Marker ${marker.index}`}`, A4_W / 2, y, { align: "center" });
-  y += 10;
-
-  // Marker image
-  const markerCanvas = generateMarkerCanvas(marker, projectName);
-  const markerDataUrl = markerCanvas.toDataURL("image/png");
-  const markerSize = 130;
-  const markerX = (A4_W - markerSize) / 2;
-  doc.addImage(markerDataUrl, "PNG", markerX, y, markerSize, markerSize);
-  y += markerSize + 8;
-
-  // Coordinates
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100, 100, 100);
-  doc.text("PLACEMENT COORDINATES", A4_W / 2, y, { align: "center" });
-  y += 6;
-
-  doc.setFontSize(13);
-  doc.setFont("courier", "bold");
-  doc.setTextColor(40, 40, 40);
-  doc.text(`X: ${marker.x}    Y: ${marker.y}    Z: ${marker.z}  (mm)`, A4_W / 2, y, { align: "center" });
-  y += 10;
-
-  // QR code
-  const qrCanvas = document.createElement("canvas");
-  await QRCode.toCanvas(qrCanvas, shareUrl, { width: 400, margin: 1, color: { dark: "#212121", light: "#FFFFFF" } });
-  const qrDataUrl = qrCanvas.toDataURL("image/png");
-  const qrSize = 32;
-  doc.addImage(qrDataUrl, "PNG", (A4_W - qrSize) / 2, y, qrSize, qrSize);
-  y += qrSize + 4;
-
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(140, 140, 140);
-  doc.text("Scan to view AR experience", A4_W / 2, y, { align: "center" });
-  y += 4;
-  doc.setFontSize(7);
-  doc.text(shareUrl, A4_W / 2, y, { align: "center" });
-  y += 8;
-
-  // Instructions footer
-  doc.setDrawColor(220, 220, 220);
-  doc.line(MARGIN, y, A4_W - MARGIN, y);
-  y += 5;
-
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(80, 80, 80);
-  doc.text("PLACEMENT INSTRUCTIONS", MARGIN, y);
-  y += 5;
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(100, 100, 100);
-  const instructions = [
-    `1. Print this page at 100% scale (no fit-to-page). The marker must be actual size for accurate AR tracking.`,
-    `2. Place this sheet at the coordinates shown above (X: ${marker.x}, Y: ${marker.y}, Z: ${marker.z} mm).`,
-    `3. Ensure the marker is flat, well-lit, and unobstructed. Avoid reflective surfaces or glass overlays.`,
-    `4. At least 3 markers must be placed before the AR experience can align the 3D model.`,
-  ];
-  instructions.forEach((line) => {
-    const split = doc.splitTextToSize(line, contentW);
-    doc.text(split, MARGIN, y);
-    y += split.length * 3.5 + 1.5;
-  });
-
-  doc.setFontSize(6.5);
-  doc.setTextColor(180, 180, 180);
-  doc.text("Generated by Archi AR", A4_W / 2, A4_H - 8, { align: "center" });
+/** Client QR page: round QR badge, three steps, placement notes. */
+async function addQrPage(doc: jsPDF, projectName: string, shareUrl: string): Promise<void> {
+  const fontCss = await loadSheetFontCss();
+  await addPageImage(doc, qrPageSvg({ projectName, shareUrl }, fontCss));
 }
 
 export async function generateMarkerPDF(
@@ -162,4 +107,11 @@ export async function downloadAllMarkerPDFs(
   }
 
   savePdf(doc, `All_Markers_${safeFileName(projectName)}.pdf`);
+}
+
+/** Generate and download the client QR page (A4 PDF). */
+export async function downloadQrPagePDF(projectName: string, shareUrl: string): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  await addQrPage(doc, projectName, shareUrl);
+  savePdf(doc, `QR_${safeFileName(projectName)}.pdf`);
 }

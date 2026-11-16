@@ -4,7 +4,7 @@ import { toast } from "@/hooks/use-toast";
 import { friendlyError } from "@/lib/plans";
 import type { Tables } from "@/integrations/supabase/types";
 import type { MarkerPoint } from "@/lib/markerTypes";
-import QRCode from "qrcode";
+import { spatialQrPng } from "@/lib/spatial/qrExport";
 import { generateAllMarkerImages, canvasToImage } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
@@ -119,15 +119,8 @@ export function useMultipointGeneration(
 
       // ── QR code ──
       setStep("qr");
-      const qrCanvas = document.createElement("canvas");
-      await QRCode.toCanvas(qrCanvas, shareUrl, {
-        width: 600,
-        margin: 2,
-        color: { dark: "#212121", light: "#FFFFFF" },
-      });
-      const qrBlob = await new Promise<Blob>((resolve) => {
-        qrCanvas.toBlob((b) => resolve(b!), "image/png");
-      });
+      // Designed round QR (Spatial only — Tabletop/Wall keep TABLETOP_QR_OPTIONS)
+      const qrBlob = await spatialQrPng(shareUrl, "round", 1200);
       const qrPath = `${projectPath}/qr_code.png`;
       const { error: qrUploadErr } = await supabase.storage
         .from("project-assets")

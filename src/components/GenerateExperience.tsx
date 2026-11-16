@@ -11,7 +11,8 @@ import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
-import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
+import { downloadMarkerPDF, downloadAllMarkerPDFs, downloadQrPagePDF } from "@/lib/generateMarkerPDF";
+import { downloadSpatialQrPng } from "@/lib/spatial/qrExport";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import QRCode from "qrcode";
@@ -389,6 +390,38 @@ const GenerateExperience = ({
                   <Download className="h-3 w-3" />
                   Download All Marker PDFs
                 </Button>
+                <p className="text-xs text-muted-foreground pt-1">
+                  Client QR: an A4 page to hang at the start of the visit, or the QR on its own.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => downloadQrPagePDF(project.name, shareUrl)}
+                  >
+                    <FileText className="h-3 w-3" />
+                    QR page (PDF)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => downloadSpatialQrPng(shareUrl, "round", project.name)}
+                  >
+                    <Download className="h-3 w-3" />
+                    QR designed (PNG)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => downloadSpatialQrPng(shareUrl, "subtle", project.name)}
+                  >
+                    <Download className="h-3 w-3" />
+                    QR subtle (PNG)
+                  </Button>
+                </div>
               </>
             )}
 

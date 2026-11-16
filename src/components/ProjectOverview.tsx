@@ -21,7 +21,8 @@ import { lazyWithReload } from "@/lib/staleDeploy";
 // model-viewer (~400KB) and three.js until ProjectOverview actually mounts.
 const ModelStill = lazyWithReload(() => import("@/components/ModelStill"));
 import SharePopover from "@/components/SharePopover";
-import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
+import { downloadMarkerPDF, downloadAllMarkerPDFs, downloadQrPagePDF } from "@/lib/generateMarkerPDF";
+import { downloadSpatialQrPng } from "@/lib/spatial/qrExport";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 
@@ -190,6 +191,24 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
                     >
                       <Download className="h-3 w-3" />
                       All Markers (PDF)
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start gap-2 text-xs h-7"
+                      onClick={() => downloadQrPagePDF(project.name, shareUrl!)}
+                    >
+                      <FileText className="h-3 w-3" />
+                      QR page (PDF)
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start gap-2 text-xs h-7"
+                      onClick={() => downloadSpatialQrPng(shareUrl!, "subtle", project.name)}
+                    >
+                      <Download className="h-3 w-3" />
+                      QR subtle (PNG)
                     </Button>
                   </div>
                 )}
