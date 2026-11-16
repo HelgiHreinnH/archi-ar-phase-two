@@ -31,6 +31,14 @@
  * triangle strips/fans are converted to plain triangles.
  *
  * Measured on Fændediget in Node: 50.3 MB → 4.4 MB, ~17 s.
+ *
+ * Marker carriers (16 Nov 2026): the Rhino plugin bakes one small sphere per
+ * Spatial marker (`marker_A_proxy` …). join() used to merge the three spheres
+ * into a single node, so the optimised file no longer said where each marker
+ * was and the plugin told architects to switch "Optimize for AR" off — which
+ * sent 211 draw calls to the phone instead of 6 (kitchen test). Marker nodes
+ * are now left out of the join, so the optimised file still carries them and
+ * optimisation can stay on for Spatial models.
  */
 import type { Document, Material, Texture, TextureInfo } from "@gltf-transform/core";
 import type { Transmission } from "@gltf-transform/extensions";
@@ -56,6 +64,14 @@ const HEAVY_MATERIAL_EXTENSIONS = [
 // glTF sampler enums
 const LINEAR = 9729;
 const LINEAR_MIPMAP_LINEAR = 9987;
+
+/**
+ * Node names the marker parser reads (`parseGlbMarkers.ts`): `marker_A`,
+ * `marker_3`, `Marker-B_proxy` … Kept in step with that parser's normalising.
+ */
+export function isMarkerNodeName(name: string): boolean {
+  return /^marker_(?:[a-z]|\d{1,2})(?:_proxy)?$/.test(name.trim().toLowerCase().replace(/[\s-]/g, "_"));
+}
 
 export interface ModelStats {
   nodes: number;
@@ -200,7 +216,8 @@ export async function optimizeDocument(
     dedup({ propertyTypes: ["Material", "Texture", "Mesh"] }),
     instance({ min: 5 }),
     flatten(),
-    join({ keepNamed: false }),
+    // Everything joins by material, except the marker carriers (see header).
+    join({ keepNamed: false, filter: (node) => !isMarkerNodeName(node.getName()) }),
     weld(),
     prune({ keepAttributes: false, keepLeaves: false }),
   );
