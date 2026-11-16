@@ -41,7 +41,7 @@ const JPEG_QUALITY = 0.88;
  * desktop tab with it. 24 MP ≈ 128 MB keeps a heavy architectural model
  * inside what a phone can hold.
  */
-const TEXTURE_BUDGET_MP = 24;
+export const TEXTURE_BUDGET_MP = 24;
 /** Never go below this: smaller than 512 looks obviously blurry up close. */
 const MIN_TEXTURE_SIZE = 512;
 
@@ -185,6 +185,96 @@ export function writeGlb(json: GltfJson, bin: Uint8Array | null): ArrayBuffer {
     u8.set(bin, b + 8);
   }
   return glb;
+}
+
+/**
+ * Pixel size of an embedded image, read from its header only (no decoding).
+ * PNG, JPEG and WebP; null for anything else (KTX2, truncated data).
+ */
+export function imagePixelSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const n = bytes.byteLength;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, n);
+
+  // PNG: signature (8) + IHDR length/type (8) + width, height (big-endian).
+  if (n >= 24 && dv.getUint32(0) === 0x89504e47 && dv.getUint32(4) === 0x0d0a1a0a) {
+    return { width: dv.getUint32(16), height: dv.getUint32(20) };
+  }
+
+  // JPEG: walk the segments to the first start-of-frame marker.
+  if (n >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let at = 2;
+    while (at + 9 < n) {
+      if (bytes[at] !== 0xff) { at++; continue; }
+      const marker = bytes[at + 1];
+      if (marker === 0xff) { at++; continue; } // fill byte
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { at += 2; continue; }
+      const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+      if (isSof) return { height: dv.getUint16(at + 5), width: dv.getUint16(at + 7) };
+      at += 2 + dv.getUint16(at + 2);
+    }
+    return null;
+  }
+
+  // WebP: RIFF....WEBP, then VP8 (lossy), VP8L (lossless) or VP8X (extended).
+  if (n >= 30 && dv.getUint32(0) === 0x52494646 && dv.getUint32(8) === 0x57454250) {
+    const chunk = dv.getUint32(12);
+    if (chunk === 0x56503820) {
+      return { width: dv.getUint16(26, true) & 0x3fff, height: dv.getUint16(28, true) & 0x3fff };
+    }
+    if (chunk === 0x5650384c) {
+      const bits = dv.getUint32(21, true);
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+    }
+    if (chunk === 0x56503858) {
+      const u24 = (o: number) => bytes[o] | (bytes[o + 1] << 8) | (bytes[o + 2] << 16);
+      return { width: u24(24) + 1, height: u24(27) + 1 };
+    }
+  }
+  return null;
+}
+
+export interface TextureLoad {
+  /** Embedded or referenced images. */
+  count: number;
+  /** Total decoded size in megapixels; unreadable images count as a full-size one. */
+  megapixels: number;
+  /** Images whose size could not be read from the file. */
+  unknown: number;
+}
+
+/**
+ * How much texture a GLB will put on the GPU, from image headers alone. This
+ * is what decides whether a preview can afford to show textures — file size
+ * says little (a 300 KB JPEG can decode to 16 MB).
+ */
+export function textureLoad(buffer: ArrayBuffer): TextureLoad {
+  const { json, bin } = parseGlb(buffer);
+  const images: any[] = json.images ?? [];
+  const fullSize = (MAX_TEXTURE_SIZE * MAX_TEXTURE_SIZE) / 1e6;
+  let megapixels = 0;
+  let unknown = 0;
+
+  for (const img of images) {
+    const bv = img.bufferView !== undefined ? json.bufferViews?.[img.bufferView] : undefined;
+    let size: { width: number; height: number } | null = null;
+    if (bv && bin && (bv.buffer ?? 0) === 0) {
+      const start = bv.byteOffset ?? 0;
+      // Headers live in the first bytes; JPEG metadata can push the frame marker out.
+      size = imagePixelSize(bin.subarray(start, start + Math.min(bv.byteLength, 262144)));
+    }
+    if (size && size.width > 0 && size.height > 0) megapixels += (size.width * size.height) / 1e6;
+    else { megapixels += fullSize; unknown++; }
+  }
+  return { count: images.length, megapixels, unknown };
+}
+
+/** True when a preview can show this GLB's textures within the GPU budget. */
+export function fitsTextureBudget(buffer: ArrayBuffer): boolean {
+  try {
+    return textureLoad(buffer).megapixels <= TEXTURE_BUDGET_MP;
+  } catch {
+    return true; // not a readable GLB — let the loader report it
+  }
 }
 
 export interface TextureOptimizeResult {

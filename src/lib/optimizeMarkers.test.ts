@@ -1,4 +1,5 @@
 // @vitest-environment node
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Pure file processing — no DOM needed, and jsdom drags in `canvas` native bindings.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -6,7 +7,8 @@ import { resolve } from "node:path";
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from "meshoptimizer";
-import { isMarkerNodeName, modelStats, optimizeDocument } from "./optimizeGlb";
+import { modelStats, optimizeDocument } from "./optimizeGlb";
+import { isMarkerNodeName, removeMarkerCarriers } from "./markerNames";
 import { parseGlbMarkers } from "./parseGlbMarkers";
 
 /**
@@ -49,6 +51,24 @@ describe("isMarkerNodeName", () => {
     for (const n of ["", "Default", "marker", "markers_A", "marker_AB", "marker_A_proxy_2", "worktop_marker_A"]) {
       expect(isMarkerNodeName(n), n).toBe(false);
     }
+  });
+});
+
+describe("removeMarkerCarriers", () => {
+  it("detaches marker nodes from a preview scene and nothing else", () => {
+    const make = (name: string, children: any[] = []) => {
+      const o: any = { name, children, parent: null as any };
+      o.traverse = (fn: (x: any) => void) => { fn(o); for (const c of [...o.children]) c.traverse(fn); };
+      o.remove = (c: any) => { o.children = o.children.filter((x: any) => x !== c); c.parent = null; };
+      for (const c of children) c.parent = o;
+      return o;
+    };
+    const cabinet = make("cabinet");
+    const root = make("Scene", [make("Default", [cabinet]), make("marker_A", [make("marker_A_proxy")]), make("marker_C_proxy")]);
+    // Layer node and its sphere are both matched; removing the layer takes the sphere with it.
+    expect(removeMarkerCarriers(root)).toBe(3);
+    expect(root.children.map((c: any) => c.name)).toEqual(["Default"]);
+    expect(cabinet.parent.name).toBe("Default");
   });
 });
 

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { isGlbBytes, parseGlb, repackGlb, stripTextures, textureSizeCap } from "./glbFile";
+import { fitsTextureBudget, imagePixelSize, isGlbBytes, parseGlb, repackGlb, stripTextures, textureLoad, textureSizeCap } from "./glbFile";
 
 function buildGlb(json: object, bin: Uint8Array): ArrayBuffer {
   // Reuse repackGlb with no replacements to author a fixture.
@@ -123,3 +123,94 @@ describe("stripTextures", () => {
   });
 });
 
+
+/** Header-only image stubs: enough bytes for imagePixelSize, no pixel data. */
+function pngHeader(width: number, height: number): Uint8Array {
+  const b = new Uint8Array(32);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, width);
+  new DataView(b.buffer).setUint32(20, height);
+  return b;
+}
+
+function jpegHeader(width: number, height: number): Uint8Array {
+  // SOI, an APP0 segment to skip (16 bytes), then a baseline start-of-frame.
+  const b = new Uint8Array(2 + 18 + 12);
+  b.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+  b.set([0xff, 0xc0, 0x00, 0x11, 0x08], 20);
+  new DataView(b.buffer).setUint16(25, height);
+  new DataView(b.buffer).setUint16(27, width);
+  return b;
+}
+
+function glbWithImages(images: Uint8Array[]): ArrayBuffer {
+  const bin = new Uint8Array(images.reduce((n, i) => n + i.length, 0));
+  const bufferViews: object[] = [];
+  let at = 0;
+  for (const img of images) {
+    bin.set(img, at);
+    bufferViews.push({ buffer: 0, byteOffset: at, byteLength: img.length });
+    at += img.length;
+  }
+  return buildGlb(
+    {
+      asset: { version: "2.0" },
+      buffers: [{ byteLength: bin.length }],
+      bufferViews,
+      images: images.map((_, i) => ({ bufferView: i, mimeType: "image/png" })),
+    },
+    bin,
+  );
+}
+
+describe("imagePixelSize", () => {
+  it("reads PNG and JPEG sizes from the header", () => {
+    expect(imagePixelSize(pngHeader(1664, 1664))).toEqual({ width: 1664, height: 1664 });
+    expect(imagePixelSize(jpegHeader(2048, 1024))).toEqual({ width: 2048, height: 1024 });
+  });
+
+  it("returns null for anything it does not know", () => {
+    expect(imagePixelSize(new Uint8Array(64))).toBeNull();
+    expect(imagePixelSize(new Uint8Array([0xff, 0xd8, 0xff]))).toBeNull();
+  });
+});
+
+describe("texture budget for previews", () => {
+  it("adds up decoded size, not bytes (kitchen export, 16 Nov 2026)", () => {
+    // Oak 1664 px, ash 1712 px, marble 1352 px — a colour and a normal map each.
+    const kitchen = glbWithImages([1664, 1664, 1712, 1712, 1352, 1352].map((s) => pngHeader(s, s)));
+    const load = textureLoad(kitchen);
+    expect(load.count).toBe(6);
+    expect(load.unknown).toBe(0);
+    expect(load.megapixels).toBeCloseTo(15.06, 1);
+    expect(fitsTextureBudget(kitchen)).toBe(true);
+  });
+
+  it("shows textures for many small images (the old rule hid everything above 12)", () => {
+    const many = glbWithImages(Array.from({ length: 40 }, () => jpegHeader(512, 512)));
+    expect(fitsTextureBudget(many)).toBe(true);
+  });
+
+  it("holds back a model that would not fit on the GPU", () => {
+    const heavy = glbWithImages(Array.from({ length: 8 }, () => pngHeader(4096, 4096)));
+    expect(fitsTextureBudget(heavy)).toBe(false);
+  });
+
+  it("counts an unreadable image as a full-size one", () => {
+    const load = textureLoad(glbWithImages([new Uint8Array(40), pngHeader(100, 100)]));
+    expect(load.unknown).toBe(1);
+    expect(load.megapixels).toBeCloseTo(4.2, 1);
+  });
+
+  it("every optimised upload fits: the optimiser resizes to the same budget", () => {
+    for (const count of [1, 6, 12, 13, 43, 90]) {
+      const cap = textureSizeCap(count);
+      const glb = glbWithImages(Array.from({ length: count }, () => pngHeader(cap, cap)));
+      expect(fitsTextureBudget(glb), `${count} textures at ${cap} px`).toBe(true);
+    }
+  });
+
+  it("lets a file that is not a GLB through to the loader", () => {
+    expect(fitsTextureBudget(new ArrayBuffer(8))).toBe(true);
+  });
+});

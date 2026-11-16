@@ -43,6 +43,7 @@
 import type { Document, Material, Texture, TextureInfo } from "@gltf-transform/core";
 import type { Transmission } from "@gltf-transform/extensions";
 import { Primitive } from "@gltf-transform/core";
+import { isMarkerNodeName } from "@/lib/markerNames";
 import { convertPrimitiveToTriangles, dedup, flatten, instance, join, meshopt, prune, simplify, weld } from "@gltf-transform/functions";
 
 /** Relative simplification error (fraction of the mesh's bounding extent). */
@@ -64,14 +65,6 @@ const HEAVY_MATERIAL_EXTENSIONS = [
 // glTF sampler enums
 const LINEAR = 9729;
 const LINEAR_MIPMAP_LINEAR = 9987;
-
-/**
- * Node names the marker parser reads (`parseGlbMarkers.ts`): `marker_A`,
- * `marker_3`, `Marker-B_proxy` … Kept in step with that parser's normalising.
- */
-export function isMarkerNodeName(name: string): boolean {
-  return /^marker_(?:[a-z]|\d{1,2})(?:_proxy)?$/.test(name.trim().toLowerCase().replace(/[\s-]/g, "_"));
-}
 
 export interface ModelStats {
   nodes: number;
