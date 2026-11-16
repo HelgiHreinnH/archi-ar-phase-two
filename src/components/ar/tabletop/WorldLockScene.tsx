@@ -48,7 +48,7 @@ const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
 const MESHOPT_DECODER_URL = "/assets/three/jsm/libs/meshopt_decoder.module.js";
 const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 
-/** Printed QR width. Must match the print sheet (see MindARScene). */
+/** Default printed QR width (the 150 mm A4 print). 50/100/150 mm are read from ?q= (lib/qrSizes). */
 export const QR_SIZE_MM = 150;
 const GLB_MAGIC = 0x46546c67;
 
@@ -73,11 +73,11 @@ const LOCK_FALLBACK_MS = 2500;
  */
 const REANCHOR_MIN_WIDTHS = 0.07;
 
-/** ?steady=<mm> tunes the lock gate on the phone (default 3 mm on the 150 mm QR). */
-function steadyGate(): number {
+/** ?steady=<mm> tunes the lock gate on the phone (default is a fixed fraction of the QR width: 3 mm on the 150 mm QR). */
+function steadyGate(qrSizeMm: number): number {
   const raw = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("steady") : null;
   const mm = raw ? Number(raw) : NaN;
-  return Number.isFinite(mm) && mm > 0 && mm < 100 ? mm / QR_SIZE_MM : STEADY_MAX_SD;
+  return Number.isFinite(mm) && mm > 0 && mm < 100 ? mm / qrSizeMm : STEADY_MAX_SD;
 }
 
 /** Restyle 8th Wall's own motion-permission prompt to match Archi AR. */
@@ -101,6 +101,8 @@ interface WorldLockSceneProps {
   modelCacheKey?: string | null;
   mode: string;
   modelScale: number;
+  /** Printed QR width in mm (50 / 100 / 150). Sets the target's real size and the model placement. */
+  qrSizeMm?: number;
   initialRotation?: number;
   /** Bump to unlock and re-place: follow the QR again, re-lock when steady. */
   replaceSignal?: number;
@@ -127,6 +129,7 @@ const WorldLockScene = ({
   modelCacheKey = null,
   mode,
   modelScale,
+  qrSizeMm = QR_SIZE_MM,
   initialRotation = 0,
   replaceSignal = 0,
   onLocked,
@@ -219,7 +222,7 @@ const WorldLockScene = ({
 
         // Gravity-aligned, outlier-rejecting, smoothed QR pose (qrPoseFilter).
         const filter = new QrPoseFilter(T, mode);
-        const steadyMaxSd = steadyGate();
+        const steadyMaxSd = steadyGate(qrSizeMm);
         let locked = false;
         let placingSince = 0;
         let trackingOk = true;
@@ -269,7 +272,7 @@ const WorldLockScene = ({
               console.log("[WorldLock] room still matches the QR — model stays put");
               return;
             }
-            console.warn(`[WorldLock] re-anchoring after SLAM loss (${(off * QR_SIZE_MM).toFixed(0)} mm off)`);
+            console.warn(`[WorldLock] re-anchoring after SLAM loss (${(off * qrSizeMm).toFixed(0)} mm off)`);
             markAR("auto-replace", "8thwall");
             glide = {
               from: anchorPose(),
@@ -306,7 +309,7 @@ const WorldLockScene = ({
             anchor.updateMatrixWorld(true);
             const span = new T.Box3().setFromObject(model).getSize(new T.Vector3());
             const qrs = Math.max(span.x, span.y, span.z) / pose.width;
-            console.log(`[WorldLock] size check: model spans ${qrs.toFixed(2)} QR widths = ${(qrs * QR_SIZE_MM / 1000).toFixed(2)} m on a ${QR_SIZE_MM} mm QR (1:${modelScale})`);
+            console.log(`[WorldLock] size check: model spans ${qrs.toFixed(2)} QR widths = ${(qrs * qrSizeMm / 1000).toFixed(2)} m on a ${qrSizeMm} mm QR (1:${modelScale})`);
           }
         };
 
@@ -347,7 +350,7 @@ const WorldLockScene = ({
             mode,
             modelScale,
             initialRotation,
-            markerSizeMm: QR_SIZE_MM,
+            markerSizeMm: qrSizeMm,
             offsetMm: qrOffsetMm(mode),
           });
           console.log(`[WorldLock] model ${placement.realSizeM.toFixed(2)} m, 1:${modelScale}`);
@@ -508,7 +511,7 @@ const WorldLockScene = ({
       }
     };
     // The engine restarts only for a different target / model identity.
-  }, [target, mode, modelScale, initialRotation]);
+  }, [target, mode, modelScale, qrSizeMm, initialRotation]);
 
   return (
     <canvas

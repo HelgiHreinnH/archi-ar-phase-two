@@ -22,7 +22,7 @@ import { lazyWithReload } from "@/lib/staleDeploy";
 const ModelStill = lazyWithReload(() => import("@/components/ModelStill"));
 import SharePopover from "@/components/SharePopover";
 import { downloadMarkerPDF, downloadAllMarkerPDFs, downloadQrPagePDF } from "@/lib/generateMarkerPDF";
-import { downloadSpatialQrPng } from "@/lib/spatial/qrExport";
+import { downloadSpatialQrPng, downloadSizedQrPng } from "@/lib/spatial/qrExport";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 
@@ -162,6 +162,28 @@ const ProjectOverview = ({ project, onEdit, onDelete }: ProjectOverviewProps) =>
                       <FileText className="h-3 w-3" />
                       Print Sheet (PDF)
                     </Button>
+                    {project.share_link && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start gap-2 text-xs h-7"
+                          onClick={() => downloadSizedQrPng(project.share_link!, 100, project.name)}
+                        >
+                          <FileText className="h-3 w-3" />
+                          QR 100 mm (PNG)
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start gap-2 text-xs h-7"
+                          onClick={() => downloadSizedQrPng(project.share_link!, 50, project.name)}
+                        >
+                          <FileText className="h-3 w-3" />
+                          QR 50 mm (PNG)
+                        </Button>
+                      </>
+                    )}
                   </div>
                 )}
 

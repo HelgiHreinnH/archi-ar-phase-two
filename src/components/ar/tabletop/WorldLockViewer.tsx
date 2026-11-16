@@ -27,6 +27,10 @@ interface WorldLockViewerProps {
   shareId: string;
   modelUrl: string | null;
   modelScale: number;
+  /** Printed QR width from ?q= (default 150 mm). */
+  qrSizeMm?: number;
+  /** ?q= was present in the scanned link (new-style QR). */
+  sizedLink?: boolean;
   initialRotation?: number;
   onClose: () => void;
   /** Model failed to load — ARViewer's recovery flow. */
@@ -45,6 +49,8 @@ const WorldLockViewer = ({
   shareId,
   modelUrl,
   modelScale,
+  qrSizeMm = QR_SIZE_MM,
+  sizedLink = false,
   initialRotation,
   onClose,
   onModelError,
@@ -65,12 +71,12 @@ const WorldLockViewer = ({
   useEffect(() => {
     let cancelled = false;
     // Built on the pre-camera screen already (arPreload); this joins it.
-    preloadQrTarget(project.qr_code_url, shareId, QR_SIZE_MM)
+    preloadQrTarget(project.qr_code_url, shareId, qrSizeMm, sizedLink)
       .then((t) => { if (!cancelled) setTarget(t); })
       .catch((e) => { if (!cancelled) onEngineError(e instanceof Error ? e : new Error(String(e))); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.qr_code_url, shareId]);
+  }, [project.qr_code_url, shareId, qrSizeMm, sizedLink]);
 
   useEffect(() => {
     if (!started || scanning) return;
@@ -103,6 +109,7 @@ const WorldLockViewer = ({
           modelCacheKey={modelCacheKeyFor(shareId, project.updated_at)}
           mode={project.mode}
           modelScale={modelScale}
+          qrSizeMm={qrSizeMm}
           initialRotation={initialRotation}
           replaceSignal={replaceSignal}
           onReady={() => setStarted(true)}

@@ -6,6 +6,10 @@ import QrViewerChrome from "./QrViewerChrome";
 import { modelCacheKeyFor, preloadModel, subscribeModelProgress } from "@/lib/arPreload";
 import { getMotionState, subscribeMotionState, type MotionState } from "@/lib/arLaunch";
 import { formatScaleReadout, qrLaunchPhase } from "@/lib/qrLaunchStatus";
+import { buildSizedExperienceUrl, qrVariantForSize, type QrSizeMm } from "@/lib/qrSizes";
+import { spatialQrSvg } from "@/lib/spatial/qr";
+import { svgToCanvas } from "@/lib/spatial/raster";
+import { compileMindFile } from "@/lib/compileMindFile";
 
 /**
  * Tabletop / Wall on MindAR (the free-tier default, Oct 2026).
@@ -26,6 +30,8 @@ interface MindARQrViewerProps {
   imageTargetSrc?: string;
   modelUrl: string | null;
   modelScale: number;
+  /** Printed QR width from ?q= (default 150 mm, the stored .mind). */
+  qrSizeMm?: number;
   initialRotation?: number;
   onClose: () => void;
   onError: (err: Error) => void;
@@ -37,6 +43,7 @@ const MindARQrViewer = ({
   imageTargetSrc,
   modelUrl,
   modelScale,
+  qrSizeMm = 150,
   initialRotation = 0,
   onClose,
   onError,
@@ -70,7 +77,47 @@ const MindARQrViewer = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelUrl, shareId]);
 
-  if (!imageTargetSrc) {
+  // 100 / 50 mm prints have no stored .mind (only the 150 mm one is): compile
+  // it here from the same deterministic QR image the download made. The MindAR
+  // path is only the fallback engine, so the wait is acceptable.
+  const [sizedMindSrc, setSizedMindSrc] = useState<string | null>(null);
+  const [sizedMindFailed, setSizedMindFailed] = useState(false);
+  useEffect(() => {
+    if (qrSizeMm === 150) return;
+    let cancelled = false;
+    let url: string | null = null;
+    (async () => {
+      try {
+        const size = qrSizeMm as QrSizeMm;
+        const canvas = await svgToCanvas(
+          spatialQrSvg(buildSizedExperienceUrl(shareId, size), qrVariantForSize(size)), 1440, 1440);
+        const img = await new Promise<HTMLImageElement>((ok, fail) => {
+          const i = new Image();
+          i.onload = () => ok(i);
+          i.onerror = fail;
+          i.src = canvas.toDataURL("image/png");
+        });
+        const { blob } = await compileMindFile([img]);
+        url = URL.createObjectURL(blob);
+        if (!cancelled) setSizedMindSrc(url);
+      } catch (e) {
+        console.warn("[MindARQrViewer] could not compile the sized QR target:", e);
+        if (!cancelled) setSizedMindFailed(true);
+      }
+    })();
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  }, [qrSizeMm, shareId]);
+  const trackingSrc = qrSizeMm === 150 ? imageTargetSrc : sizedMindSrc ?? undefined;
+
+  if (qrSizeMm !== 150 && !sizedMindSrc && !sizedMindFailed) {
+    return (
+      <div className="fixed inset-0 bg-black flex items-center justify-center p-6">
+        <p className="text-sm text-white/70">Preparing the {qrSizeMm} mm QR target…</p>
+      </div>
+    );
+  }
+
+  if (!trackingSrc) {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center p-6">
         <div className="text-center space-y-4 max-w-sm">
@@ -118,11 +165,12 @@ const MindARQrViewer = ({
   return (
     <div className="fixed inset-0 bg-black">
       <MindARScene
-        imageTargetSrc={imageTargetSrc}
+        imageTargetSrc={trackingSrc}
         modelUrl={modelUrl}
         mode={project.mode}
         maxTrack={1}
         modelScale={modelScale}
+        qrSizeMm={qrSizeMm}
         initialRotation={initialRotation}
         prefetchedModel={prefetchedModel}
         awaitPrefetch={!!modelUrl && !prefetchedModel && !prefetchFailed}

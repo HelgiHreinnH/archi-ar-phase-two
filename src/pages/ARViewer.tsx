@@ -21,6 +21,7 @@ import MindARQrViewer from "@/components/ar/qr/MindARQrViewer";
 import { beginARLaunchFromTap } from "@/lib/arLaunch";
 import { modelCacheKeyFor, preloadQrExperience, subscribeModelProgress } from "@/lib/arPreload";
 import { QR_SIZE_MM } from "@/components/ar/tabletop/WorldLockScene";
+import { qrSizeFromSearch } from "@/lib/qrSizes";
 
 // Phase 0 timing: this chunk being evaluated = the app bundle is in.
 markAR("app-start");
@@ -279,6 +280,11 @@ const ARViewer = () => {
   // Tabletop/Wall preload: while the pre-camera screen is up, fetch the engine,
   // the tracking target and the model, so the tap lands on warm assets.
   const preloadEngine = worldEngineOn ? "8thwall" : "mindar";
+  // Printed QR size, carried in the scanned link (?q=50|100|150). No ?q = a QR
+  // printed before multi-size support: 150 mm, the stored plain image.
+  const linkQrSize = qrSizeFromSearch(typeof window !== "undefined" ? window.location.search : "");
+  const qrSizeMm: number = linkQrSize ?? QR_SIZE_MM;
+  const sizedLink = linkQrSize !== null;
   const preloadModelUrl = project?.model_url ?? null;
   const [preloadProgress, setPreloadProgress] = useState<number | null>(null);
   useEffect(() => {
@@ -291,12 +297,13 @@ const ARViewer = () => {
       modelCacheKey: modelCacheKeyFor(shareId, project.updated_at),
       qrCodeUrl: project.qr_code_url ?? null,
       mindFileUrl: project.mind_file_url ?? null,
-      qrSizeMm: QR_SIZE_MM,
+      qrSizeMm,
+      sizedLink,
     });
     if (!preloadModelUrl) return;
     return subscribeModelProgress(preloadModelUrl, setPreloadProgress);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id, isMultipoint, shareId, viewState, preloadEngine, preloadModelUrl]);
+  }, [project?.id, isMultipoint, shareId, viewState, preloadEngine, preloadModelUrl, qrSizeMm, sizedLink]);
 
   const handleReset = useCallback(() => {
     setMarkers(getInitialMarkers());
@@ -590,6 +597,8 @@ const ARViewer = () => {
             shareId={shareId ?? ""}
             modelUrl={publicModelUrl}
             modelScale={scaleNum}
+            qrSizeMm={qrSizeMm}
+            sizedLink={sizedLink}
             initialRotation={project.initial_rotation || 0}
             onClose={() => setViewState("ended")}
             onModelError={(err) => handleARError(err)}
@@ -612,6 +621,7 @@ const ARViewer = () => {
             imageTargetSrc={imageTargetSrc}
             modelUrl={publicModelUrl}
             modelScale={scaleNum}
+            qrSizeMm={qrSizeMm}
             initialRotation={project.initial_rotation || 0}
             onClose={() => setViewState("ended")}
             onError={(err) => handleARError(err)}

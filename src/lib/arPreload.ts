@@ -155,11 +155,12 @@ export function preloadQrTarget(
   qrUrl: string | null | undefined,
   shareId: string,
   qrSizeMm: number,
+  sizedLink = false,
 ): Promise<Xr8ImageTargetData> {
-  const key = `${shareId}:${qrSizeMm}`;
+  const key = `${shareId}:${qrSizeMm}:${sizedLink ? "q" : "legacy"}`;
   let p = qrTargets.get(key);
   if (!p) {
-    p = buildQrImageTarget(qrUrl, shareId, qrSizeMm);
+    p = buildQrImageTarget(qrUrl, shareId, qrSizeMm, sizedLink);
     p.catch(() => { qrTargets.delete(key); });
     qrTargets.set(key, p);
   }
@@ -196,6 +197,8 @@ export interface QrPreloadInput {
   qrCodeUrl: string | null;
   mindFileUrl: string | null;
   qrSizeMm: number;
+  /** ?q= was in the link. */
+  sizedLink?: boolean;
 }
 
 /** Everything for one Tabletop/Wall experience. Safe to call repeatedly. */
@@ -203,7 +206,7 @@ export function preloadQrExperience(i: QrPreloadInput): void {
   preloadEngine(i.engine);
   if (i.modelUrl) void preloadModel(i.modelUrl, i.modelCacheKey).catch(() => {});
   if (i.engine === "8thwall") {
-    void preloadQrTarget(i.qrCodeUrl, i.shareId, i.qrSizeMm).catch(() => {});
+    void preloadQrTarget(i.qrCodeUrl, i.shareId, i.qrSizeMm, i.sizedLink).catch(() => {});
   } else if (i.mindFileUrl) {
     void preloadTrackingFile(i.mindFileUrl).catch(() => {});
   }

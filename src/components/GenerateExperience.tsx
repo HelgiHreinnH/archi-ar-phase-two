@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
 import { downloadMarkerPDF, downloadAllMarkerPDFs, downloadQrPagePDF } from "@/lib/generateMarkerPDF";
-import { downloadSpatialQrPng } from "@/lib/spatial/qrExport";
+import { downloadSpatialQrPng, downloadSizedQrPng } from "@/lib/spatial/qrExport";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import QRCode from "qrcode";
@@ -352,6 +352,35 @@ const GenerateExperience = ({
                 <Download className="h-3 w-3" />
                 Download QR code (PNG)
               </Button>
+            )}
+
+            {/* Tabletop / Wall: the two smaller printed sizes. The size is in the QR
+                link, so the viewer reads 150 / 100 / 50 mm and scales to it. */}
+            {isTabletop && project.share_link && (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => downloadSizedQrPng(project.share_link!, 100, project.name)}
+                >
+                  <Download className="h-3 w-3" />
+                  QR for slides — 100 mm (PNG)
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => downloadSizedQrPng(project.share_link!, 50, project.name)}
+                >
+                  <Download className="h-3 w-3" />
+                  QR for a printed plan — 50 mm (PNG)
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Place each QR at exactly its size (100 or 50 mm wide): the model loads at the QR&apos;s centre and is
+                  scaled from that size. A different size than the file says gives a wrong model scale.
+                </p>
+              </div>
             )}
 
             {/* Multipoint: Marker PDFs + .mind file */}

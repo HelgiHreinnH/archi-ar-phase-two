@@ -5,7 +5,7 @@ import { friendlyError } from "@/lib/plans";
 import type { Tables } from "@/integrations/supabase/types";
 import { spatialQrSvg } from "@/lib/spatial/qr";
 import { canvasToBlob, svgToCanvas } from "@/lib/spatial/raster";
-import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
+import { buildSizedExperienceUrl, DEFAULT_QR_SIZE_MM } from "@/lib/qrSizes";
 import { compileMindFile } from "@/lib/compileMindFile";
 
 type Project = Tables<"projects">;
@@ -68,7 +68,9 @@ export function useTabletopGeneration(project: Project, onGenerated: () => void)
 
     try {
       const shareId = project.share_link || crypto.randomUUID();
-      const shareUrl = buildPublicExperienceUrl(shareId);
+      // The stored image is the 150 mm print: its link carries ?q=150 so the viewer
+      // knows the real width. 100 / 50 mm are rendered on demand (qrExport, xr8QrTarget).
+      const shareUrl = buildSizedExperienceUrl(shareId, DEFAULT_QR_SIZE_MM);
       const projectPath = project.id;
 
       // ── QR code ──
