@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MarkerCoordinateEditor from "@/components/MarkerCoordinateEditor";
 import MarkerPlacementValidator from "@/components/ar/multipoint/MarkerPlacementValidator";
+import { MINDAR_ENABLED } from "@/lib/arEngines";
 import { type MarkerPoint } from "@/lib/markerTypes";
 import { ScanLine } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,7 +62,10 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
     </CardContent>
     </Card>
 
-      {/* Fix 6 · Architect placement validator — verify printed markers match Rhino coords */}
+      {/* Fix 6 · Architect placement validator — verify printed markers match Rhino coords.
+          Runs on MindAR, so it is hidden while MindAR is off (17 Nov 2026,
+          arEngines.ts); it comes back once it is rebuilt on 8th Wall. */}
+      {MINDAR_ENABLED && (
       <Card>
       <CardContent className="pt-6 space-y-2">
         <div className="flex items-center gap-2">
@@ -88,8 +92,9 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
         )}
       </CardContent>
       </Card>
+      )}
 
-      {validating && markerData && (
+      {MINDAR_ENABLED && validating && markerData && (
         <MarkerPlacementValidator
           project={project}
           markerData={markerData}

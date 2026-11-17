@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { deleteProject as deleteProjectAndFiles } from "@/lib/projectActions";
 import { useAuth } from "@/hooks/useAuth";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
 
@@ -39,10 +40,7 @@ export function useProjects() {
   });
 
   const deleteProject = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("projects").delete().eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => deleteProjectAndFiles(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },

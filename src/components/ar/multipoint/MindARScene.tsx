@@ -45,6 +45,8 @@ interface MindARSceneProps {
    * e.g. 1 = true size, 50 = 1:50, 100 = 1:100.
    */
   modelScale?: number;
+  /** Tabletop/Wall printed QR width in mm (50/100/150); Spatial ignores it. */
+  qrSizeMm?: number;
   /** Initial Y rotation in degrees */
   initialRotation?: number;
   /** Rhino marker coordinates for multi-point triangulation */
@@ -258,6 +260,7 @@ const MindARScene = ({
   onReady,
   onError,
   modelScale = 1,
+  qrSizeMm = MARKER_SIZE_MM,
   initialRotation = 0,
   markerData,
   prefetchedModel,
@@ -1203,7 +1206,7 @@ const MindARScene = ({
             mode,
             modelScale,
             initialRotation,
-            markerSizeMm: MARKER_SIZE_MM,
+            markerSizeMm: qrSizeMm,
             offsetMm: qrOffsetMm(mode),
           });
           onModelPlacedRef.current?.({ displayedSizeM: placement.displayedSizeM });
@@ -1264,7 +1267,7 @@ const MindARScene = ({
         try { disposeScene(attached); } catch { /* noop */ }
       }
     };
-  }, [sceneEpoch, modelSource, modelScale, initialRotation, mode]);
+  }, [sceneEpoch, modelSource, modelScale, qrSizeMm, initialRotation, mode]);
 
   return (
     <div

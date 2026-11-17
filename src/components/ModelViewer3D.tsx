@@ -8,7 +8,9 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { supabase } from "@/integrations/supabase/client";
-import { parseGlb, stripTextures } from "@/lib/glbFile";
+import { fitsTextureBudget, stripTextures } from "@/lib/glbFile";
+import { dropBrokenNormalMaps } from "@/lib/normalMaps";
+import { removeMarkerCarriers } from "@/lib/markerNames";
 
 /**
  * Lightweight GLB preview (desktop + iOS/macOS Safari + Android).
@@ -68,14 +70,15 @@ function disposeObject(root: THREE.Object3D) {
 type LoadState = "signing" | "loading" | "ready" | "error";
 
 /**
- * Above this many textures, the preview drops them and shows an untextured
- * (clay) render instead. Decoded textures are what exhaust GPU memory: a model
- * with dozens of 2K maps needs hundreds of MB and can take the tab down. The
- * AR view still uses the full model — this cap is for the dashboard preview.
+ * The preview shows textures whenever the model fits the texture budget
+ * (`TEXTURE_BUDGET_MP` in glbFile.ts — the same budget the upload optimiser
+ * resizes to, so every optimised upload fits). Above it, textures are dropped
+ * and an untextured (clay) render is shown instead: decoded textures are what
+ * exhaust GPU memory and take the tab down. Until 16 Nov 2026 this was a flat
+ * count (more than 12 textures → clay), which also hid small, cheap textures.
+ *
+ * Downloads the GLB with progress and strips its textures when over budget.
  */
-const PREVIEW_TEXTURE_LIMIT = 12;
-
-/** Download the GLB with progress, and strip textures when there are too many. */
 async function fetchModel(
   url: string,
   onProgress: (pct: number) => void,
@@ -104,12 +107,7 @@ async function fetchModel(
     buffer = await res.arrayBuffer();
   }
 
-  let textureCount = 0;
-  try {
-    textureCount = parseGlb(buffer).json.images?.length ?? 0;
-  } catch { /* let the loader report a malformed file */ }
-
-  if (textureCount > PREVIEW_TEXTURE_LIMIT) {
+  if (!fitsTextureBudget(buffer)) {
     return { buffer: stripTextures(buffer, { keepMaterials: true }), textured: false };
   }
   return { buffer, textured: true };
@@ -235,6 +233,8 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
         return;
       }
       model = gltf.scene;
+      dropBrokenNormalMaps(model);
+      removeMarkerCarriers(model);
       scene.add(model);
 
       // Frame the model: orbit around its centre, distance from its size.

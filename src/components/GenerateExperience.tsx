@@ -11,7 +11,8 @@ import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, getMarkerColor } from "@/lib/markerTypes";
-import { downloadMarkerPDF, downloadAllMarkerPDFs } from "@/lib/generateMarkerPDF";
+import { downloadMarkerPDF, downloadAllMarkerPDFs, downloadQrPagePDF } from "@/lib/generateMarkerPDF";
+import { downloadSpatialQrPng, downloadSizedQrPng } from "@/lib/spatial/qrExport";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 import { downloadTabletopPrintSheet } from "@/lib/generateTabletopPDF";
 import QRCode from "qrcode";
@@ -26,6 +27,7 @@ import {
   MULTIPOINT_PIPELINE,
   type MultipointStep,
 } from "@/hooks/useMultipointGeneration";
+import { MINDAR_ENABLED } from "@/lib/arEngines";
 
 type Project = Tables<"projects">;
 
@@ -47,7 +49,7 @@ interface CheckItem {
 const STEP_LABELS: Record<string, string> = {
   idle: "",
   markers: "Generating marker images…",
-  compiling: "Compiling MindAR targets…",
+  compiling: "Compiling marker targets…",
   qr: "Creating QR code…",
   uploading: "Uploading assets…",
   activating: "Activating experience…",
@@ -71,7 +73,7 @@ const GenerateExperience = ({
   markerData,
   onGenerated,
 }: GenerateExperienceProps) => {
-  const isTabletop = mode !== "multipoint"; // treat wall like tabletop (same QR + .mind pipeline)
+  const isTabletop = mode !== "multipoint"; // treat wall like tabletop (same QR pipeline, no .mind)
 
   const tabletop = useTabletopGeneration(project, onGenerated);
   const multipoint = useMultipointGeneration(project, markerData, onGenerated);
@@ -353,6 +355,35 @@ const GenerateExperience = ({
               </Button>
             )}
 
+            {/* Tabletop / Wall: the two smaller printed sizes. The size is in the QR
+                link, so the viewer reads 150 / 100 / 50 mm and scales to it. */}
+            {isTabletop && project.share_link && (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => downloadSizedQrPng(project.share_link!, 100, project.name)}
+                >
+                  <Download className="h-3 w-3" />
+                  QR for slides — 100 mm (PNG)
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => downloadSizedQrPng(project.share_link!, 50, project.name)}
+                >
+                  <Download className="h-3 w-3" />
+                  QR for a printed plan — 50 mm (PNG)
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Place each QR at exactly its size (100 or 50 mm wide): the model loads at the QR&apos;s centre and is
+                  scaled from that size. A different size than the file says gives a wrong model scale.
+                </p>
+              </div>
+            )}
+
             {/* Multipoint: Marker PDFs + .mind file */}
             {!isTabletop && markerData && markerData.length > 0 && (
               <>
@@ -389,6 +420,38 @@ const GenerateExperience = ({
                   <Download className="h-3 w-3" />
                   Download All Marker PDFs
                 </Button>
+                <p className="text-xs text-muted-foreground pt-1">
+                  Client QR: an A4 page to hang at the start of the visit, or the QR on its own.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => downloadQrPagePDF(project.name, shareUrl)}
+                  >
+                    <FileText className="h-3 w-3" />
+                    QR page (PDF)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => downloadSpatialQrPng(shareUrl, "round", project.name)}
+                  >
+                    <Download className="h-3 w-3" />
+                    QR designed (PNG)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="justify-start gap-2"
+                    onClick={() => downloadSpatialQrPng(shareUrl, "subtle", project.name)}
+                  >
+                    <Download className="h-3 w-3" />
+                    QR subtle (PNG)
+                  </Button>
+                </div>
               </>
             )}
 
@@ -476,7 +539,8 @@ const GenerateExperience = ({
                     </Badge>
                   )}
                 </div>
-                {hasWtcFile && (
+                {/* No way back to MindAR while it is off (17 Nov 2026, arEngines.ts). */}
+                {MINDAR_ENABLED && hasWtcFile && (
                   <Button
                     variant="ghost"
                     size="sm"

@@ -1,14 +1,21 @@
 /**
  * Render a single still image of a GLB — the project thumbnail.
  *
- * WHY: a live WebGL preview of an architectural model is the most fragile
- * thing on the dashboard. A model with dozens of large textures needs hundreds
- * of megabytes of GPU memory, which crashes browser tabs (iOS Safari first).
- * The thumbnail is rendered ONCE, at upload time, from a texture-free copy of
- * the model, and everything after that is a plain <img>.
+ * WHY A STILL: a live WebGL preview of an architectural model is the most
+ * fragile thing on the dashboard. The thumbnail is rendered ONCE, at upload
+ * time, and everything after that is a plain <img>.
  *
- * Materials keep their colours (base colour / metallic / roughness factors);
- * only image textures are dropped, so the result reads as a clean clay render.
+ * WITH TEXTURES (since 16 Nov 2026). The still used to be rendered from a
+ * texture-free copy ("clay render"), which made the first thing an architect
+ * saw after uploading a kitchen a white box — it read as "my textures are
+ * gone". Textures are a core promise of the product, and the upload optimiser
+ * already keeps every model inside a GPU texture budget, so the still now
+ * shows them:
+ *   1. within the budget (every optimised upload) → rendered as is;
+ *   2. over it (optimisation switched off, heavy export) → textures are
+ *      shrunk to THUMB_TEXTURE_SIZE for this one render;
+ *   3. still over it, or the file can't be repacked → clay render, as before.
+ * One render, then the context is thrown away, so nothing stays on the GPU.
  */
 import * as THREE from "three";
 import { measureModel } from "@/lib/modelPlacement";
@@ -16,11 +23,31 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { stripTextures } from "@/lib/glbFile";
+import { fitsTextureBudget, optimizeGlbTextures, stripTextures } from "@/lib/glbFile";
+import { dropBrokenNormalMaps } from "@/lib/normalMaps";
+import { removeMarkerCarriers } from "@/lib/markerNames";
 
 const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 const WIDTH = 1200;
 const HEIGHT = 900;
+/** Texture size used only when a model is over the budget (case 2 above). */
+const THUMB_TEXTURE_SIZE = 1024;
+
+/** The bytes to render: textured whenever the GPU budget allows it. */
+async function previewBytes(file: File): Promise<ArrayBuffer> {
+  const original = await file.arrayBuffer();
+  if (fitsTextureBudget(original)) return original;
+  try {
+    const small = await optimizeGlbTextures(file, THUMB_TEXTURE_SIZE);
+    if (small.changed) {
+      const shrunk = await small.file.arrayBuffer();
+      if (fitsTextureBudget(shrunk)) return shrunk;
+    }
+  } catch (err) {
+    console.warn("[thumbnail] Could not shrink textures for the preview:", err);
+  }
+  return stripTextures(original, { keepMaterials: true });
+}
 
 function disposeObject(root: THREE.Object3D) {
   root.traverse((obj) => {
@@ -28,7 +55,13 @@ function disposeObject(root: THREE.Object3D) {
     if (!mesh.isMesh) return;
     mesh.geometry?.dispose();
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const m of mats) m?.dispose();
+    for (const m of mats) {
+      if (!m) continue;
+      for (const value of Object.values(m)) {
+        if (value instanceof THREE.Texture) value.dispose();
+      }
+      m.dispose();
+    }
   });
 }
 
@@ -42,7 +75,7 @@ export async function renderGlbThumbnail(file: File): Promise<Blob | null> {
   let env: THREE.Texture | null = null;
 
   try {
-    const buffer = stripTextures(await file.arrayBuffer(), { keepMaterials: true });
+    const buffer = await previewBytes(file);
 
     const draco = new DRACOLoader();
     draco.setDecoderPath(DRACO_DECODER_PATH);
@@ -55,6 +88,8 @@ export async function renderGlbThumbnail(file: File): Promise<Blob | null> {
     );
     draco.dispose();
     model = gltf.scene;
+    dropBrokenNormalMaps(model);
+    removeMarkerCarriers(model);
 
     const canvas = document.createElement("canvas");
     canvas.width = WIDTH;

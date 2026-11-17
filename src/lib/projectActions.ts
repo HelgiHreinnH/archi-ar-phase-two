@@ -15,9 +15,24 @@ export const ARCHIVED = "archived";
 
 export const isArchived = (p: Pick<Project, "status">) => p.status === ARCHIVED;
 
-/** Status to restore to: live again if it was generated, otherwise a draft. */
-export function restoredStatus(p: Pick<Project, "mind_file_url" | "share_link">): "active" | "draft" {
-  return p.mind_file_url && p.share_link ? "active" : "draft";
+/**
+ * Status to restore to: live again if it was generated, otherwise a draft.
+ * "Generated" means the tracking asset exists: the printed QR for Tabletop/Wall
+ * (8th Wall builds its target from it — no .mind since 16 Nov 2026); for
+ * Spatial the uploaded marker images (8th Wall targets since 17 Nov 2026) or,
+ * for experiences generated before that, the compiled .mind.
+ */
+export function restoredStatus(
+  p: Pick<Project, "mode" | "mind_file_url" | "qr_code_url" | "share_link"> &
+    Partial<Pick<Project, "marker_image_urls">>,
+): "active" | "draft" {
+  const singleQr = p.mode === "tabletop" || p.mode === "wall";
+  const hasMarkerImages =
+    !!p.marker_image_urls &&
+    typeof p.marker_image_urls === "object" &&
+    Object.keys(p.marker_image_urls as Record<string, unknown>).length > 0;
+  const generated = singleQr ? !!p.qr_code_url : hasMarkerImages || !!p.mind_file_url;
+  return generated && p.share_link ? "active" : "draft";
 }
 
 /** "Office" → "Office (copy)", "Office (copy)" → "Office (copy 2)". */
@@ -66,4 +81,60 @@ export async function duplicateProject(source: Project, existingNames: ReadonlyA
     return { ...(created as Project), model_url: newPath };
   }
   return created as Project;
+}
+
+/** The two private buckets that hold a project's files, each under `<projectId>/`. */
+const PROJECT_BUCKETS = ["project-models", "project-assets"] as const;
+
+type ListEntry = { name: string; id: string | null };
+type ListFn = (path: string) => Promise<ListEntry[]>;
+
+/**
+ * Every file under `prefix`, walking sub-folders. Storage `list()` returns one
+ * level only, and a project nests: models live in `<id>/<uploadId>/file.glb`,
+ * marker images in `<id>/markers/`. Folders come back with `id: null`.
+ */
+export async function collectFiles(list: ListFn, prefix: string, depth = 4): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await list(prefix)) {
+    const path = `${prefix}/${entry.name}`;
+    if (entry.id) files.push(path);
+    else if (depth > 0) files.push(...(await collectFiles(list, path, depth - 1)));
+  }
+  return files;
+}
+
+/**
+ * Delete a project AND its stored files.
+ *
+ * Until 16 Nov 2026 the three delete buttons removed only the database row.
+ * Model, preview image, marker images, QR and tracking file stayed in storage,
+ * where nobody could reach them any more: the storage policies grant access
+ * through the project row. 14 of 18 project folders had no row.
+ *
+ * Files go first, while the row still gives the owner the right to remove
+ * them. A storage failure is logged and does not block the delete — leaving
+ * the experience on the dashboard would be worse than a leftover file.
+ */
+export async function deleteProject(projectId: string): Promise<void> {
+  for (const bucket of PROJECT_BUCKETS) {
+    try {
+      const list: ListFn = async (path) => {
+        const { data, error } = await supabase.storage.from(bucket).list(path, { limit: 1000 });
+        if (error) throw error;
+        return (data ?? []) as ListEntry[];
+      };
+      const files = await collectFiles(list, projectId);
+      // Belt and braces: only ever this project's folder.
+      const own = files.filter((f) => f.startsWith(`${projectId}/`));
+      if (own.length) {
+        const { error } = await supabase.storage.from(bucket).remove(own);
+        if (error) throw error;
+      }
+    } catch (err) {
+      console.warn(`[deleteProject] could not clear ${bucket}/${projectId}:`, err);
+    }
+  }
+  const { error } = await supabase.from("projects").delete().eq("id", projectId);
+  if (error) throw error;
 }

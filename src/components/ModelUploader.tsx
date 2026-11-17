@@ -6,7 +6,7 @@ import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
 import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
 import { isGlbFile, optimizeGlbTextures, storageSafeName } from "@/lib/glbFile";
-import { thumbnailPath } from "@/lib/thumbnailPath";
+import { legacyThumbnailPath, thumbnailPath } from "@/lib/thumbnailPath";
 import type { MarkerPoint } from "@/lib/markerTypes";
 import {
   describeUploadError,
@@ -242,8 +242,9 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
         void supabase.storage.from("project-models").remove([previousModelPath]).catch(() => {});
       }
 
-      // Project image: rendered once here (textures stripped) so the dashboard
-      // never has to spin up WebGL on a heavy model just to show a preview.
+      // Project image: rendered once here, with textures (see
+      // renderGlbThumbnail.ts), so the dashboard never has to spin up WebGL on
+      // a heavy model just to show a preview.
       void (async () => {
         try {
           const { renderGlbThumbnail } = await import("@/lib/renderGlbThumbnail");
@@ -256,6 +257,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
               upsert: true,
               cacheControl: "60",
             });
+          void supabase.storage.from("project-assets").remove([legacyThumbnailPath(projectId)]).catch(() => {});
           onUploadComplete(filePath);
         } catch (thumbErr) {
           console.warn("[ModelUploader] Thumbnail skipped:", thumbErr);

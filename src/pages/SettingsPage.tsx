@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -18,15 +17,56 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Trash2, Shield } from "lucide-react";
+import { Download, Trash2, Shield, Package, Loader2 } from "lucide-react";
+import { accountSummary, confirmPhrase, downloadModelsZip, phraseMatches } from "@/lib/accountDeletion";
 
 const SettingsPage = () => {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [confirmEmail, setConfirmEmail] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // Delete account: 1 what goes, 2 download or continue, 3 type the phrase (Helgi, 17 Nov 2026).
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [summary, setSummary] = useState<Awaited<ReturnType<typeof accountSummary>> | null>(null);
+  const [typed, setTyped] = useState("");
+  const [zipping, setZipping] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState(false);
+  const phrase = confirmPhrase(user?.email);
+
+  const openDelete = async (open: boolean) => {
+    setDeleteOpen(open);
+    if (!open) return;
+    setStep(1);
+    setTyped("");
+    setDownloaded(false);
+    setSummary(null);
+    try {
+      setSummary(await accountSummary());
+    } catch {
+      setSummary({ projects: [], models: 0 });
+    }
+  };
+
+  const handleDownloadModels = async (projects = summary?.projects) => {
+    try {
+      const list = projects ?? (await accountSummary()).projects;
+      setZipping("Preparing…");
+      const n = await downloadModelsZip(list, (done, total) =>
+        setZipping(done < total ? `Packing ${done + 1} of ${total}…` : "Saving…"),
+      );
+      setDownloaded(n > 0);
+      toast(n
+        ? { title: "Models downloaded", description: `${n} model${n === 1 ? "" : "s"} saved as a .zip file.` }
+        : { title: "No models to download", description: "None of your experiences has a model yet." });
+    } catch {
+      toast({ title: "Download failed", description: "Could not pack your models. Please try again.", variant: "destructive" });
+    } finally {
+      setZipping(null);
+    }
+  };
 
   const handleExportData = async () => {
     setExporting(true);
@@ -63,7 +103,7 @@ const SettingsPage = () => {
       if (!session) throw new Error("Not authenticated");
 
       const res = await supabase.functions.invoke("delete-user-data", {
-        body: { confirmEmail },
+        body: { confirmPhrase: typed },
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
@@ -76,7 +116,7 @@ const SettingsPage = () => {
       toast({ title: "Deletion failed", description: "Could not delete your account. Please try again.", variant: "destructive" });
     } finally {
       setDeleting(false);
-      setConfirmEmail("");
+      setTyped("");
     }
   };
 
@@ -130,43 +170,118 @@ const SettingsPage = () => {
             </Button>
           </div>
 
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <p className="font-medium">Download Your Models</p>
+              <p className="text-sm text-muted-foreground">Every experience's 3D model (GLB) in one .zip file.</p>
+            </div>
+            <Button variant="outline" onClick={() => handleDownloadModels()} disabled={!!zipping}>
+              {zipping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Package className="mr-2 h-4 w-4" />}
+              {zipping ?? "Download .zip"}
+            </Button>
+          </div>
+
           <div className="flex items-center justify-between rounded-lg border border-destructive/30 p-4">
             <div>
               <p className="font-medium text-destructive">Delete Account</p>
               <p className="text-sm text-muted-foreground">Permanently delete your account, projects, and all uploaded files.</p>
             </div>
-            <AlertDialog>
+            <AlertDialog open={deleteOpen} onOpenChange={(o) => { if (!deleting) void openDelete(o); }}>
               <AlertDialogTrigger asChild>
                 <Button variant="destructive">
                   <Trash2 className="mr-2 h-4 w-4" /> Delete
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action cannot be undone. All your projects, 3D models, and personal data
-                    will be permanently deleted. Type your email to confirm.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <div className="space-y-2 py-2">
-                  <Label>Confirm your email</Label>
-                  <Input
-                    placeholder={user?.email || "your@email.com"}
-                    value={confirmEmail}
-                    onChange={(e) => setConfirmEmail(e.target.value)}
-                  />
-                </div>
-                <AlertDialogFooter>
-                  <AlertDialogCancel onClick={() => setConfirmEmail("")}>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDeleteAccount}
-                    disabled={confirmEmail.toLowerCase() !== user?.email?.toLowerCase() || deleting}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    {deleting ? "Deleting…" : "Delete My Account"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
+                <p className="text-xs font-medium text-muted-foreground">Step {step} of 3</p>
+
+                {step === 1 && (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+                      <AlertDialogDescription asChild>
+                        <div className="space-y-2">
+                          <p>Everything below is deleted permanently. It cannot be undone.</p>
+                          <ul className="list-disc pl-5">
+                            <li>
+                              {summary
+                                ? `${summary.projects.length} experience${summary.projects.length === 1 ? "" : "s"} and ${summary.models} 3D model${summary.models === 1 ? "" : "s"}`
+                                : "Your experiences and 3D models"}
+                            </li>
+                            <li>QR codes, marker sheets and client links (they stop working)</li>
+                            <li>Your profile and login</li>
+                          </ul>
+                        </div>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <Button variant="destructive" onClick={() => setStep(2)}>Continue</Button>
+                    </AlertDialogFooter>
+                  </>
+                )}
+
+                {step === 2 && (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Keep your models?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Download your 3D models as one .zip file before they are deleted. You get each
+                        experience's GLB as stored on Archi AR (optimised for phones when "Optimize for
+                        AR" was on). QR codes and marker sheets are not included.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleDownloadModels()}
+                      disabled={!!zipping || !summary?.models}
+                    >
+                      {zipping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Package className="mr-2 h-4 w-4" />}
+                      {zipping ?? (summary?.models ? `Download ${summary.models} model${summary.models === 1 ? "" : "s"} (.zip)` : "No models to download")}
+                    </Button>
+                    {downloaded && <p className="text-sm text-muted-foreground">Downloaded. Check your downloads folder before you go on.</p>}
+                    <AlertDialogFooter>
+                      <Button variant="ghost" onClick={() => setStep(1)} disabled={!!zipping}>Back</Button>
+                      <Button variant="destructive" onClick={() => setStep(3)} disabled={!!zipping}>
+                        {downloaded ? "Continue to delete" : "Skip and delete"}
+                      </Button>
+                    </AlertDialogFooter>
+                  </>
+                )}
+
+                {step === 3 && (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Confirm deletion</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Type <span className="font-mono font-semibold text-foreground">{phrase}</span> to delete your account.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-2 py-2">
+                      <Label htmlFor="delete-phrase">Confirmation</Label>
+                      <Input
+                        id="delete-phrase"
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        className="font-mono"
+                        placeholder={phrase}
+                        value={typed}
+                        onChange={(e) => setTyped(e.target.value)}
+                      />
+                    </div>
+                    <AlertDialogFooter>
+                      <Button variant="ghost" onClick={() => setStep(2)} disabled={deleting}>Back</Button>
+                      <Button
+                        variant="destructive"
+                        onClick={handleDeleteAccount}
+                        disabled={!phraseMatches(typed, user?.email) || deleting}
+                      >
+                        {deleting ? "Deleting…" : "Delete my account"}
+                      </Button>
+                    </AlertDialogFooter>
+                  </>
+                )}
               </AlertDialogContent>
             </AlertDialog>
           </div>

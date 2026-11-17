@@ -13,8 +13,11 @@ import QrViewerChrome from "@/components/ar/qr/QrViewerChrome";
  * on it and follows it while the readings settle → the scene locks it in the
  * room by itself (onLocked) → walk around it, look away, come back.
  * "Re-place" unlocks: the model follows the QR again and re-locks when
- * steady. Status copy comes from qrLaunchStatus — the same voice as the
- * MindAR viewer.
+ * steady. Status copy comes from qrLaunchStatus.
+ *
+ * This is the only Tabletop/Wall viewer: the MindAR fallback was removed on
+ * 16 Nov 2026. An engine that cannot start is reported through onEngineError
+ * and ARViewer shows AREngineUnavailable (or the camera screen).
  */
 
 interface WorldLockViewerProps {
@@ -27,11 +30,15 @@ interface WorldLockViewerProps {
   shareId: string;
   modelUrl: string | null;
   modelScale: number;
+  /** Printed QR width from ?q= (default 150 mm). */
+  qrSizeMm?: number;
+  /** ?q= was present in the scanned link (new-style QR). */
+  sizedLink?: boolean;
   initialRotation?: number;
   onClose: () => void;
   /** Model failed to load — ARViewer's recovery flow. */
   onModelError: (err: Error) => void;
-  /** Engine couldn't start on this device — fall back to MindAR. */
+  /** Engine or camera couldn't start on this device — ARViewer shows why. */
   onEngineError: (err: Error) => void;
 }
 
@@ -45,6 +52,8 @@ const WorldLockViewer = ({
   shareId,
   modelUrl,
   modelScale,
+  qrSizeMm = QR_SIZE_MM,
+  sizedLink = false,
   initialRotation,
   onClose,
   onModelError,
@@ -65,12 +74,12 @@ const WorldLockViewer = ({
   useEffect(() => {
     let cancelled = false;
     // Built on the pre-camera screen already (arPreload); this joins it.
-    preloadQrTarget(project.qr_code_url, shareId, QR_SIZE_MM)
+    preloadQrTarget(project.qr_code_url, shareId, qrSizeMm, sizedLink)
       .then((t) => { if (!cancelled) setTarget(t); })
       .catch((e) => { if (!cancelled) onEngineError(e instanceof Error ? e : new Error(String(e))); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.qr_code_url, shareId]);
+  }, [project.qr_code_url, shareId, qrSizeMm, sizedLink]);
 
   useEffect(() => {
     if (!started || scanning) return;
@@ -103,6 +112,7 @@ const WorldLockViewer = ({
           modelCacheKey={modelCacheKeyFor(shareId, project.updated_at)}
           mode={project.mode}
           modelScale={modelScale}
+          qrSizeMm={qrSizeMm}
           initialRotation={initialRotation}
           replaceSignal={replaceSignal}
           onReady={() => setStarted(true)}
@@ -123,7 +133,6 @@ const WorldLockViewer = ({
         mode={project.mode}
         projectName={project.name}
         modelProgress={modelProgress}
-        holdsInRoom
         hint={hint}
         scaleReadout={formatScaleReadout(modelScale, shownSize)}
         onClose={onClose}

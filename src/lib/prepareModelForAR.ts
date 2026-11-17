@@ -7,6 +7,7 @@
  * three.js objects come from the self-hosted runtime module, so types are loose.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { dropBrokenNormalMaps } from "@/lib/normalMaps";
 
 const ROOM_ENV_URL = "/assets/three/jsm/environments/RoomEnvironment.js";
 const TEXTURE_SLOTS = ["map", "normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap"];
@@ -18,11 +19,15 @@ const TEXTURE_SLOTS = ["map", "normalMap", "roughnessMap", "metalnessMap", "aoMa
  *   scene a second time, every frame).
  * - Rhino "display colour" fallback materials (unnamed, metal 1, rough 1, no
  *   map) → matte, instead of black.
+ * - Normal maps that are not normal maps (Rhino bump exports) → ignored, see
+ *   normalMaps.ts.
  */
 export function tuneMaterialsForMobile(model: any, T: any, renderer?: any): void {
   const maxAniso = Math.min(4, renderer?.capabilities?.getMaxAnisotropy?.() ?? 1);
   const seenMat = new Set<any>();
   const seenTex = new Set<any>();
+
+  dropBrokenNormalMaps(model);
 
   model.traverse((o: any) => {
     if (!o.isMesh) return;

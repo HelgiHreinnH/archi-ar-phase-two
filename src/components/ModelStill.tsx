@@ -2,7 +2,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Box, Rotate3d } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { thumbnailPath } from "@/lib/thumbnailPath";
+import { legacyThumbnailPath, thumbnailPath } from "@/lib/thumbnailPath";
 import { lazyWithReload } from "@/lib/staleDeploy";
 
 const ModelViewer3D = lazyWithReload(() => import("@/components/ModelViewer3D"));
@@ -43,8 +43,9 @@ const ModelStill = ({ projectId, modelUrl, className = "" }: ModelStillProps) =>
     return () => { cancelled = true; };
   }, [projectId, modelUrl]);
 
-  // Projects uploaded before thumbnails existed get one generated on first
-  // view: the render strips textures, so it costs a fraction of a live preview.
+  // Projects without a current image get one generated on first view — those
+  // uploaded before thumbnails existed, and every project whose still predates
+  // textured stills (16 Nov 2026). One render, then it is a plain <img> again.
   useEffect(() => {
     if (!checked || thumbUrl || building || !modelUrl) return;
     let cancelled = false;
@@ -64,6 +65,8 @@ const ModelStill = ({ projectId, modelUrl, className = "" }: ModelStillProps) =>
           .from("project-assets")
           .createSignedUrl(thumbnailPath(projectId), 60 * 60);
         if (!cancelled) setThumbUrl(signed.data?.signedUrl ?? null);
+        // The untextured still this one replaces (best effort).
+        void supabase.storage.from("project-assets").remove([legacyThumbnailPath(projectId)]).catch(() => {});
       } catch (err) {
         console.warn("[ModelStill] Could not build preview image:", err);
       }

@@ -16,6 +16,9 @@
 import QRCode from "qrcode";
 import { TABLETOP_QR_OPTIONS } from "@/hooks/useTabletopGeneration";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
+import { buildSizedExperienceUrl, qrVariantForSize, type QrSizeMm } from "@/lib/qrSizes";
+import { spatialQrSvg } from "@/lib/spatial/qr";
+import { svgToCanvas } from "@/lib/spatial/raster";
 
 export const TARGET_W = 480;
 export const TARGET_H = 640;
@@ -51,13 +54,29 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-async function qrSource(qrUrl: string | null | undefined, shareId: string): Promise<CanvasImageSource> {
+/**
+ * `sized` = the link carried ?q=<mm>. The 150 mm print is the stored image
+ * (generated with ?q=150); 100 / 50 mm are not stored — they are re-rendered
+ * here from the same deterministic renderer the download buttons use, so the
+ * tracking image is the printed pattern pixel for pixel.
+ */
+async function qrSource(
+  qrUrl: string | null | undefined,
+  shareId: string,
+  sized: QrSizeMm | null,
+): Promise<CanvasImageSource> {
+  if (sized && sized !== 150) {
+    return svgToCanvas(spatialQrSvg(buildSizedExperienceUrl(shareId, sized), qrVariantForSize(sized)), 1440, 1440);
+  }
   if (qrUrl) {
     try {
       return await loadImage(qrUrl);
     } catch {
       /* fall through to a deterministic re-render */
     }
+  }
+  if (sized) {
+    return svgToCanvas(spatialQrSvg(buildSizedExperienceUrl(shareId, sized), qrVariantForSize(sized)), 1440, 1440);
   }
   const c = document.createElement("canvas");
   await QRCode.toCanvas(c, buildPublicExperienceUrl(shareId), TABLETOP_QR_OPTIONS);
@@ -68,8 +87,10 @@ export async function buildQrImageTarget(
   qrUrl: string | null | undefined,
   shareId: string,
   qrSizeMm: number,
+  /** The size came from ?q= in the scanned link (false = legacy link without it). */
+  sizedLink = false,
 ): Promise<Xr8ImageTargetData> {
-  const src = await qrSource(qrUrl, shareId);
+  const src = await qrSource(qrUrl, shareId, sizedLink ? (qrSizeMm as QrSizeMm) : null);
   const canvas = document.createElement("canvas");
   canvas.width = TARGET_W;
   canvas.height = TARGET_H;

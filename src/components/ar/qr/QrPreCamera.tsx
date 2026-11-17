@@ -6,8 +6,8 @@ import { markAR } from "@/lib/arTiming";
  * Tabletop / Wall pre-camera screen — the single tap (Oct 2026).
  *
  * Scanning the printed QR lands here, not in the camera: iOS only grants
- * motion access from a tap, and without it there is no world lock (8th Wall)
- * or gyro hold (MindAR). So one clean screen, one button. Dark, like the
+ * motion access from a tap, and without it there is no world lock (8th
+ * Wall). So one clean screen, one button. Dark, like the
  * camera that follows, so there is no white flash and no landing-card flash
  * (4 Oct test, bug 8).
  *

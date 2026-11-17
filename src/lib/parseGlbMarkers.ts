@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import type { MarkerPoint } from "@/lib/markerTypes";
 import { stripTextures } from "@/lib/glbFile";
 
@@ -83,6 +84,9 @@ export async function parseGlbMarkers(file: File): Promise<MarkerPoint[] | null>
   // block the UI for seconds on texture-heavy models.
   const buffer = stripTextures(await file.arrayBuffer());
   const loader = new GLTFLoader();
+  // Optimised uploads are meshopt-compressed; without the decoder the parse
+  // failed and a stored model could never be read for markers again.
+  loader.setMeshoptDecoder(MeshoptDecoder);
 
   return new Promise((resolve) => {
     loader.parse(
