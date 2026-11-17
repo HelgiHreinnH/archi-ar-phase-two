@@ -7,6 +7,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, normalizeMarkerData } from "@/lib/markerTypes";
 import { supabase } from "@/integrations/supabase/client";
 import { preloadMindCompiler } from "@/lib/compileMindFile";
+import { MINDAR_ENABLED } from "@/lib/arEngines";
 import { MODE_COPY, toExperienceMode, type ExperienceMode } from "@/lib/modeCopy";
 import StepProgress from "@/components/wizard/StepProgress";
 import StepModel from "@/components/wizard/StepModel";
@@ -252,7 +253,8 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
   // details/uploads, so "Generate" starts compiling immediately instead of
   // downloading ~2 MB first. Tabletop/Wall compile nothing (8th Wall builds its
   // target from the QR at view time).
-  useEffect(() => { if (mode === "multipoint") preloadMindCompiler(); }, [mode]);
+  // 17 Nov 2026: no MindAR compiler preload — MindAR must not be called (arEngines.ts).
+  useEffect(() => { if (MINDAR_ENABLED && mode === "multipoint") preloadMindCompiler(); }, [mode]);
   const [activeSection, setActiveSection] = useState(0);
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
   const sectionEls = useRef<(HTMLElement | null)[]>([]);

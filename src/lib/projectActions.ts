@@ -18,14 +18,20 @@ export const isArchived = (p: Pick<Project, "status">) => p.status === ARCHIVED;
 /**
  * Status to restore to: live again if it was generated, otherwise a draft.
  * "Generated" means the tracking asset exists: the printed QR for Tabletop/Wall
- * (8th Wall builds its target from it — no .mind since 16 Nov 2026), the
- * compiled .mind for Spatial.
+ * (8th Wall builds its target from it — no .mind since 16 Nov 2026); for
+ * Spatial the uploaded marker images (8th Wall targets since 17 Nov 2026) or,
+ * for experiences generated before that, the compiled .mind.
  */
 export function restoredStatus(
-  p: Pick<Project, "mode" | "mind_file_url" | "qr_code_url" | "share_link">,
+  p: Pick<Project, "mode" | "mind_file_url" | "qr_code_url" | "share_link"> &
+    Partial<Pick<Project, "marker_image_urls">>,
 ): "active" | "draft" {
   const singleQr = p.mode === "tabletop" || p.mode === "wall";
-  const generated = singleQr ? !!p.qr_code_url : !!p.mind_file_url;
+  const hasMarkerImages =
+    !!p.marker_image_urls &&
+    typeof p.marker_image_urls === "object" &&
+    Object.keys(p.marker_image_urls as Record<string, unknown>).length > 0;
+  const generated = singleQr ? !!p.qr_code_url : hasMarkerImages || !!p.mind_file_url;
   return generated && p.share_link ? "active" : "draft";
 }
 

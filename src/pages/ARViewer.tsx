@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, AlertTriangle } from "lucide-react";
@@ -12,6 +12,9 @@ import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRec
 import AREngineUnavailable from "@/components/ar/shared/AREngineUnavailable";
 import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
 import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
+import SpatialInTesting from "@/components/ar/shared/SpatialInTesting";
+import { MINDAR_ENABLED } from "@/lib/arEngines";
+import { LAB } from "@/lib/lab";
 import WorldLockViewer from "@/components/ar/tabletop/WorldLockViewer";
 import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
@@ -197,6 +200,8 @@ const ARViewer = () => {
     new URLSearchParams(window.location.search).get("landing") === "1";
   useEffect(() => {
     if (autoLaunched.current || forceLanding) return;
+    // Spatial auto-launch starts the MindAR viewer — never while MindAR is off.
+    if (!MINDAR_ENABLED) return;
     if (!project || !projectHasMindFile || viewState !== "landing") return;
     // Oct 2026: Tabletop/Wall no longer auto-launch — they get the single tap
     // on QrPreCamera (iOS motion access needs a gesture; without it there is
@@ -261,7 +266,8 @@ const ARViewer = () => {
   useEffect(() => {
     if (!project?.mode) return;
     setARContext("mode", project.mode);
-    setARContext("engine", project.mode === "tabletop" || project.mode === "wall" ? "8thwall" : "mindar");
+    const singleQr = project.mode === "tabletop" || project.mode === "wall";
+    setARContext("engine", singleQr ? "8thwall" : MINDAR_ENABLED ? "mindar" : "none (spatial in testing)");
   }, [project?.mode]);
   useEffect(() => {
     if (viewState === "ended") logARTimingSummary(true);
@@ -396,6 +402,17 @@ const ARViewer = () => {
         </div>
       </div>
     );
+  }
+
+  // Spatial while MindAR is off (decision 17 Nov 2026, src/lib/arEngines.ts):
+  // the MindAR viewer is never mounted. On the 8th Wall test site the link
+  // goes straight to the Spatial lab, which runs on 8th Wall; on production
+  // the client sees that Spatial is in testing.
+  if (isMultipoint && !MINDAR_ENABLED) {
+    if (LAB?.engine === "8thwall" && shareId) {
+      return <Navigate to={`/lab/spatial/${shareId}${window.location.search}`} replace />;
+    }
+    return <SpatialInTesting projectName={project.name} />;
   }
 
   // The model loaded-URL was fine, but the GLB failed to load at runtime inside

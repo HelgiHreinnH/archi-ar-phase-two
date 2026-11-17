@@ -27,6 +27,7 @@ import {
   MULTIPOINT_PIPELINE,
   type MultipointStep,
 } from "@/hooks/useMultipointGeneration";
+import { MINDAR_ENABLED } from "@/lib/arEngines";
 
 type Project = Tables<"projects">;
 
@@ -48,7 +49,7 @@ interface CheckItem {
 const STEP_LABELS: Record<string, string> = {
   idle: "",
   markers: "Generating marker images…",
-  compiling: "Compiling MindAR targets…",
+  compiling: "Compiling marker targets…",
   qr: "Creating QR code…",
   uploading: "Uploading assets…",
   activating: "Activating experience…",
@@ -538,7 +539,8 @@ const GenerateExperience = ({
                     </Badge>
                   )}
                 </div>
-                {hasWtcFile && (
+                {/* No way back to MindAR while it is off (17 Nov 2026, arEngines.ts). */}
+                {MINDAR_ENABLED && hasWtcFile && (
                   <Button
                     variant="ghost"
                     size="sm"

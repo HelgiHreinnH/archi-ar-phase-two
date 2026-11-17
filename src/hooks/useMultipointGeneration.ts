@@ -7,6 +7,7 @@ import type { MarkerPoint } from "@/lib/markerTypes";
 import { spatialQrPng } from "@/lib/spatial/qrExport";
 import { generateAllMarkerImages, canvasToImage } from "@/lib/generateMarkers";
 import { compileMindFile } from "@/lib/compileMindFile";
+import { MINDAR_ENABLED, SPATIAL_TRACKING_FORMAT } from "@/lib/arEngines";
 import { buildPublicExperienceUrl } from "@/lib/publicExperienceUrl";
 
 type Project = Tables<"projects">;
@@ -25,13 +26,15 @@ const STEP_PROGRESS: Record<MultipointStep, number> = {
   error: 0,
 };
 
+// 17 Nov 2026: no "Compile" step while MindAR is off — 8th Wall builds its
+// targets from the marker PNGs at runtime, so there is nothing to compile.
 export const MULTIPOINT_PIPELINE = [
   { key: "markers" as const, label: "Markers" },
-  { key: "compiling" as const, label: "Compile" },
+  ...(MINDAR_ENABLED ? [{ key: "compiling" as const, label: "Compile" }] : []),
   { key: "qr" as const, label: "QR Code" },
   { key: "uploading" as const, label: "Upload" },
   { key: "activating" as const, label: "Activate" },
-] as const;
+];
 
 export function useMultipointGeneration(
   project: Project,
@@ -64,25 +67,32 @@ export function useMultipointGeneration(
       setStep("markers");
       const generatedMarkers = await generateAllMarkerImages(markerData, project.name);
 
-      // ── Compile .mind file ──
-      setStep("compiling");
-      const markerImages = await Promise.all(
-        generatedMarkers.map((m) => canvasToImage(m.canvas))
-      );
-      const { blob: mindBlob } = await compileMindFile(markerImages, (p) =>
-        setCompileProgress(p)
-      );
-      console.log(
-        `[multipoint] .mind compiled — ${(mindBlob.size / 1024).toFixed(1)} KB ` +
-        `(${markerImages.length} markers)`
-      );
+      // ── Compile .mind file (MindAR only — off since 17 Nov 2026) ──
+      // With MindAR off nothing is compiled: the marker PNGs uploaded below
+      // are the 8th Wall image targets. mind_file_url is cleared so a
+      // regenerated project never points at an old .mind (the file itself
+      // stays in storage — archived, not deleted).
+      let mindBlob: Blob | null = null;
+      if (MINDAR_ENABLED) {
+        setStep("compiling");
+        const markerImages = await Promise.all(
+          generatedMarkers.map((m) => canvasToImage(m.canvas))
+        );
+        ({ blob: mindBlob } = await compileMindFile(markerImages, (p) =>
+          setCompileProgress(p)
+        ));
+        console.log(
+          `[multipoint] .mind compiled — ${(mindBlob.size / 1024).toFixed(1)} KB ` +
+          `(${markerImages.length} markers)`
+        );
+      }
 
-      // ── Upload marker images + .mind ──
+      // ── Upload marker images (+ .mind when MindAR is on) ──
       setStep("uploading");
       const markerImageUrls: Record<string, string> = {};
-      const mindPath = `${projectPath}/targets.mind`;
+      const mindPath = mindBlob ? `${projectPath}/targets.mind` : null;
 
-      // Upload all marker images and the .mind file in parallel.
+      // Upload all marker images (and the .mind file, if any) in parallel.
       const uploads = generatedMarkers.map(async (marker) => {
         const filePath = `${projectPath}/markers/marker_${marker.index}.png`;
         const { error: uploadErr } = await supabase.storage
@@ -92,30 +102,34 @@ export function useMultipointGeneration(
         // Store bare path — signed URLs are generated on retrieval
         markerImageUrls[String(marker.index)] = filePath;
       });
-      uploads.push(
-        supabase.storage
-          .from("project-assets")
-          .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true })
-          .then(({ error: mindUploadErr }) => { if (mindUploadErr) throw mindUploadErr; }),
-      );
+      if (mindBlob && mindPath) {
+        uploads.push(
+          supabase.storage
+            .from("project-assets")
+            .upload(mindPath, mindBlob, { contentType: "application/octet-stream", upsert: true })
+            .then(({ error: mindUploadErr }) => { if (mindUploadErr) throw mindUploadErr; }),
+        );
+      }
       await Promise.all(uploads);
 
       // ── Verify .mind reachability before activating ──
-      const { data: signedMind, error: signErr } = await supabase.storage
-        .from("project-assets")
-        .createSignedUrl(mindPath, 60);
-      if (signErr || !signedMind?.signedUrl) {
-        throw new Error("Failed to verify .mind file: signing returned no URL");
+      if (mindPath) {
+        const { data: signedMind, error: signErr } = await supabase.storage
+          .from("project-assets")
+          .createSignedUrl(mindPath, 60);
+        if (signErr || !signedMind?.signedUrl) {
+          throw new Error("Failed to verify .mind file: signing returned no URL");
+        }
+        const headRes = await fetch(signedMind.signedUrl, { method: "HEAD" });
+        if (!headRes.ok) {
+          throw new Error(`Failed to verify .mind file: HEAD returned ${headRes.status}`);
+        }
+        const contentLength = parseInt(headRes.headers.get("content-length") || "0", 10);
+        if (contentLength < 1024) {
+          throw new Error(`.mind file appears empty or invalid (${contentLength} bytes)`);
+        }
+        console.log(`[multipoint] .mind verified — ${(contentLength / 1024).toFixed(1)} KB reachable`);
       }
-      const headRes = await fetch(signedMind.signedUrl, { method: "HEAD" });
-      if (!headRes.ok) {
-        throw new Error(`Failed to verify .mind file: HEAD returned ${headRes.status}`);
-      }
-      const contentLength = parseInt(headRes.headers.get("content-length") || "0", 10);
-      if (contentLength < 1024) {
-        throw new Error(`.mind file appears empty or invalid (${contentLength} bytes)`);
-      }
-      console.log(`[multipoint] .mind verified — ${(contentLength / 1024).toFixed(1)} KB reachable`);
 
       // ── QR code ──
       setStep("qr");
@@ -136,6 +150,7 @@ export function useMultipointGeneration(
           status: "active",
           qr_code_url: qrPath,
           mind_file_url: mindPath,
+          tracking_format: SPATIAL_TRACKING_FORMAT,
           marker_image_urls: markerImageUrls,
         })
         .eq("id", project.id);
@@ -144,7 +159,7 @@ export function useMultipointGeneration(
       setStep("done");
       toast({
         title: "AR Experience Generated! 🚀",
-        description: `${markerData.length} markers compiled and experience is live.`,
+        description: `${markerData.length} markers generated and experience is live.`,
       });
       onGenerated();
     } catch (err: any) {

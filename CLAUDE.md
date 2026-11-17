@@ -7,12 +7,22 @@ WebAR presentation platform for architects: upload a model from Rhino, generate 
 printed marker, share an AR experience with a client by QR code. No native app.
 
 ## Stack (locked)
-Vite + React 18 + TS + Tailwind + shadcn/Radix · MindAR.js 1.2.5 (Spatial only) ·
-8th Wall engine binary 1.0.0 (Tabletop/Wall: QR image target + SLAM, auto lock;
-`WorldLockScene.tsx`) · three 0.170 (PINNED — see .npmrc) ·
+Vite + React 18 + TS + Tailwind + shadcn/Radix ·
+8th Wall engine binary 1.0.0 — the engine for **every** mode (Tabletop/Wall: QR image
+target + SLAM, auto lock, `WorldLockScene.tsx`; Spatial: being moved, see below) ·
+MindAR.js 1.2.5 — **parked and archived, switched off** (`src/lib/arEngines.ts`) · three 0.170 (PINNED — see .npmrc) ·
 Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS.
 
 ## Rules
+- **8th Wall is the engine in all modes; MindAR is off (decision 17 Nov 2026).**
+  `MINDAR_ENABLED = false` in `src/lib/arEngines.ts` guards every MindAR entry point:
+  the Spatial viewer (production shows `SpatialInTesting`; the 8th Wall lab site
+  redirects to `/lab/spatial/:shareId`), the `.mind` compile at generation, the
+  compiler preload, the placement validator and "Revert to MindAR". `index.html` no
+  longer preloads MindAR. During the test phase MindAR must never be called —
+  `arEngines.test.ts` enforces it. Never flip the flag back; MindAR is archived on
+  branch `archive/mindar` (archived, not deleted). Plan: Notion page "Decision: 8th
+  Wall is the primary engine in all modes, MindAR is archived · 17 Nov 2026".
 - **"Spatial" is a UI label only.** Never rename `mode === "multipoint"` in code,
   DB values, identifiers, filenames or imports. The rename is frontend copy.
 - **GLB is the only model format** across Tabletop, Wall and Spatial. USDZ was
@@ -30,8 +40,9 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
 - **8th Wall licence:** the engine binary is Niantic Spatial's "Distributed Engine
   Binary" licence, not MIT. Keep the on-screen attribution + licence link in
   `WorldLockViewer.tsx`. §1.2 restricts paid products whose value derives
-  substantially from the engine — accepted risk (Helgi, 23 Sep 2026); get it
-  cleared with Niantic Spatial before scaling. Never modify or rehost altered builds.
+  substantially from the engine — accepted risk (Helgi, 23 Sep 2026); it now covers
+  paid Spatial too. Contact Niantic Spatial once Spatial on 8th Wall has been tested
+  and works (Helgi, est. Q1 2027), and before selling it. Never modify or rehost altered builds.
 - **Tabletop/Wall have one engine.** The MindAR fallback was removed on 16 Nov 2026
   (image tracking + gyro hold cannot keep a model on the QR once the phone moves).
   If 8th Wall can't start, the client sees `AREngineUnavailable` — do not add a

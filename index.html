@@ -21,42 +21,24 @@
 
     <!-- es-module-shims polyfill for import maps on older Safari/iOS/Firefox -->
     <script async src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
-    <!-- Import map MUST appear before any module scripts so MindAR can resolve "three".
-         Audit C-1 (May 2026): point "three" at the self-hosted copy so MindAR and the
-         AR scene loaders share a single Three.js module instance (instanceof checks
-         across modules previously broke silently). -->
+    <!-- Import map MUST appear before any module scripts so the AR scene loaders
+         resolve "three". Audit C-1 (May 2026): point "three" at the self-hosted copy so
+         every loader shares a single Three.js module instance (instanceof checks
+         across modules previously broke silently). The MindAR entry was removed on
+         17 Nov 2026 (archive/mindar). -->
     <script type="importmap">
       {
         "imports": {
           "three": "/assets/three/three.module.js",
-          "three/addons/": "/assets/three/jsm/",
-          "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+          "three/addons/": "/assets/three/jsm/"
         }
       }
     </script>
 
-    <!-- Audit C-1 / L-5 (May 2026): Modulepreload + SRI for the MindAR runtime.
-         The actual import in MindARScene.tsx is dynamic (await import(URL)) and
-         dynamic imports cannot carry an integrity attribute. Preloading here with
-         integrity makes the browser verify the hash before the module is reused
-         by the later import. Recompute when bumping `mind-ar` version.
-         Oct 2026: skipped on ?engine=8thwall links, where the MindAR + TF.js
-         bundle only competed with the 8th Wall engine download on 4G.
-         Nov 2026: MindAR now serves Spatial only (Tabletop/Wall are 8th Wall
-         only). The mode is not known here, so the preload still runs on plain
-         /view links; the ?engine=8thwall switch is kept for the Spatial tests. -->
-    <script>
-      (function () {
-        var q = new URLSearchParams(location.search);
-        if (q.get("engine") === "8thwall") return;
-        var l = document.createElement("link");
-        l.rel = "modulepreload";
-        l.href = "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
-        l.integrity = "sha384-V4MJvKKF+j4p5na1bzvsCAqd88oPPyGSRD/QSJM0Ad+Nkx88/3wnkr7Cx3caZmpt";
-        l.crossOrigin = "anonymous";
-        document.head.appendChild(l);
-      })();
-    </script>
+    <!-- 17 Nov 2026: the MindAR modulepreload (with SRI hash) that used to sit
+         here was removed. 8th Wall is the engine in every mode and MindAR must
+         not be fetched or called during the test phase (src/lib/arEngines.ts).
+         The original block is on branch archive/mindar. -->
     <!-- AR links: open the TLS connection to Supabase (get-public-project)
          while the app bundle is still downloading. Vite fills the env value at
          build time; skipped if it is missing. -->
