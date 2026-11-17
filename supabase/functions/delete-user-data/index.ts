@@ -1,100 +1,72 @@
+/**
+ * Delete an account: every stored file, then projects and profile, then the login.
+ * The order and the checks live in core.ts (tested from vitest). This file is the HTTP shell.
+ *
+ * Body: { confirmPhrase: "DELETE <email name>" } — the phrase the Settings dialog asks for.
+ */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
+import { deleteAccount, phraseMatches, type AdminLike } from './core.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // Validate JWT from Authorization header
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
+    if (!authHeader) return json({ error: 'Missing authorization' }, 401)
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-
-    // User client to get authenticated user
     const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
-      global: { headers: { Authorization: authHeader } }
+      global: { headers: { Authorization: authHeader } },
     })
     const { data: { user }, error: userError } = await userClient.auth.getUser()
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
+    if (userError || !user) return json({ error: 'Unauthorized' }, 401)
 
-    // Validate confirmation email matches
     const body = await req.json().catch(() => ({}))
-    if (body.confirmEmail?.toLowerCase() !== user.email?.toLowerCase()) {
-      return new Response(JSON.stringify({ error: 'Email confirmation does not match' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+    if (!phraseMatches(body.confirmPhrase, user.email)) {
+      return json({ error: 'Confirmation phrase does not match' }, 400)
     }
 
-    // Admin client for privileged operations
-    const adminClient = createClient(supabaseUrl, serviceRoleKey)
-
-    // 1. Get all user projects to find storage paths
-    const { data: projects } = await adminClient
-      .from('projects')
-      .select('id')
-      .eq('user_id', user.id)
-
-    // 2. Delete storage files for each project
-    if (projects && projects.length > 0) {
-      for (const project of projects) {
-        // Delete from project-assets
-        const { data: assetFiles } = await adminClient.storage
-          .from('project-assets')
-          .list(project.id)
-        if (assetFiles && assetFiles.length > 0) {
-          await adminClient.storage
-            .from('project-assets')
-            .remove(assetFiles.map(f => `${project.id}/${f.name}`))
-        }
-
-        // Delete from project-models
-        const { data: modelFiles } = await adminClient.storage
-          .from('project-models')
-          .list(project.id)
-        if (modelFiles && modelFiles.length > 0) {
-          await adminClient.storage
-            .from('project-models')
-            .remove(modelFiles.map(f => `${project.id}/${f.name}`))
-        }
-      }
+    const admin = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    const port: AdminLike = {
+      async listFolder(bucket, path) {
+        const { data, error } = await admin.storage.from(bucket).list(path, { limit: 1000 })
+        if (error) throw error
+        return data ?? []
+      },
+      async removeFiles(bucket, paths) {
+        const { error } = await admin.storage.from(bucket).remove(paths)
+        if (error) throw error
+      },
+      async projectIds(userId) {
+        const { data, error } = await admin.from('projects').select('id').eq('user_id', userId)
+        if (error) throw error
+        return (data ?? []).map((p: { id: string }) => p.id)
+      },
+      async deleteRows(userId) {
+        const p = await admin.from('projects').delete().eq('user_id', userId)
+        if (p.error) throw p.error
+        const pr = await admin.from('profiles').delete().eq('user_id', userId)
+        if (pr.error) throw pr.error
+      },
+      async deleteAuthUser(userId) {
+        const { error } = await admin.auth.admin.deleteUser(userId)
+        if (error) throw error
+      },
     }
 
-    // 3. Delete all projects (cascade handled by DB)
-    await adminClient.from('projects').delete().eq('user_id', user.id)
-
-    // 4. Delete profile
-    await adminClient.from('profiles').delete().eq('user_id', user.id)
-
-    // 5. Delete the auth user
-    const { error: deleteError } = await adminClient.auth.admin.deleteUser(user.id)
-    if (deleteError) {
-      return new Response(JSON.stringify({ error: 'Failed to delete account' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
-
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    const result = await deleteAccount(port, user.id)
+    if (result.ok) return json({ success: true, filesRemoved: result.filesRemoved })
+    console.error('[delete-user-data]', user.id, result)
+    return json({ error: result.message, stage: result.stage }, 500)
   } catch (err) {
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    console.error('[delete-user-data] unexpected', err)
+    return json({ error: 'Internal server error' }, 500)
   }
 })
