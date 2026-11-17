@@ -9,15 +9,16 @@ printed marker, share an AR experience with a client by QR code. No native app.
 ## Stack (locked)
 Vite + React 18 + TS + Tailwind + shadcn/Radix ·
 8th Wall engine binary 1.0.0 — the engine for **every** mode (Tabletop/Wall: QR image
-target + SLAM, auto lock, `WorldLockScene.tsx`; Spatial: being moved, see below) ·
+target + SLAM, auto lock, `WorldLockScene.tsx`; Spatial: every marker an image
+target inside SLAM, survey + fit, manual lock, `SpatialWorldViewer.tsx`) ·
 MindAR.js 1.2.5 — **parked and archived, switched off** (`src/lib/arEngines.ts`) · three 0.170 (PINNED — see .npmrc) ·
 Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS.
 
 ## Rules
 - **8th Wall is the engine in all modes; MindAR is off (decision 17 Nov 2026).**
   `MINDAR_ENABLED = false` in `src/lib/arEngines.ts` guards every MindAR entry point:
-  the Spatial viewer (production shows `SpatialInTesting`; the 8th Wall lab site
-  redirects to `/lab/spatial/:shareId`), the `.mind` compile at generation, the
+  the Spatial viewer (Spatial now runs on 8th Wall in `SpatialWorldViewer.tsx` via
+  `src/lib/spatial/adapter8thWall.ts`), the `.mind` compile at generation, the
   compiler preload, the placement validator and "Revert to MindAR". `index.html` no
   longer preloads MindAR. During the test phase MindAR must never be called —
   `arEngines.test.ts` enforces it. Never flip the flag back; MindAR is archived on

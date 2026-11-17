@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, AlertTriangle } from "lucide-react";
@@ -12,9 +12,8 @@ import ModelUnavailableRecovery from "@/components/ar/shared/ModelUnavailableRec
 import AREngineUnavailable from "@/components/ar/shared/AREngineUnavailable";
 import TabletopViewer from "@/components/ar/tabletop/TabletopViewer";
 import MultipointViewer from "@/components/ar/multipoint/MultipointViewer";
-import SpatialInTesting from "@/components/ar/shared/SpatialInTesting";
+import SpatialWorldViewer from "@/components/ar/spatial/SpatialWorldViewer";
 import { MINDAR_ENABLED } from "@/lib/arEngines";
-import { LAB } from "@/lib/lab";
 import WorldLockViewer from "@/components/ar/tabletop/WorldLockViewer";
 import { MindARSRIError } from "@/lib/sriError";
 import { ModelLoadError } from "@/lib/modelLoadError";
@@ -267,7 +266,7 @@ const ARViewer = () => {
     if (!project?.mode) return;
     setARContext("mode", project.mode);
     const singleQr = project.mode === "tabletop" || project.mode === "wall";
-    setARContext("engine", singleQr ? "8thwall" : MINDAR_ENABLED ? "mindar" : "none (spatial in testing)");
+    setARContext("engine", singleQr || !MINDAR_ENABLED ? "8thwall" : "mindar");
   }, [project?.mode]);
   useEffect(() => {
     if (viewState === "ended") logARTimingSummary(true);
@@ -404,15 +403,22 @@ const ARViewer = () => {
     );
   }
 
-  // Spatial while MindAR is off (decision 17 Nov 2026, src/lib/arEngines.ts):
-  // the MindAR viewer is never mounted. On the 8th Wall test site the link
-  // goes straight to the Spatial lab, which runs on 8th Wall; on production
-  // the client sees that Spatial is in testing.
-  if (isMultipoint && !MINDAR_ENABLED) {
-    if (LAB?.engine === "8thwall" && shareId) {
-      return <Navigate to={`/lab/spatial/${shareId}${window.location.search}`} replace />;
-    }
-    return <SpatialInTesting projectName={project.name} />;
+  // Spatial on 8th Wall (decision 17 Nov 2026, src/lib/arEngines.ts): the
+  // MindAR viewer is never mounted. SpatialWorldViewer owns its own tap screen,
+  // camera, survey and lock; closing it goes to the shared end screen, and
+  // "View in AR again" remounts it (resetKey).
+  if (isMultipoint && !MINDAR_ENABLED && viewState !== "ended") {
+    return (
+      <>
+        <SpatialWorldViewer
+          key={`spatial-${resetKey}`}
+          project={project}
+          onStartTap={requestMotionPermission}
+          onClose={() => setViewState("ended")}
+        />
+        <ARTimingOverlay />
+      </>
+    );
   }
 
   // The model loaded-URL was fine, but the GLB failed to load at runtime inside
