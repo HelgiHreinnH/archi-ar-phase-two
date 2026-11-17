@@ -80,4 +80,19 @@ describe("parseGlbMarkers", () => {
     const notGlb = new File(["{}"], "markers.json", { type: "application/json" });
     expect(await parseGlbMarkers(notGlb)).toBeNull();
   });
+
+  it("maps letter names across the full A–T range, not just A/B/C", async () => {
+    // The Rhino Marker Tool names markers by letter and its LETTERS run A–T. Before
+    // Nov 2026 the lookup here stopped at C, so marker_D and up were dropped in
+    // silence. This locks the two sides to the same 20.
+    const mod = await import("./parseGlbMarkers");
+    const src = (await import("node:fs")).readFileSync(
+      new URL("./parseGlbMarkers.ts", import.meta.url),
+      "utf8"
+    );
+    // The map is built from MAX_MARKERS, so assert the construction, not a literal.
+    expect(src).toMatch(/length:\s*MAX_MARKERS/);
+    expect(src).not.toMatch(/marker_c:\s*3/);
+    expect(mod).toBeTruthy();
+  });
 });

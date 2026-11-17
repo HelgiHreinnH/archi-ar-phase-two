@@ -6,12 +6,17 @@ import { stripTextures } from "@/lib/glbFile";
 
 const MAX_MARKERS = 20;
 
-/** Legacy name → index mapping */
-const LEGACY_MAP: Record<string, number> = {
-  marker_a: 1,
-  marker_b: 2,
-  marker_c: 3,
-};
+/**
+ * Letter name → index: marker_a = 1 … marker_t = 20.
+ *
+ * The Rhino Marker Tool names markers by letter, and its LETTERS run A–T — the same
+ * 20 the numeric form allows. Until Nov 2026 this map stopped at C, so a model with
+ * marker_D and up simply lost those markers here, silently: the plugin wrote them,
+ * the GLB carried them, and the wizard showed three. The two sides now agree on 20.
+ */
+const LETTER_MAP: Record<string, number> = Object.fromEntries(
+  Array.from({ length: MAX_MARKERS }, (_, i) => [`marker_${String.fromCharCode(97 + i)}`, i + 1])
+);
 
 /**
  * Extracts the world-space position of a THREE.Object3D.
@@ -118,9 +123,9 @@ export async function parseGlbMarkers(file: File): Promise<MarkerPoint[] | null>
             .replace(/[\s-]/g, "_")
             .replace(/_proxy$/, "");
 
-          // Check legacy names first
-          if (LEGACY_MAP[name] !== undefined) {
-            record(LEGACY_MAP[name], obj);
+          // Letter names (marker_a … marker_t) come from the Rhino Marker Tool
+          if (LETTER_MAP[name] !== undefined) {
+            record(LETTER_MAP[name], obj);
             return;
           }
 
