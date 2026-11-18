@@ -123,31 +123,6 @@ export function subscribeModelProgress(url: string, l: (p: number | null) => voi
 
 // ── Tracking targets ─────────────────────────────────────────────────
 
-const trackingFiles = new Map<string, Promise<ArrayBuffer>>();
-
-/**
- * A MindAR .mind file, fetched once (MindARScene validates it). Spatial only:
- * Tabletop/Wall no longer have a .mind (16 Nov 2026).
- */
-export function preloadTrackingFile(url: string): Promise<ArrayBuffer> {
-  const key = assetKey(url);
-  let p = trackingFiles.get(key);
-  if (!p) {
-    p = fetch(url, { cache: "force-cache" }).then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.arrayBuffer();
-    });
-    p.catch(() => { trackingFiles.delete(key); });
-    trackingFiles.set(key, p);
-  }
-  return p;
-}
-
-/** A tracking file already being preloaded, or null. */
-export function takePreloadedTrackingFile(url: string): Promise<ArrayBuffer> | null {
-  return trackingFiles.get(assetKey(url)) ?? null;
-}
-
 const qrTargets = new Map<string, Promise<Xr8ImageTargetData>>();
 
 /** The 8th Wall QR image target, built in the browser from qr_code.png. */
@@ -209,7 +184,6 @@ export function preloadQrExperience(i: QrPreloadInput): void {
 /** Test hook. */
 export function __resetARPreloadForTests(): void {
   models.clear();
-  trackingFiles.clear();
   qrTargets.clear();
   threePreload = null;
 }

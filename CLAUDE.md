@@ -11,19 +11,21 @@ Vite + React 18 + TS + Tailwind + shadcn/Radix ·
 8th Wall engine binary 1.0.0 — the engine for **every** mode (Tabletop/Wall: QR image
 target + SLAM, auto lock, `WorldLockScene.tsx`; Spatial: every marker an image
 target inside SLAM, survey + fit, manual lock, `SpatialWorldViewer.tsx`) ·
-MindAR.js 1.2.5 — **parked and archived, switched off** (`src/lib/arEngines.ts`) · three 0.170 (PINNED — see .npmrc) ·
+three 0.170 (PINNED — see .npmrc) ·
 Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS.
 
 ## Rules
-- **8th Wall is the engine in all modes; MindAR is off (decision 17 Nov 2026).**
-  `MINDAR_ENABLED = false` in `src/lib/arEngines.ts` guards every MindAR entry point:
-  the Spatial viewer (Spatial now runs on 8th Wall in `SpatialWorldViewer.tsx` via
-  `src/lib/spatial/adapter8thWall.ts`), the `.mind` compile at generation, the
-  compiler preload, the placement validator and "Revert to MindAR". `index.html` no
-  longer preloads MindAR. During the test phase MindAR must never be called —
-  `arEngines.test.ts` enforces it. Never flip the flag back; MindAR is archived on
-  branch `archive/mindar` (archived, not deleted). Plan: Notion page "Decision: 8th
-  Wall is the primary engine in all modes, MindAR is archived · 17 Nov 2026".
+- **8th Wall is the only engine; MindAR is archived (decision 17 Nov 2026, phase 3
+  18 Nov).** The MindAR code left `src/` for `archive/mindar/` (readable copy, not
+  built — see its README) and the `mind-ar` dependency is gone. The working MindAR
+  system is on branch `archive/mindar` (archived, not deleted). `arEngines.test.ts`
+  fails if MindAR comes back into `src/`, `package.json` or `index.html` — bringing it
+  back is a documented product decision, not a code change. Spatial runs on
+  `SpatialWorldViewer.tsx` + `src/lib/spatial/adapter8thWall.ts`; generation uploads
+  the marker PNGs as the 8th Wall targets and writes `tracking_format = 8thwall-image`
+  (no `.mind`). `projects.mind_file_url` stays in the schema for old rows. Plan: Notion
+  page "Decision: 8th Wall is the primary engine in all modes, MindAR is archived ·
+  17 Nov 2026".
 - **"Spatial" is a UI label only.** Never rename `mode === "multipoint"` in code,
   DB values, identifiers, filenames or imports. The rename is frontend copy.
 - **GLB is the only model format** across Tabletop, Wall and Spatial. USDZ was

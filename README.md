@@ -8,8 +8,11 @@ Three modes: **Tabletop** (QR flat, model on the table), **Wall** (QR mounted
 vertically), **Spatial** (multi-marker triangulation at 1:1 in the real space).
 
 ## Stack
-Vite · React 18 · TypeScript · Tailwind · shadcn/Radix · MindAR.js 1.2.5 ·
-Three.js · Google Model Viewer · Supabase · Netlify.
+Vite · React 18 · TypeScript · Tailwind · shadcn/Radix · 8th Wall engine binary
+1.0.0 (every mode) · Three.js · Google Model Viewer · Supabase · Netlify.
+
+MindAR was the earlier tracking engine; it was archived on 18 Nov 2026 — see
+`archive/mindar/README.md`.
 
 ## Local development
 

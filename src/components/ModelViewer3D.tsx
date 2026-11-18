@@ -296,7 +296,7 @@ const ModelViewer3D = ({ modelUrl, className = "" }: ModelViewer3DProps) => {
     };
   }, [signedUrl]);
 
-  // Legacy USDZ uploads can't render in the browser (or in MindAR AR) —
+  // Legacy USDZ uploads can't render in the browser (or in the AR view) —
   // prompt the owner to replace them with a GLB.
   if (isUsdz) {
     return (

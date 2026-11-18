@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Loader2, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import LaunchRing, { type LaunchRingState } from "@/components/ar/multipoint/LaunchRing";
+import LaunchRing, { type LaunchRingState } from "@/components/ar/qr/LaunchRing";
 import { qrStatusCopy, type QrPhase } from "@/lib/qrLaunchStatus";
 
 /**

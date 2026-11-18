@@ -26,7 +26,7 @@
 # NOTE: no X-Frame-Options / frame-ancestors here on purpose. /view/:shareId is a
 # link an architect sends to a client and may be embedded. Decide deliberately
 # before locking it down.
-# NOTE: no CSP here on purpose. The AR engine loads MindAR from cdn.jsdelivr.net
+# NOTE: no CSP here on purpose. The AR engine loads 8th Wall from cdn.jsdelivr.net
 # and the es-module-shims polyfill from ga.jspm.io (both declared in index.html).
 # A 'self'-only script-src would kill AR. If you add one, start it as
 # Content-Security-Policy-Report-Only with those two hosts plus Supabase allowed.

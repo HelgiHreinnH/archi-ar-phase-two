@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from "react";
-// FALLBACK ONLY. Tabletop/Wall run on 8th Wall (WorldLockViewer), Spatial on
-// MindAR. This model-viewer path (3D preview + native device AR where the OS
+// FALLBACK ONLY. Every mode runs on 8th Wall (Tabletop/Wall: WorldLockViewer,
+// Spatial: SpatialWorldViewer). This model-viewer path (3D preview + native device AR where the OS
 // offers it) is reached only from the error screens — "Open the 3D preview
 // instead" when the AR engine can't start, "Use device AR instead" when the
 // camera is refused. New USDZ files can no longer be uploaded.
-// Phase 3.3 — Lazy-load <model-viewer>. The multi-point AR path never uses it
-// (it goes through XR8/MindAR), so keeping ~200KB out of that bundle is free.
+// Phase 3.3 — Lazy-load <model-viewer>. The AR paths never use it (they go
+// through XR8), so keeping ~200KB out of that bundle is free.
 import { ArrowLeft, Box, Info, ChevronDown, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";

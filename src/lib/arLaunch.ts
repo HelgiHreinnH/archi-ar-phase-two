@@ -3,8 +3,7 @@
  *
  * Why a tap at all: on iOS, motion access (DeviceMotionEvent /
  * DeviceOrientationEvent.requestPermission) can ONLY be asked inside a user
- * gesture. 8th Wall's world tracking (SLAM) needs it, and MindAR's gyro hold
- * needs it. The 18 Sep auto-launch had no tap, so motion was never granted:
+ * gesture. 8th Wall's world tracking (SLAM) needs it. The 18 Sep auto-launch had no tap, so motion was never granted:
  * the model rode with the screen when the QR left the frame (4 Oct test,
  * bug 4). One tap is our agreed floor (decisions, 18 Sep).
  *
@@ -13,7 +12,7 @@
  *   1. motion permission (both APIs; iOS shows one prompt),
  *   2. camera permission via getUserMedia.
  * The probe stream is stopped as soon as it is granted, so the engine's own
- * getUserMedia (MindAR start() / XR8.run) is the only capture running — two
+ * getUserMedia (XR8.run) is the only capture running — two
  * concurrent captures of the same camera can mute one another on iOS.
  * Engines call waitForCameraGrant() before starting their camera so a second
  * permission prompt can't queue behind ours.

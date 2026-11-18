@@ -1,8 +1,8 @@
 /**
  * How big a model should be drawn in a marker-anchored AR scene.
  *
- * In MindAR's anchor space one unit is one marker width (the printed QR is
- * MARKER_SIZE_MM across), so a model has to be scaled by its REAL size. The
+ * In the QR anchor space one unit is one QR width (the printed QR is
+ * QR_SIZE_MM across), so a model has to be scaled by its REAL size. The
  * old code normalised the model's largest dimension to a fixed number of
  * units, which made every model 150 marker widths — 22.5 m at 1:1 — so the
  * camera ended up inside it and nothing was visible.
@@ -84,8 +84,8 @@ export function measureModel(
  * The caller puts the model inside a group whose transform is the QR's pose
  * scaled so that 1 unit = the QR's width in the scene.
  *
- * Same maths as MindARScene's Effect B (kept identical on purpose, so both
- * engines place a model the same way). The target image spans local X/Y and
+ * (MindARScene's Effect B used the same maths until MindAR was archived on
+ * 18 Nov 2026.) The target image spans local X/Y and
  * +Z points out of it:
  *  · wall     — the image is vertical, +Y already up: no tip. Centred on the
  *               QR in X/Y; the BACK of the box stands offsetMm in front of it.

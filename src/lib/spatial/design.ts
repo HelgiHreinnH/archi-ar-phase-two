@@ -32,10 +32,10 @@ export function logoTile(cx: number, cy: number, r: number): string {
 }
 
 /**
- * Location marker (MindAR tracking target): the disc fills the full square
+ * Location marker (8th Wall image target): the disc fills the full square
  * (1200 units by default), white corners. Dial rim, asymmetric arcs rotated by
  * (index × 47)°, dots, centre number. No text other than the number, so a
- * layout change never forces a new .mind compile.
+ * layout change never changes the tracked image.
  */
 export function markerDiscInner(idx: number, col: string, size = 1200): string {
   const c = size / 2;

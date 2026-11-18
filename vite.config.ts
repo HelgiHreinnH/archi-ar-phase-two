@@ -19,7 +19,6 @@ export default defineConfig(() => ({
   },
   build: {
     rollupOptions: {
-      external: ["mind-ar", "mind-ar/dist/mindar-image-three.prod.js"],
       output: {
         // Phase 3.2 — Manual vendor chunks. Keeps big libs cacheable across
         // deploys and prevents one giant bundle on first load. The /view route

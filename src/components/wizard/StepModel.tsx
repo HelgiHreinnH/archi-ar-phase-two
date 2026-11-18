@@ -20,7 +20,7 @@ const StepModel = ({ project, onUpdate, onMarkersDetected }: StepModelProps) => 
   const [showUploader, setShowUploader] = useState(false);
 
   // GLB is the only supported format. Older projects may still point at a
-  // USDZ — MindAR/Three.js can't render it, so ask the owner to replace it.
+  // USDZ — Three.js can't render it, so ask the owner to replace it.
   const isLegacyUsdz = !!project.model_url?.toLowerCase().split("?")[0].endsWith(".usdz");
   const showPreview = !!project.model_url && !isLegacyUsdz && !showUploader;
 

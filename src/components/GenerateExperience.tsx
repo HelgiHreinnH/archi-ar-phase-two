@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   Rocket, CheckCircle2, AlertCircle, Loader2,
-  Download, Link2, Copy, FileDown, FileText, QrCode, Upload, Zap, Image, Cpu,
+  Download, Link2, Copy, FileDown, FileText, QrCode, Upload, Zap, Image,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,7 +27,6 @@ import {
   MULTIPOINT_PIPELINE,
   type MultipointStep,
 } from "@/hooks/useMultipointGeneration";
-import { MINDAR_ENABLED } from "@/lib/arEngines";
 
 type Project = Tables<"projects">;
 
@@ -49,7 +48,6 @@ interface CheckItem {
 const STEP_LABELS: Record<string, string> = {
   idle: "",
   markers: "Generating marker images…",
-  compiling: "Compiling marker targets…",
   qr: "Creating QR code…",
   uploading: "Uploading assets…",
   activating: "Activating experience…",
@@ -62,7 +60,6 @@ const ICON_MAP: Record<string, typeof QrCode> = {
   uploading: Upload,
   activating: Zap,
   markers: Image,
-  compiling: Cpu,
 };
 
 const GenerateExperience = ({
@@ -73,16 +70,11 @@ const GenerateExperience = ({
   markerData,
   onGenerated,
 }: GenerateExperienceProps) => {
-  const isTabletop = mode !== "multipoint"; // treat wall like tabletop (same QR pipeline, no .mind)
+  const isTabletop = mode !== "multipoint"; // treat wall like tabletop (same QR pipeline)
 
   const tabletop = useTabletopGeneration(project, onGenerated);
   const multipoint = useMultipointGeneration(project, markerData, onGenerated);
 
-  // .wtc upload state
-  const [uploadingWtc, setUploadingWtc] = useState(false);
-  const wtcInputRef = useRef<HTMLInputElement>(null);
-  const hasWtcFile = !!(project as any).tracking_file_url;
-  const trackingFormat = (project as any).tracking_format || "mindar-mind";
 
   // Unified interface
   const generating = isTabletop ? tabletop.generating : multipoint.generating;
@@ -384,7 +376,7 @@ const GenerateExperience = ({
               </div>
             )}
 
-            {/* Multipoint: Marker PDFs + .mind file */}
+            {/* Multipoint: marker PDFs */}
             {!isTabletop && markerData && markerData.length > 0 && (
               <>
                 <p className="text-xs text-muted-foreground">
@@ -455,113 +447,9 @@ const GenerateExperience = ({
               </>
             )}
 
-            {/* .mind file — multipoint only (MindAR format) */}
-            {!isTabletop && project.mind_file_url && trackingFormat === "mindar-mind" && (
-              <Button variant="outline" size="sm" className="w-full justify-start gap-2" asChild>
-                <a
-                  href={project.mind_file_url}
-                  download={`targets_${project.name.replace(/\s+/g, "_")}.mind`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Download className="h-3 w-3" />
-                  Download MindAR Targets (.mind)
-                </a>
-              </Button>
-            )}
-
-            {/* 8th Wall .wtc Upload Section — multipoint only */}
-            {!isTabletop && (
-              <div className="space-y-2 border-t pt-3 mt-3">
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  8th Wall Tracking (Optional Upgrade)
-                </h4>
-                <p className="text-xs text-muted-foreground">
-                  For SLAM-based stability, compile your marker images with the 8th Wall CLI
-                  (<code className="text-[10px] bg-muted px-1 rounded">npx @8thwall/image-target-cli compile</code>)
-                  and upload the resulting .wtc file.
-                </p>
-                <input
-                  ref={wtcInputRef}
-                  type="file"
-                  accept=".wtc"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    setUploadingWtc(true);
-                    try {
-                      const path = `${project.id}/markers.wtc`;
-                      const { error: uploadErr } = await supabase.storage
-                        .from("project-models")
-                        .upload(path, file, { upsert: true });
-                      if (uploadErr) throw uploadErr;
-
-                      const { error: updateErr } = await supabase
-                        .from("projects")
-                        .update({
-                          tracking_file_url: path,
-                          tracking_format: "8thwall-wtc",
-                        } as any)
-                        .eq("id", project.id);
-                      if (updateErr) throw updateErr;
-
-                      toast({ title: "8th Wall tracking file uploaded" });
-                      onGenerated();
-                    } catch (err) {
-                      console.error("WTC upload error:", err);
-                      toast({ title: "Upload failed", variant: "destructive" });
-                    } finally {
-                      setUploadingWtc(false);
-                      if (wtcInputRef.current) wtcInputRef.current.value = "";
-                    }
-                  }}
-                />
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 justify-start gap-2"
-                    disabled={uploadingWtc}
-                    onClick={() => wtcInputRef.current?.click()}
-                  >
-                    {uploadingWtc ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Upload className="h-3 w-3" />
-                    )}
-                    {hasWtcFile ? "Replace .wtc File" : "Upload .wtc File"}
-                  </Button>
-                  {hasWtcFile && (
-                    <Badge variant="outline" className="text-green-600 border-green-600/30">
-                      <CheckCircle2 className="h-3 w-3 mr-1" />
-                      XR8 Active
-                    </Badge>
-                  )}
-                </div>
-                {/* No way back to MindAR while it is off (17 Nov 2026, arEngines.ts). */}
-                {MINDAR_ENABLED && hasWtcFile && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full text-xs text-muted-foreground"
-                    onClick={async () => {
-                      await supabase
-                        .from("projects")
-                        .update({
-                          tracking_file_url: null,
-                          tracking_format: "mindar-mind",
-                        } as any)
-                        .eq("id", project.id);
-                      toast({ title: "Reverted to MindAR tracking" });
-                      onGenerated();
-                    }}
-                  >
-                    Revert to MindAR
-                  </Button>
-                )}
-              </div>
-            )}
+            {/* The ".mind" download and the ".wtc upload / Revert to MindAR" section
+                were removed on 18 Nov 2026: Spatial runs on 8th Wall with the marker
+                images as targets, and MindAR is archived (archive/mindar/). */}
           </div>
         )}
       </CardContent>

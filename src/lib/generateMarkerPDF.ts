@@ -39,7 +39,7 @@ async function addPageImage(doc: jsPDF, svg: string): Promise<void> {
 
 /**
  * One location-marker sheet (Spatial, locked v7): title + logo, disc at exactly
- * 150 mm (= MARKER_SIZE_MM in MindARScene), X/Y/Z, origin row, placement steps,
+ * 150 mm (= MARKER_WIDTH_M in SpatialWorldViewer), X/Y/Z, origin row, placement steps,
  * round QR. The disc is drawn from the same SVG as the tracked marker image.
  */
 async function addMarkerPage(

@@ -16,9 +16,6 @@ interface ARLandingProps {
     marker_data?: unknown;
     /** Pre-signed model URL (multipoint path) — preloaded during dwell */
     signed_model_url?: string | null;
-    tracking_format?: string | null;
-    tracking_file_url?: string | null;
-    mind_file_url?: string | null;
   };
   onLaunchAR: () => void;
 }
@@ -30,7 +27,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
 
   // ── Preload heavy AR assets during landing-page dwell ──
   // The user typically reads the landing page for 2–4s. Use that time to
-  // download the tracking/model assets so they're already cached the moment
+  // download the model so it's already cached the moment
   // they tap "Launch AR".
   useEffect(() => {
     const links: HTMLLinkElement[] = [];
@@ -48,10 +45,6 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
       links.push(link);
     };
 
-    // Tracking file (.mind or .wtc)
-    const trackingUrl = project.tracking_file_url || project.mind_file_url;
-    if (trackingUrl) addPreload(trackingUrl, "fetch");
-
     // GLB model — biggest single asset. We only preload for the multipoint path
     // because tabletop refetches a fresh signed URL on Launch (see ARViewer.launchAR),
     // which would invalidate any preload we set here and waste mobile bandwidth.
@@ -66,7 +59,7 @@ const ARLanding = ({ project, onLaunchAR }: ARLandingProps) => {
       // Don't remove on unmount: the browser cache should retain them for the
       // imminent navigation into the AR view.
     };
-  }, [isMultipoint, project.tracking_file_url, project.mind_file_url, project.signed_model_url, project.model_url]);
+  }, [isMultipoint, project.signed_model_url, project.model_url]);
 
   // Release the warm camera only on real page exit, not on internal navigation
   // into the AR view (which would needlessly kill the stream we just warmed).

@@ -1,9 +1,5 @@
-import { useState } from "react";
 import MarkerCoordinateEditor from "@/components/MarkerCoordinateEditor";
-import MarkerPlacementValidator from "@/components/ar/multipoint/MarkerPlacementValidator";
-import { MINDAR_ENABLED } from "@/lib/arEngines";
 import { type MarkerPoint } from "@/lib/markerTypes";
-import { ScanLine } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ExperienceMode } from "@/lib/modeCopy";
 import type { Tables } from "@/integrations/supabase/types";
@@ -18,10 +14,6 @@ interface StepMarkersProps {
 }
 
 const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) => {
-  // Fix 6: architect placement validator overlay (multipoint only).
-  const [validating, setValidating] = useState(false);
-  const canValidate = !!project.mind_file_url && (markerData?.length ?? 0) >= 3;
-
   // Spatial only. Tabletop/Wall have no marker step since the Oct 2026 UI
   // review — their single-QR "Print & place" guidance lives in StepGenerate.
   if (mode !== "multipoint") return null;
@@ -62,45 +54,9 @@ const StepMarkers = ({ project, mode, markerData, onUpdate }: StepMarkersProps) 
     </CardContent>
     </Card>
 
-      {/* Fix 6 · Architect placement validator — verify printed markers match Rhino coords.
-          Runs on MindAR, so it is hidden while MindAR is off (17 Nov 2026,
-          arEngines.ts); it comes back once it is rebuilt on 8th Wall. */}
-      {MINDAR_ENABLED && (
-      <Card>
-      <CardContent className="pt-6 space-y-2">
-        <div className="flex items-center gap-2">
-          <ScanLine className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold">Verify physical placement</h3>
-        </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          After printing and placing your markers, scan them here to confirm the real spacing
-          matches your Rhino coordinates. Catches placement errors before a client ever sees the model.
-        </p>
-        <button
-          type="button"
-          disabled={!canValidate}
-          onClick={() => setValidating(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium px-4 py-2 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <ScanLine className="h-4 w-4" />
-          Validate placement in AR
-        </button>
-        {!canValidate && (
-          <p className="text-[11px] text-muted-foreground/70">
-            Generate the experience (with at least 3 markers) to enable placement checking.
-          </p>
-        )}
-      </CardContent>
-      </Card>
-      )}
-
-      {MINDAR_ENABLED && validating && markerData && (
-        <MarkerPlacementValidator
-          project={project}
-          markerData={markerData}
-          onClose={() => setValidating(false)}
-        />
-      )}
+      {/* The MindAR placement validator ("Verify physical placement") was
+          archived with MindAR on 18 Nov 2026 (archive/mindar/). A placement
+          check on 8th Wall can come back as its own feature. */}
     </>
   );
 };

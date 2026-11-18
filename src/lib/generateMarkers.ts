@@ -1,5 +1,5 @@
 /**
- * Generate location-marker images for MindAR tracking (Spatial mode).
+ * Generate location-marker images for Spatial tracking (8th Wall image targets).
  * Creates 1200x1200px PNG images: the Archi AR dial disc, one colour per marker.
  * Supports N markers (3-20) with extended color palette.
  */
@@ -16,11 +16,11 @@ export interface GeneratedMarker {
 }
 
 /**
- * Generate a single location-marker image (MindAR tracking target).
+ * Generate a single location-marker image (an 8th Wall image target).
  * Spatial design (locked 16 Nov 2026): the disc fills the full 1200 px square,
  * white corners, number in the centre. Coordinates, project name and "POINT n"
  * are NOT part of the tracked image — they live on the printed sheet
- * (see spatial/sheets.ts), so layout changes never force a new .mind compile.
+ * (see spatial/sheets.ts), so a sheet layout change never changes the tracked image.
  */
 export async function generateMarkerCanvas(
   markerPoint: MarkerPoint,
@@ -57,12 +57,3 @@ export async function generateAllMarkerImages(
   return results;
 }
 
-/** Convert canvas to HTMLImageElement (needed for MindAR compiler) */
-export function canvasToImage(canvas: HTMLCanvasElement): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = canvas.toDataURL("image/png");
-  });
-}

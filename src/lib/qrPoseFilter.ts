@@ -10,7 +10,7 @@
  * and SIZE. Tilt comes from gravity. Readings whose tilt or size disagree with
  * that are discarded as outliers; the rest are smoothed.
  *
- * Anchor frame convention (same as MindAR / placeModelOnQr): the QR spans
+ * Anchor frame convention (same as placeModelOnQr): the QR spans
  * local X/Y, +Z points out of it. Tabletop → +Z = world up, +Y = the QR's
  * "up" edge projected flat. Wall → +Y = world up, +Z = the QR's facing
  * direction projected horizontal.
@@ -39,7 +39,7 @@ const HISTORY = 15;
  * Automatic lock (Oct 2026): the QR counts as steady when the last
  * STEADY_FRAMES accepted readings sit within STEADY_MAX_SD QR widths of each
  * other (standard deviation of position). 0.02 × 150 mm = 3 mm — the same
- * gate the MindAR lock uses (MindARScene VARIANCE_THRESHOLD). On 8th Wall the
+ * gate the archived MindAR lock used (VARIANCE_THRESHOLD). On 8th Wall the
  * readings are world-space, so SLAM already removes the hand's own motion.
  */
 export const STEADY_FRAMES = 8;

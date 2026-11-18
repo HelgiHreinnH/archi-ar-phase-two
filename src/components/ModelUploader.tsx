@@ -18,7 +18,7 @@ import {
 
 const MAX_FILE_SIZE_MB = 250;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-// GLB only: every AR mode renders through MindAR + Three.js, which loads GLB
+// GLB only: every AR mode renders through 8th Wall + Three.js, which loads GLB
 // on iOS and Android alike. USDZ is no longer accepted (3–10× heavier, and
 // Three.js can't render it).
 const ACCEPTED_EXTENSIONS = [".glb"];

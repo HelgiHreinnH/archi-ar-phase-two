@@ -20,7 +20,7 @@ interface LaunchRingProps {
   state: LaunchRingState;
   /** Download percentage 0–100, or null when the size is unknown. */
   progress: number | null;
-  /** False until MindAR reports the camera feed is live. */
+  /** False until the engine reports the camera feed is live. */
   cameraReady: boolean;
   /** Heading + body for B2, already mode-aware (QR surface vs. Spatial markers). */
   aimTitle: string;

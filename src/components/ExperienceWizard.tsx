@@ -6,8 +6,6 @@ import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { type MarkerPoint, normalizeMarkerData } from "@/lib/markerTypes";
 import { supabase } from "@/integrations/supabase/client";
-import { preloadMindCompiler } from "@/lib/compileMindFile";
-import { MINDAR_ENABLED } from "@/lib/arEngines";
 import { MODE_COPY, toExperienceMode, type ExperienceMode } from "@/lib/modeCopy";
 import StepProgress from "@/components/wizard/StepProgress";
 import StepModel from "@/components/wizard/StepModel";
@@ -226,7 +224,7 @@ const NextButton = ({ label, onClick, blockedReason, busy }: NextButtonProps) =>
 const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) => {
   const mode = toExperienceMode(project.mode);
   const markerData = normalizeMarkerData(project.marker_data);
-  // GLB only — a legacy USDZ model can't be rendered by MindAR/Three.js, so it
+  // GLB only — a legacy USDZ model can't be rendered by Three.js, so it
   // doesn't count as "uploaded" until it's replaced.
   const hasModel = !!project.model_url && !project.model_url.toLowerCase().split("?")[0].endsWith(".usdz");
   const hasValidMarkers = mode !== "multipoint" || (
@@ -249,12 +247,6 @@ const ExperienceWizard = ({ project, onProjectUpdate }: ExperienceWizardProps) =
 
   const [unlocked, setUnlocked] = useState(initialUnlocked);
 
-  // Spatial only: warm the MindAR compiler while the architect fills in
-  // details/uploads, so "Generate" starts compiling immediately instead of
-  // downloading ~2 MB first. Tabletop/Wall compile nothing (8th Wall builds its
-  // target from the QR at view time).
-  // 17 Nov 2026: no MindAR compiler preload — MindAR must not be called (arEngines.ts).
-  useEffect(() => { if (MINDAR_ENABLED && mode === "multipoint") preloadMindCompiler(); }, [mode]);
   const [activeSection, setActiveSection] = useState(0);
   const [pendingScroll, setPendingScroll] = useState<number | null>(null);
   const sectionEls = useRef<(HTMLElement | null)[]>([]);

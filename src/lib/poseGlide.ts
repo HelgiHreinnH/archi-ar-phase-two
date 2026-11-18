@@ -3,7 +3,7 @@
  * move, make the movement smoother").
  *
  * Every time a locked model has to move (8th Wall re-anchoring after SLAM
- * lost the room, MindAR re-snapping onto the QR) it glides from where it is
+ * lost the room) it glides from where it is
  * to where it should be with an ease-in-out curve, instead of a jump or a
  * quick snap.
  */

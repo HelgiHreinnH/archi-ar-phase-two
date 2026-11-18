@@ -59,7 +59,7 @@ export const tabletopSteps: Step[] = [
     title: "Generate & Share",
     shortTitle: "Generate",
     description:
-      'Hit "Generate Experience" to create a QR code for your project. The pipeline generates a QR → uploads it → activates the experience in three quick steps. No marker images or .mind files are needed for tabletop mode.',
+      'Hit "Generate Experience" to create a QR code for your project. The pipeline generates a QR → uploads it → activates the experience in three quick steps. No marker images are needed for tabletop mode.',
     tips: [
       "Print the QR code on heavy stock paper (200gsm+) with matte finish to reduce glare",
       "The printed QR is the tracking marker: the model loads centred on it, stays put as you look around, and re-aligns whenever the QR is back in view",
@@ -125,12 +125,12 @@ export const multipointSteps: Step[] = [
     title: "Generate Experience",
     shortTitle: "Generate",
     description:
-      'Hit "Generate Experience" to run the full pipeline: generate unique marker images for each point → compile them into a .mind tracking file → create a QR code → upload everything → activate. This typically takes 30–60 seconds.',
+      'Hit "Generate Experience" to run the full pipeline: generate unique marker images for each point → create a QR code → upload everything → activate. This takes a few seconds.',
     tips: [
       "Each marker gets a unique, color-coded image (Red=A, Green=B, Blue=C, Yellow=D+)",
       "Download the branded A4 PDF print sheets (300 DPI) for each marker",
       "Print markers on heavy stock paper (200gsm+) and place them at the corresponding physical locations in the room",
-      "The .mind file is compiled from all marker images for MindAR-based tracking",
+      "The marker images themselves are the tracking targets: the AR view recognises each printed marker and fits your model onto them",
     ],
   },
   {

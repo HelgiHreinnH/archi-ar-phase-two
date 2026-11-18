@@ -188,20 +188,3 @@ export function watchCamera(opts: WatchCameraOptions): () => void {
     bind(null);
   };
 }
-
-/**
- * MindAR restart: a fresh rear-camera stream into MindAR's own <video>, with
- * the same constraints MindAR 1.2.5 used. MindAR reads frames from that
- * element, so tracking and the locked model carry on.
- */
-export async function restartVideoElementStream(video: HTMLVideoElement): Promise<void> {
-  const old = video.srcObject instanceof MediaStream ? video.srcObject : null;
-  // Stop first: iOS won't hand out a second capture of the same camera.
-  old?.getTracks().forEach((t) => { try { t.stop(); } catch { /* noop */ } });
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: { facingMode: "environment" },
-  });
-  video.srcObject = stream;
-  await video.play();
-}

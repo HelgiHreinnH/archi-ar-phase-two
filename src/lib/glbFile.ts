@@ -1,7 +1,7 @@
 /**
  * GLB-only model pipeline helpers.
  *
- * Archi AR renders every mode (tabletop, wall, spatial) through MindAR +
+ * Archi AR renders every mode (tabletop, wall, spatial) through 8th Wall +
  * Three.js in the browser, which loads GLB on iOS and Android alike. GLB is
  * therefore the only accepted model format. These helpers:
  *

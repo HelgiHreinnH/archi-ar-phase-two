@@ -1,12 +1,12 @@
 /**
  * Generates an A4 print sheet PDF for tabletop AR projects.
  *
- * The QR code is BOTH the launch link and the AR anchor: the compiled .mind
- * tracking target is built from this exact QR image, and the 3D model locks
- * onto its centre in the AR view.
+ * The QR code is BOTH the launch link and the AR anchor: the 8th Wall image
+ * target is built from this exact QR image at view time (xr8QrTarget), and the
+ * 3D model locks onto its centre in the AR view.
  *
- * CRITICAL — physical size: MindARScene assumes the printed tracking target is
- * MARKER_SIZE_MM (150mm) wide. The QR on this sheet is laid out at exactly
+ * CRITICAL — physical size: the AR view assumes the printed tracking target is
+ * QR_SIZE_MM (150mm) wide (WorldLockScene). The QR on this sheet is laid out at exactly
  * 150 × 150mm, and the sheet must be printed at 100% scale ("actual size")
  * for the model's scale to be correct.
  *
@@ -21,7 +21,7 @@ import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
 import { TABLETOP_QR_OPTIONS } from "@/hooks/useTabletopGeneration";
 
-/** Must match MARKER_SIZE_MM in MindARScene.tsx */
+/** Must match QR_SIZE_MM in WorldLockScene.tsx (the full-sheet 150 mm QR) */
 const QR_PRINT_SIZE_MM = 150;
 
 /** Fetch the stored QR image as a data URL; null if unavailable. */
@@ -59,7 +59,7 @@ export async function downloadTabletopPrintSheet(
   /**
    * Signed URL of the QR image stored at generation time (project.qr_code_url).
    *
-   * THIS MUST BE USED WHEN AVAILABLE. The compiled .mind tracking target is
+   * THIS MUST BE USED WHEN AVAILABLE. The 8th Wall tracking target is
    * built from that exact image, and a QR's pixel pattern depends on the text
    * it encodes. Re-generating the QR here from the CURRENT origin produced a
    * different pattern whenever the sheet was downloaded from a different
@@ -99,7 +99,7 @@ export async function downloadTabletopPrintSheet(
 
   // ── Centred QR code at exact physical size ──
   // Rendered with the same options used at generation time so the print
-  // matches the compiled .mind tracking target.
+  // matches the 8th Wall tracking target built from the stored QR.
   const qrDataUrl = (await loadStoredQr(storedQrUrl)) ?? (await renderQr(shareUrl));
 
   const qrX = (pageW - QR_PRINT_SIZE_MM) / 2;

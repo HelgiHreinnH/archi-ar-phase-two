@@ -18,10 +18,10 @@ export const AR_MARKS = [
   "precamera-shown",  // single tap screen painted (Tabletop/Wall)
   "tap",              // "Launch AR Camera" tapped
   "camera-granted",   // getUserMedia from the tap resolved
-  "engine-script",    // engine JS loaded (MindAR + TF.js / 8th Wall xr.js + slam)
-  "target-ready",     // tracking target loaded (.mind / QR image target scanning)
+  "engine-script",    // engine JS loaded (8th Wall xr.js + slam)
+  "target-ready",     // tracking target loaded (8th Wall image target scanning)
   "camera-live",      // first live video frame from the engine's camera
-  "engine-ready",     // engine reports it is tracking (MindAR start() / XR8 onStart)
+  "engine-ready",     // engine reports it is tracking (XR8 onStart)
   "glb-downloaded",   // model bytes in hand
   "qr-seen",          // first QR sighting
   "model-parsed",     // GLB parsed and placed on the QR anchor

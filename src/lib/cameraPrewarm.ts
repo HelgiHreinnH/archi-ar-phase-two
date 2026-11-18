@@ -12,7 +12,7 @@
  *    reports "granted"). Otherwise we'd trigger a confusing pre-emptive
  *    permission prompt before the user taps "Launch AR".
  *  - The stream is parked but never attached to any visible element. AR engines
- *    (XR8, MindAR) typically request their own getUserMedia internally; the
+ *    (XR8) typically request their own getUserMedia internally; the
  *    benefit here is that the camera hardware is already "warm" so subsequent
  *    requests resolve almost instantly on iOS/Android.
  *  - On unmount or cancel we stop tracks to release the camera light.

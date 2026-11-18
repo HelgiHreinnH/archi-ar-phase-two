@@ -1,6 +1,6 @@
 /**
  * Runtime fixes applied to every GLB before it goes into an AR scene
- * (8th Wall WorldLockScene and MindARScene). The upload optimiser
+ * (8th Wall: WorldLockScene and SpatialWorldViewer). The upload optimiser
  * (optimizeGlb.ts) does the same material fixes at the file level; doing them
  * here too means models uploaded before that existed also look right.
  *

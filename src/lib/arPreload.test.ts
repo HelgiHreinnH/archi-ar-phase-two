@@ -15,9 +15,7 @@ import {
   modelCacheKeyFor,
   preloadModel,
   preloadQrTarget,
-  preloadTrackingFile,
   subscribeModelProgress,
-  takePreloadedTrackingFile,
 } from "./arPreload";
 import { buildQrImageTarget } from "@/lib/xr8QrTarget";
 
@@ -80,15 +78,6 @@ describe("arPreload", () => {
     await expect(preloadModel("https://x/d.glb")).rejects.toThrow("HTTP 403");
     fetchMock.mockResolvedValueOnce(streamResponse([1, 2]));
     await expect(preloadModel("https://x/d.glb")).resolves.toBeInstanceOf(ArrayBuffer);
-  });
-
-  it("hands the preloaded .mind to the scene; nothing preloaded → null (Spatial)", async () => {
-    fetchMock.mockResolvedValue(new Response(new Uint8Array([7, 7]), { status: 200 }));
-    expect(takePreloadedTrackingFile("https://x/t.mind?s=1")).toBeNull();
-    void preloadTrackingFile("https://x/t.mind?s=1");
-    const p = takePreloadedTrackingFile("https://x/t.mind?s=2");
-    expect(p).not.toBeNull();
-    expect(new Uint8Array(await p!)).toEqual(new Uint8Array([7, 7]));
   });
 
   it("builds the 8th Wall QR target once per experience", async () => {
