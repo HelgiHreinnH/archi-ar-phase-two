@@ -5,7 +5,7 @@
  * Same engine path as the Spatial lab (`/lab/spatial/:shareId`), without the
  * lab's measuring form:
  *  - Every printed marker (A, B, C…) is an 8th Wall image target inside SLAM
- *    world tracking (`adapter8thWall.ts`), 150 mm wide, so the world is metres.
+ *    world tracking (`adapter8thWall.ts`), 180 mm wide, so the world is metres.
  *  - Sightings feed a SurveyCollector; as soon as two markers are known the
  *    Rhino marker coordinates are fitted onto them (`fitSurvey`) and the model
  *    appears. More sightings refine the fit; corrections blend, never snap
@@ -16,6 +16,7 @@
  *
  * Licence: the 8th Wall attribution from the adapter stays on screen.
  */
+import { SPATIAL_MARKER_MM } from "@/lib/spatial/design";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Lock, RotateCcw, X } from "lucide-react";
 import { normalizeMarkerData, type MarkerPoint } from "@/lib/markerTypes";
@@ -31,8 +32,8 @@ const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
 const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
 const MESHOPT_DECODER_URL = "/assets/three/jsm/libs/meshopt_decoder.module.js";
 const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
-/** Printed Spatial marker width (the 150 mm disc). */
-const MARKER_WIDTH_M = 0.15;
+/** Printed Spatial marker width (the Ø180 mm circle, locked v11). */
+const MARKER_WIDTH_M = SPATIAL_MARKER_MM / 1000;
 /** Sightings a marker needs before it takes part in the fit. */
 const MIN_SIGHTINGS = 5;
 

@@ -1,6 +1,6 @@
 /**
  * Spatial (mode === "multipoint") print design — shared constants and the
- * location-marker artwork. Locked design: Notion "Spatial sheet + 3 QR designs — LOCKED".
+ * location-marker artwork. Locked design v11 (18 Nov 2026): Notion "Spatial sheet v11 — LOCKED".
  * Everything here returns SVG markup strings so it renders identically in the
  * browser (canvas rasterisation) and in tests (sharp / resvg).
  */
@@ -31,61 +31,190 @@ export function logoTile(cx: number, cy: number, r: number): string {
   );
 }
 
-/**
- * Location marker (8th Wall image target): the disc fills the full square
- * (1200 units by default), white corners. Dial rim, asymmetric arcs rotated by
- * (index × 47)°, dots, centre number. No text other than the number, so a
- * layout change never changes the tracked image.
- */
-export function markerDiscInner(idx: number, col: string, size = 1200): string {
-  const c = size / 2;
-  const R = size / 2;
-  let s = `<rect width="${size}" height="${size}" fill="#fff"/><circle cx="${c}" cy="${c}" r="${R}" fill="${col}"/>`;
+/** Printed diameter of a Spatial location marker (= image-target physical width). */
+export const SPATIAL_MARKER_MM = 180;
 
-  // outer white ring + dial ticks
-  s += `<circle cx="${c}" cy="${c}" r="${R * 0.93}" fill="none" stroke="#fff" stroke-width="${R * 0.03}"/>`;
-  const T = 72;
-  for (let i = 0; i < T; i++) {
-    const a = (i / T) * Math.PI * 2;
-    const major = i % 6 === 0;
-    const len = R * (major ? 0.085 : 0.04);
-    const r0 = R * 0.9;
-    s +=
-      `<line x1="${c + Math.cos(a) * r0}" y1="${c + Math.sin(a) * r0}" x2="${c + Math.cos(a) * (r0 - len)}" y2="${c + Math.sin(a) * (r0 - len)}" ` +
-      `stroke="#fff" stroke-width="${R * (major ? 0.014 : 0.008)}" stroke-linecap="round"/>`;
-  }
+// ── Deterministic organic pattern ───────────────────────────────────────────
+// Multi-scale blurred noise, thresholded at 0 and traced to smooth vector
+// outlines (marching squares). Pure function of (index, size): the printed
+// sheet and the 8th Wall target come from the same SVG, so they are identical.
 
-  // asymmetric ring segments (rotated per marker → unique + breaks symmetry)
-  const rot = (idx * 47) % 360;
-  const arc = (r: number, a0: number, a1: number, w: number, op: number) => {
-    const p = (a: number): [number, number] => [
-      c + Math.cos((a * Math.PI) / 180) * r,
-      c + Math.sin((a * Math.PI) / 180) * r,
-    ];
-    const [x0, y0] = p(a0);
-    const [x1, y1] = p(a1);
-    return `<path d="M${x0} ${y0} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}" fill="none" stroke="#fff" stroke-opacity="${op}" stroke-width="${w}" stroke-linecap="round"/>`;
+/** Field resolution (nodes per side). Pitch = size / (N - 1) ≈ 0.75 mm on the 180 mm print. */
+const FIELD_N = 240;
+/** Blur sigmas in field nodes (fine / medium / coarse) and their weights. */
+const SCALES: [number, number][] = [
+  [4.5, 0.5],
+  [10.5, 0.8],
+  [22, 1.0],
+];
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  s +=
-    arc(R * 0.72, rot, rot + 118, R * 0.05, 0.95) +
-    arc(R * 0.72, rot + 150, rot + 205, R * 0.05, 0.6) +
-    arc(R * 0.72, rot + 235, rot + 330, R * 0.05, 0.95);
-  s += arc(R * 0.6, rot + 200, rot + 290, R * 0.025, 0.7) + arc(R * 0.6, rot + 20, rot + 70, R * 0.025, 0.7);
-  for (let i = 0; i <= (idx % 5) + 2; i++) {
-    const a = ((rot + i * 23 + 10) * Math.PI) / 180;
-    s += `<circle cx="${c + Math.cos(a) * R * 0.82}" cy="${c + Math.sin(a) * R * 0.82}" r="${R * 0.022}" fill="#fff"/>`;
-  }
-
-  // centre number + crosshair
-  s += `<circle cx="${c}" cy="${c}" r="${R * 0.44}" fill="#000" fill-opacity=".14"/><circle cx="${c}" cy="${c}" r="${R * 0.44}" fill="none" stroke="#fff" stroke-width="${R * 0.018}"/>`;
-  s += `<text x="${c}" y="${c + R * 0.2}" text-anchor="middle" font-size="${R * 0.62}" font-weight="700" fill="#fff" font-family="Inter, Helvetica, Arial, sans-serif">${idx}</text>`;
-  for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
-    s += `<line x1="${c + dx * R * 0.48}" y1="${c + dy * R * 0.48}" x2="${c + dx * R * 0.58}" y2="${c + dy * R * 0.58}" stroke="#fff" stroke-width="${R * 0.014}"/>`;
-  }
-  return s;
 }
 
-/** Standalone SVG document of the marker disc (1200 × 1200 by default). */
-export function markerDiscSvg(idx: number, col: string, size = 1200): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${markerDiscInner(idx, col, size)}</svg>`;
+function gaussianNoise(n: number, rnd: () => number): Float32Array {
+  const out = new Float32Array(n * n);
+  for (let i = 0; i < out.length; i += 2) {
+    const u = Math.max(rnd(), 1e-12);
+    const v = rnd();
+    const r = Math.sqrt(-2 * Math.log(u));
+    out[i] = r * Math.cos(2 * Math.PI * v);
+    if (i + 1 < out.length) out[i + 1] = r * Math.sin(2 * Math.PI * v);
+  }
+  return out;
+}
+
+function blur(src: Float32Array, n: number, sigma: number): Float32Array {
+  const rad = Math.ceil(sigma * 3);
+  const k = new Float32Array(2 * rad + 1);
+  let sum = 0;
+  for (let i = -rad; i <= rad; i++) sum += k[i + rad] = Math.exp(-(i * i) / (2 * sigma * sigma));
+  for (let i = 0; i < k.length; i++) k[i] /= sum;
+  const tmp = new Float32Array(src.length);
+  const dst = new Float32Array(src.length);
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++) {
+      let a = 0;
+      for (let i = -rad; i <= rad; i++) a += k[i + rad] * src[y * n + Math.min(n - 1, Math.max(0, x + i))];
+      tmp[y * n + x] = a;
+    }
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++) {
+      let a = 0;
+      for (let i = -rad; i <= rad; i++) a += k[i + rad] * tmp[Math.min(n - 1, Math.max(0, y + i)) * n + x];
+      dst[y * n + x] = a;
+    }
+  return dst;
+}
+
+/** Scalar field for marker `idx`: > 0 is black. Seeded by the index only. */
+function patternField(idx: number): Float32Array {
+  const rnd = mulberry32(2000 + idx);
+  const acc = new Float32Array(FIELD_N * FIELD_N);
+  for (const [sigma, w] of SCALES) {
+    const f = blur(gaussianNoise(FIELD_N, rnd), FIELD_N, sigma);
+    let mean = 0;
+    for (const v of f) mean += v;
+    mean /= f.length;
+    let varr = 0;
+    for (const v of f) varr += (v - mean) * (v - mean);
+    const sd = Math.sqrt(varr / f.length) || 1;
+    for (let i = 0; i < acc.length; i++) acc[i] += (w * (f[i] - mean)) / sd;
+  }
+  return acc;
+}
+
+const fmt = (v: number) => Math.round(v * 10) / 10;
+
+/** Marching squares on the field (padded with a white border) → smooth closed outlines of the black areas. */
+function patternPath(idx: number, size: number): string {
+  const n = FIELD_N + 2;
+  const f = new Float32Array(n * n).fill(-1);
+  const src = patternField(idx);
+  for (let y = 0; y < FIELD_N; y++) for (let x = 0; x < FIELD_N; x++) f[(y + 1) * n + x + 1] = src[y * FIELD_N + x];
+  const pitch = size / (FIELD_N - 1);
+  const px = (i: number) => (i - 1) * pitch;
+
+  // edge ids: horizontal edge from node (x,y) to (x+1,y) = 2*(y*n+x); vertical (x,y)→(x,y+1) = 2*(y*n+x)+1
+  const pts = new Map<number, [number, number]>();
+  const point = (id: number): [number, number] => {
+    let p = pts.get(id);
+    if (!p) {
+      const vertical = id & 1;
+      const node = id >> 1;
+      const x = node % n;
+      const y = (node - x) / n;
+      const a = f[node];
+      const b = vertical ? f[node + n] : f[node + 1];
+      const t = a / (a - b);
+      p = vertical ? [px(x), px(y) + t * pitch] : [px(x) + t * pitch, px(y)];
+      pts.set(id, p);
+    }
+    return p;
+  };
+  const adj = new Map<number, number[]>();
+  const link = (a: number, b: number) => {
+    (adj.get(a) ?? adj.set(a, []).get(a)!).push(b);
+    (adj.get(b) ?? adj.set(b, []).get(b)!).push(a);
+  };
+
+  for (let y = 0; y < n - 1; y++)
+    for (let x = 0; x < n - 1; x++) {
+      const i = y * n + x;
+      const v0 = f[i], v1 = f[i + 1], v2 = f[i + n + 1], v3 = f[i + n];
+      const c = (v0 > 0 ? 1 : 0) | (v1 > 0 ? 2 : 0) | (v2 > 0 ? 4 : 0) | (v3 > 0 ? 8 : 0);
+      if (c === 0 || c === 15) continue;
+      const top = 2 * i, right = 2 * (i + 1) + 1, bottom = 2 * (i + n), left = 2 * i + 1;
+      switch (c) {
+        case 1: case 14: link(left, top); break;
+        case 2: case 13: link(top, right); break;
+        case 3: case 12: link(left, right); break;
+        case 4: case 11: link(right, bottom); break;
+        case 6: case 9: link(top, bottom); break;
+        case 7: case 8: link(left, bottom); break;
+        case 5: case 10: {
+          const centreBlack = (v0 + v1 + v2 + v3) / 4 > 0;
+          if ((c === 5) === centreBlack) { link(left, bottom); link(top, right); }
+          else { link(left, top); link(right, bottom); }
+          break;
+        }
+      }
+    }
+
+  const seen = new Set<number>();
+  let d = "";
+  for (const start of adj.keys()) {
+    if (seen.has(start)) continue;
+    const loop: number[] = [];
+    let prev = -1, cur = start;
+    for (;;) {
+      seen.add(cur);
+      loop.push(cur);
+      const nb = adj.get(cur)!;
+      const next = nb[0] !== prev && !seen.has(nb[0]) ? nb[0] : nb[1] !== undefined && !seen.has(nb[1]) ? nb[1] : -1;
+      if (next < 0) break;
+      prev = cur;
+      cur = next;
+    }
+    if (loop.length < 4) continue;
+    const P = loop.map(point);
+    const mid = (a: [number, number], b: [number, number]) => `${fmt((a[0] + b[0]) / 2)} ${fmt((a[1] + b[1]) / 2)}`;
+    d += `M${mid(P[P.length - 1], P[0])}`;
+    for (let i = 0; i < P.length; i++) d += `Q${fmt(P[i][0])} ${fmt(P[i][1])} ${mid(P[i], P[(i + 1) % P.length])}`;
+    d += "Z";
+  }
+  return d;
+}
+
+/**
+ * Location marker (8th Wall image target, locked v11): black/white organic
+ * pattern inside a thin black rim, filling the full square (1200 units by
+ * default; the circle touches the square's edges, corners are transparent).
+ * No text and no colour, so a sheet layout change never changes the tracked
+ * image. The pattern is unique per index and has no rotational symmetry.
+ */
+export function markerDiscInner(idx: number, size = 1200): string {
+  const c = size / 2;
+  const u = size / 1200;
+  const ring = 8 * u; // rim thickness ≈ 1.2 mm on the 180 mm print
+  const rimR = c - 2 * u - ring / 2;
+  const patR = rimR - ring / 2 - 8 * u; // white gap of ≈ 1.2 mm inside the rim
+  const clip = `archi-mk-${idx}`;
+  return (
+    `<clipPath id="${clip}"><circle cx="${c}" cy="${c}" r="${patR}"/></clipPath>` +
+    `<circle cx="${c}" cy="${c}" r="${rimR}" fill="none" stroke="#000" stroke-width="${ring}"/>` +
+    `<path clip-path="url(#${clip})" fill="#000" fill-rule="evenodd" d="${patternPath(idx, size)}"/>`
+  );
+}
+
+/** Standalone SVG document of the marker on a white square (1200 × 1200 by default). */
+export function markerDiscSvg(idx: number, size = 1200): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}"><rect width="${size}" height="${size}" fill="#fff"/>${markerDiscInner(idx, size)}</svg>`;
 }

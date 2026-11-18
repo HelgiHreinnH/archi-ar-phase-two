@@ -28,6 +28,16 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
   17 Nov 2026".
 - **"Spatial" is a UI label only.** Never rename `mode === "multipoint"` in code,
   DB values, identifiers, filenames or imports. The rename is frontend copy.
+- **Spatial marker design is LOCKED (v11, 18 Nov 2026).** Black/white organic circle,
+  Ø180 mm (`SPATIAL_MARKER_MM` in `src/lib/spatial/design.ts`, = image-target
+  `physicalWidthInMeters`), thin black rim, pattern generated deterministically per
+  point index (seeded noise → marching squares → vector path; no colour, no text). The
+  printed sheet and the 8th Wall target come from the same SVG, so they match. A4
+  sheet (`sheets.ts`): "POINT n" top left and logo top right on one centre line, circle
+  centred between sheet top and cut line, model name bottom left above the cut line,
+  then X/Y/Z, origin row, placement steps, round QR. The old coloured dial disc (v7,
+  Ø150 mm) is retired: its markers were too alike and rotationally symmetric for 8th
+  Wall (ZNCC 0.89 vs ≤0.33 now). Changing the look needs a documented decision.
 - **GLB is the only model format** across Tabletop, Wall and Spatial. USDZ was
   dropped Sep 2026 — file size.
 - **Rhino exports Z-up, Three.js is Y-up.** The -90 deg X rotation must be applied

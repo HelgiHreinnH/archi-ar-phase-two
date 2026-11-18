@@ -1,9 +1,9 @@
 /**
  * Generate location-marker images for Spatial tracking (8th Wall image targets).
- * Creates 1200x1200px PNG images: the Archi AR dial disc, one colour per marker.
+ * Creates 1200x1200px PNG images: the black/white organic circle marker (locked v11), unique per point.
  * Supports N markers (3-20) with extended color palette.
  */
-import { type MarkerPoint, getSafeMarkerColor } from "@/lib/markerTypes";
+import type { MarkerPoint } from "@/lib/markerTypes";
 import { markerDiscSvg } from "@/lib/spatial/design";
 import { svgToCanvas } from "@/lib/spatial/raster";
 
@@ -17,9 +17,9 @@ export interface GeneratedMarker {
 
 /**
  * Generate a single location-marker image (an 8th Wall image target).
- * Spatial design (locked 16 Nov 2026): the disc fills the full 1200 px square,
- * white corners, number in the centre. Coordinates, project name and "POINT n"
- * are NOT part of the tracked image — they live on the printed sheet
+ * Spatial design (locked v11, 18 Nov 2026): the black/white circle fills the full
+ * 1200 px square, white corners, no text. Number, coordinates, project name and
+ * "POINT n" are NOT part of the tracked image — they live on the printed sheet
  * (see spatial/sheets.ts), so a sheet layout change never changes the tracked image.
  */
 export async function generateMarkerCanvas(
@@ -27,8 +27,7 @@ export async function generateMarkerCanvas(
   _projectName?: string
 ): Promise<HTMLCanvasElement> {
   const size = 1200;
-  const color = getSafeMarkerColor(markerPoint.index);
-  return svgToCanvas(markerDiscSvg(markerPoint.index, color.bg, size), size, size);
+  return svgToCanvas(markerDiscSvg(markerPoint.index, size), size, size);
 }
 
 /** Generate all marker images from MarkerPoint[] and return as blobs */

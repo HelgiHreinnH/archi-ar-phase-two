@@ -1,15 +1,17 @@
 /**
  * Spatial A4 print layouts (210 × 297 mm), built as SVG strings.
  *
- *  - markerSheetSvg: location-marker sheet (locked v7) — 210 × 210 top card with
- *    title, logo, disc Ø150 mm and POINT n pill; dotted cut line; info strip with
- *    X/Y/Z pills, origin row, placement steps and the round QR.
+ *  - markerSheetSvg: location-marker sheet (locked v11, 18 Nov 2026) — "POINT n" top
+ *    left and logo top right on one centre line, black/white circle Ø180 mm centred
+ *    between the sheet top and the cut line, model name bottom left above the dotted
+ *    cut line; below it the info strip with X/Y/Z pills, origin row, placement steps
+ *    and the round QR.
  *  - qrPageSvg: client QR page — same logic, round QR badge instead of the disc.
  *
  * Fonts are embedded (see fonts.ts) so the SVG renders the same when it is
  * rasterised through an <img>.
  */
-import { BRAND, INK, escapeXml, logoTile, markerDiscInner } from "@/lib/spatial/design";
+import { BRAND, INK, SPATIAL_MARKER_MM, escapeXml, logoTile, markerDiscInner } from "@/lib/spatial/design";
 import { spatialQrInner } from "@/lib/spatial/qr";
 
 export const SHEET_W = 210;
@@ -20,7 +22,7 @@ export interface MarkerSheetInput {
   x: number;
   y: number;
   z: number;
-  /** Placement label shown under the project name. */
+  /** Placement label (not printed on the Spatial marker sheet since v11). */
   label?: string;
   projectName: string;
   /** Marker colour (#RRGGBB). */
@@ -99,7 +101,6 @@ function pill(x: number, y: number, w: number, label: string, col: string): stri
 
 export function markerSheetSvg(input: MarkerSheetInput, fontCss: string): string {
   const { index, projectName, color: col, shareUrl } = input;
-  const label = input.label || `Marker ${index}`;
   const originNote = input.originNote ?? [
     "Same point as 0,0,0 in the Rhino model",
     "Measure X, Y, Z from the model's origin",
@@ -107,22 +108,31 @@ export function markerSheetSvg(input: MarkerSheetInput, fontCss: string): string
   const ac = accentText(col);
   let s = `<rect width="${SHEET_W}" height="${SHEET_H}" fill="#fff"/>`;
 
-  // top card 210 × 210
-  s += `<rect x="6" y="6" width="198" height="198" rx="9" fill="none" stroke="${col}" stroke-width=".7"/>`;
-  s += `<rect x="9.5" y="9.5" width="191" height="191" rx="6.5" fill="none" stroke="${col}" stroke-opacity=".25" stroke-width=".25"/>`;
-  s += header(projectName, label);
-
-  // disc Ø150 mm (= MARKER_SIZE_MM), centre (105, 105), plus N/E/S/W alignment ticks
-  s += `<g transform="translate(30 30) scale(${150 / 1200})">${markerDiscInner(index, col)}</g>`;
+  // circle Ø180 mm, centre (105, 105): centred between the sheet top and the cut line (y = 210).
+  // N/E/S/W ticks just outside the rim for aligning the circle centre on the coordinate.
+  const cx = SHEET_W / 2;
+  const cy = 105;
+  const r0 = SPATIAL_MARKER_MM / 2;
+  s += `<g transform="translate(${cx - r0} ${cy - r0}) scale(${SPATIAL_MARKER_MM / 1200})">${markerDiscInner(index)}</g>`;
   for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
-    s += `<line x1="${105 + dx * 77.5}" y1="${105 + dy * 77.5}" x2="${105 + dx * 82}" y2="${105 + dy * 82}" stroke="${INK}" stroke-width=".35"/>`;
+    s += `<line x1="${cx + dx * (r0 + 1.5)}" y1="${cy + dy * (r0 + 1.5)}" x2="${cx + dx * (r0 + 4.5)}" y2="${cy + dy * (r0 + 4.5)}" stroke="${INK}" stroke-width=".35"/>`;
   }
-  s += pill(17, 184, 38, `POINT ${index}`, col);
+
+  // top row on one centre line (y = 15): "POINT n" left, logo + wordmark right
+  s +=
+    `<text x="15" y="16.3" font-size="3.6" font-weight="700" letter-spacing=".8" fill="${GREY}">POINT</text>` +
+    `<text x="33" y="21.4" font-family="Space Grotesk" font-size="19" font-weight="700" fill="${ac}">${index}</text>` +
+    `<text x="195" y="17.1" text-anchor="end" font-family="Space Grotesk" font-size="6" font-weight="700" fill="${INK}">Archi AR</text>` +
+    logoTile(160.2, 15, 4.4);
+
+  // model name, bottom left, just above the cut line (the corner is outside the circle)
+  const name = projectName.length > 26 ? `${projectName.slice(0, 25)}…` : projectName;
+  s += `<text x="15" y="206" font-size="5" font-weight="700" fill="${INK}">${escapeXml(name)}</text>`;
 
   s += cutLine();
 
   // info strip
-  s += `<text x="17" y="218" font-size="3" letter-spacing=".6" fill="${GREY}" font-weight="600">DISC Ø 150 MM · CENTRE = COORDINATE · FACING THE MODEL FROM THE FRONT</text>`;
+  s += `<text x="17" y="218" font-size="3" letter-spacing=".6" fill="${GREY}" font-weight="600">CIRCLE Ø 180 MM · CENTRE = COORDINATE · FACING THE MODEL FROM THE FRONT</text>`;
   const px = [17, 75, 133];
   const notes = ["left  ←  →  right (+)", "toward  ↓  ↑  away (+)", "down  ↓  ↑  up (+)"];
   const values = [input.x, input.y, input.z];
@@ -152,7 +162,7 @@ export function markerSheetSvg(input: MarkerSheetInput, fontCss: string): string
   s += `<text x="17" y="268" font-size="3.4" font-weight="700" letter-spacing=".6" fill="${INK}">PLACEMENT</text>`;
   [
     "Print at 100% — no fit-to-page.",
-    "Fix flat; disc centre on the coordinate.",
+    "Fix flat; circle centre on the coordinate.",
     "Matte surface, even light, unobstructed.",
     "Place at least 3 points, then scan the QR.",
   ].forEach((t, i) => {

@@ -2,7 +2,7 @@
  * 8th Wall adapter for the Spatial lab (branch spatial-8thwall).
  *
  * Every Spatial marker (A, B, C…) becomes an 8th Wall image target inside SLAM
- * world tracking, with its printed width (150 mm) and scale "absolute", so the
+ * world tracking, with its printed width (180 mm) and scale "absolute", so the
  * world frame is metres and gravity-up. Each imagefound / imageupdated event
  * is passed on raw as a MarkerSighting; the viewer does the survey and fit.
  *

@@ -21,7 +21,7 @@ export interface SpatialMarkerTarget {
   index: number;
   /** Signed URL (or data URL) of the printed marker image. */
   imageUrl: string;
-  /** Printed width in metres (Spatial markers are 150 mm). */
+  /** Printed width in metres (Spatial markers are Ø180 mm). */
   physicalWidthM: number;
 }
 

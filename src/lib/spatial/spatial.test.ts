@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { markerDiscSvg, escapeXml, INK } from "@/lib/spatial/design";
+import { markerDiscSvg, escapeXml, SPATIAL_MARKER_MM } from "@/lib/spatial/design";
 import { spatialQrSvg } from "@/lib/spatial/qr";
 import { markerSheetSvg, qrPageSvg } from "@/lib/spatial/sheets";
 
@@ -9,29 +9,47 @@ const base = { index: 3, x: 100, y: -20, z: 1200, projectName: "Test", shareUrl:
 
 describe("spatial design", () => {
   it("escapes XML in project names and labels", () => {
-    const svg = markerSheetSvg({ ...base, label: 'A & <B> "C"', color: "#007AFF" }, "");
+    const svg = markerSheetSvg({ ...base, projectName: 'A & <B> "C"', color: "#007AFF" }, "");
     expect(svg).toContain("A &amp; &lt;B&gt; &quot;C&quot;");
     expect(svg).not.toContain("<B>");
     expect(escapeXml("<&>")).toBe("&lt;&amp;&gt;");
   });
 
-  it("marker disc is unique per index (rotation and number)", () => {
-    expect(markerDiscSvg(1, "#007AFF")).not.toBe(markerDiscSvg(2, "#007AFF"));
-    expect(markerDiscSvg(4, "#007AFF")).toBe(markerDiscSvg(4, "#007AFF"));
+  it("marker circle is unique per index, deterministic, colourless and text-free", () => {
+    expect(markerDiscSvg(1)).not.toBe(markerDiscSvg(2));
+    expect(markerDiscSvg(4)).toBe(markerDiscSvg(4));
+    const svg = markerDiscSvg(3);
+    expect(svg).not.toContain("<text");
+    expect(svg).not.toMatch(/#(?!fff|000)[0-9a-f]{6}/i);
+    expect(svg.match(/Q/g)!.length).toBeGreaterThan(200);
   });
 
-  it("marker sheet prints the coordinates, point pill and 150 mm disc", () => {
+  it("marker sheet prints POINT n, the coordinates, model name and a Ø180 mm circle", () => {
     const svg = markerSheetSvg({ ...base, color: "#007AFF" }, "");
-    expect(svg).toContain("POINT 3");
+    expect(svg).toContain(">POINT<");
+    expect(svg).toContain(">3</text>");
+    expect(svg).toContain(">Test</text>");
     expect(svg).toContain(">100 <");
-    expect(svg).toContain(`scale(${150 / 1200})`);
+    expect(svg).toContain("CIRCLE Ø 180 MM");
+    expect(svg).toContain(`scale(${SPATIAL_MARKER_MM / 1200})`);
+    expect(SPATIAL_MARKER_MM).toBe(180);
   });
 
-  it("uses dark text on light marker colours (yellow) and white on dark ones", () => {
+  it("number sits on the same centre line as the logo, the circle is centred above the cut line", () => {
+    const svg = markerSheetSvg({ ...base, color: "#007AFF" }, "");
+    expect(svg).toMatch(/<rect x="155\.7\d*" y="10\.6\d*"|<rect x="155\.8\d*" y="10\.6\d*"/); // logo tile centred on y = 15
+    expect(svg).toContain("translate(15 15)"); // circle Ø180 centred on (105, 105)
+  });
+
+  it("light marker colours (yellow) get a darkened number, never the raw colour", () => {
     const yellow = markerSheetSvg({ ...base, color: "#FFD60A" }, "");
-    const blue = markerSheetSvg({ ...base, color: "#007AFF" }, "");
-    expect(yellow).toContain(`fill="${INK}">POINT 3`);
-    expect(blue).toContain('fill="#fff">POINT 3');
+    expect(yellow).not.toContain('fill="#FFD60A">3');
+  });
+
+  it("truncates very long model names", () => {
+    const svg = markerSheetSvg({ ...base, projectName: "x".repeat(60), color: "#007AFF" }, "");
+    expect(svg).toContain(`${"x".repeat(25)}…`);
+    expect(svg).not.toContain("x".repeat(26));
   });
 
   it("round QR carries arcs, subtle QR does not", () => {

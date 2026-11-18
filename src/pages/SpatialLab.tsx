@@ -15,6 +15,7 @@
  * Engine-agnostic: the engine comes from loadSpatialAdapter(LAB.engine).
  * On main no adapter is wired in, so the page explains that and stops.
  */
+import { SPATIAL_MARKER_MM } from "@/lib/spatial/design";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -32,7 +33,7 @@ const GLTF_LOADER_URL = "/assets/three/jsm/loaders/GLTFLoader.js";
 const DRACO_LOADER_URL = "/assets/three/jsm/loaders/DRACOLoader.js";
 const MESHOPT_DECODER_URL = "/assets/three/jsm/libs/meshopt_decoder.module.js";
 const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
-const MARKER_WIDTH_M = 0.15;
+const MARKER_WIDTH_M = SPATIAL_MARKER_MM / 1000;
 const MIN_SIGHTINGS = 5;
 const CHECK_POINTS = 5;
 
