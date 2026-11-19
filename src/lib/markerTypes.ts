@@ -2,12 +2,24 @@
  * Shared marker type used across the pipeline.
  * Each marker has a 1-based index, 3D coordinates (mm), and optional label.
  */
+export type Vec3Tuple = [number, number, number];
+
 export interface MarkerPoint {
   index: number;
   x: number;
   y: number;
   z: number;
   label?: string;
+  /**
+   * "rhino": read from the GLB's marker nodes (D18 — Rhino is the only source;
+   * shown read-only). Absent: entered or pasted by hand (legacy files).
+   */
+  source?: "rhino";
+  /** Distance between the node position and extras v2 `p`, mm (cross-check only). */
+  extrasDeltaMm?: number;
+  /** Sheet normal and up from extras v2 (Rhino frame, unit). Cross-check only, never the fit (D8). */
+  n?: Vec3Tuple | null;
+  up?: Vec3Tuple | null;
 }
 
 /** Extended color palette for up to 12 uniquely-colored markers */
@@ -108,6 +120,19 @@ export function convertLegacyMarkerData(data: unknown): MarkerPoint[] | null {
   }));
 }
 
+const isTuple = (v: unknown): v is Vec3Tuple =>
+  Array.isArray(v) && v.length === 3 && v.every((c) => typeof c === "number" && Number.isFinite(c));
+
+/** True when the markers came from the GLB (Rhino plugin) and must not be edited here (D18). */
+export function markersFromRhino(markers: MarkerPoint[] | null | undefined): boolean {
+  return !!markers?.length && markers.every((m) => m.source === "rhino");
+}
+
+/** Extras cross-check warnings stored with the markers (> 1 mm, contract §5.2). */
+export function markerExtrasWarnings(markers: MarkerPoint[] | null | undefined, toleranceMm = 1): MarkerPoint[] {
+  return (markers ?? []).filter((m) => typeof m.extrasDeltaMm === "number" && m.extrasDeltaMm > toleranceMm);
+}
+
 /**
  * Normalize raw marker_data from the database into MarkerPoint[].
  * Handles both array format and legacy {A,B,C} format.
@@ -121,13 +146,20 @@ export function normalizeMarkerData(raw: unknown): MarkerPoint[] | null {
     if (arr.length < 3) return null;
     return arr
       .filter((p) => p && typeof p === "object" && "index" in p && "x" in p)
-      .map((p) => ({
-        index: Number(p.index),
-        x: Number(p.x) || 0,
-        y: Number(p.y) || 0,
-        z: Number(p.z) || 0,
-        label: p.label || undefined,
-      }))
+      .map((p) => {
+        const out: MarkerPoint = {
+          index: Number(p.index),
+          x: Number(p.x) || 0,
+          y: Number(p.y) || 0,
+          z: Number(p.z) || 0,
+          label: p.label || undefined,
+        };
+        if (p.source === "rhino") out.source = "rhino";
+        if (typeof p.extrasDeltaMm === "number") out.extrasDeltaMm = p.extrasDeltaMm;
+        if (isTuple(p.n)) out.n = p.n;
+        if (isTuple(p.up)) out.up = p.up;
+        return out;
+      })
       .sort((a, b) => a.index - b.index);
   }
 

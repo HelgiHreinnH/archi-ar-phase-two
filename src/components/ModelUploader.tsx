@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import UploadProgress from "@/components/UploadProgress";
-import { parseGlbMarkers } from "@/lib/parseGlbMarkers";
+import { describeMarkerImport, readGlbMarkers, type GlbMarkerReport } from "@/lib/parseGlbMarkers";
 import { isGlbFile, optimizeGlbTextures, storageSafeName } from "@/lib/glbFile";
 import { legacyThumbnailPath, thumbnailPath } from "@/lib/thumbnailPath";
 import type { MarkerPoint } from "@/lib/markerTypes";
@@ -108,7 +108,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     let file = selected;
     let geometryCompressed = false;
     let drawCalls = "";
-    let markersPromise: Promise<MarkerPoint[] | null> = Promise.resolve(null);
+    let markersPromise: Promise<GlbMarkerReport | null> = Promise.resolve(null);
 
     // ── Prepare in the browser, BEFORE upload ──
     // Everything heavy happens locally so the upload is small and nothing
@@ -117,7 +117,7 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
     //   2. textures resized to ≤2048 px
     //   3. geometry compressed (meshopt) — typically 5–10× smaller
     if (onMarkersDetected) {
-      markersPromise = parseGlbMarkers(selected).catch(() => null);
+      markersPromise = readGlbMarkers(selected).catch(() => null);
     }
 
     if (optimize) {
@@ -264,10 +264,17 @@ const ModelUploader = ({ projectId, onUploadComplete, onMarkersDetected, previou
         }
       })();
 
-      const markers = await markersPromise;
-      if (markers && onMarkersDetected) {
-        onMarkersDetected(markers);
-        toast({ title: "Marker positions detected", description: `Found ${markers.length} marker points in your model.` });
+      if (onMarkersDetected) {
+        // Spatial: markers come from the plugin's marker nodes (D18). A plain
+        // Rhino export or too few markers is said out loud, never silently.
+        const report = await markersPromise;
+        const msg = describeMarkerImport(report);
+        if (report?.usable) onMarkersDetected(report.markers);
+        toast({
+          title: msg.title,
+          description: msg.description,
+          variant: msg.kind === "ok" ? undefined : "destructive",
+        });
       }
 
       // Fallback only: if in-browser compression couldn't run (e.g. the file
