@@ -65,6 +65,8 @@ export interface SpatialTracker {
   stop(): void;
   onSighting(cb: (s: MarkerSighting) => void): () => void;
   onTrackingState(cb: (state: TrackingState, reason?: string) => void): () => void;
+  /** The adapter replaced a dead camera feed (screenshot, app switch). For logs; the scene is untouched. */
+  onCameraRestart?(cb: (reason: string) => void): () => void;
 }
 
 /** Tiny listener set used by adapters. */

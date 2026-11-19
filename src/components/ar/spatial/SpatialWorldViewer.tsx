@@ -13,6 +13,11 @@
  *  - "Lock placement" freezes the fit. After that only world tracking holds
  *    the model (1 Oct 2026 rule: markers register, world tracking holds).
  *    Losing tracking never hides the model; a "tracking weak" chip shows.
+ *  - Lock needs 3 markers and a fit error under the threshold (D9,
+ *    `lockGuard.ts`); the pair distances are shown before Lock.
+ *  - `?debug=1` shows the rotation isolation log (§6.4). Display only: after
+ *    Lock it fits new sightings in the shadow and logs the heading drift; the
+ *    model never uses them.
  *
  * Licence: the 8th Wall attribution from the adapter stays on screen.
  */
@@ -25,6 +30,9 @@ import { SurveyCollector, fitSurvey, rhinoMmToModelM, type FitResult } from "@/l
 import { PoseBlender } from "@/lib/spatial/poseBlend";
 import { loadSpatialAdapter } from "@/lib/spatial/adapters";
 import type { SpatialTracker, TrackingState } from "@/lib/spatial/SpatialTracker";
+import { LOCK_MAX_RMS_MM, lockDecision, pairRows } from "@/lib/spatial/lockGuard";
+import { RefitLog } from "@/lib/spatial/refitLog";
+import RefitLogOverlay from "@/components/ar/spatial/RefitLogOverlay";
 import { applyRoomEnvironment, fetchWithProgress, tuneMaterialsForMobile } from "@/lib/prepareModelForAR";
 import { measureModel, UNIT_GUESS_THRESHOLD } from "@/lib/modelPlacement";
 
@@ -36,6 +44,8 @@ const DRACO_DECODER_PATH = "/assets/three/jsm/libs/draco/gltf/";
 const MARKER_WIDTH_M = SPATIAL_MARKER_MM / 1000;
 /** Sightings a marker needs before it takes part in the fit. */
 const MIN_SIGHTINGS = 5;
+/** Refit ticks (250 ms) between shadow-fit log entries after Lock. */
+const POST_LOCK_LOG_EVERY = 4;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -66,6 +76,15 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   const modelRootRef = useRef<Any>(null);
   const dotsRef = useRef<Map<number, Any>>(new Map());
   const blender = useRef(new PoseBlender());
+  // Debug only (§6.4): log + a shadow collector fed after Lock, never applied.
+  const debug = useMemo(() => {
+    try { return new URLSearchParams(window.location.search).get("debug") === "1"; } catch { return false; }
+  }, []);
+  const refitLog = useRef(new RefitLog(400, performance.now(), debug));
+  const shadow = useRef(new SurveyCollector());
+  const trackingRef = useRef<TrackingState>("initializing");
+  const tickRef = useRef(0);
+  const [logTick, setLogTick] = useState(0);
 
   const [phase, setPhase] = useState<Phase>("ready");
   const [message, setMessage] = useState("");
@@ -104,9 +123,17 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       trackerRef.current = tracker;
       setAttribution(tracker.attribution);
 
-      tracker.onTrackingState(setTracking);
+      tracker.onTrackingState((state) => {
+        trackingRef.current = state;
+        setTracking(state);
+        refitLog.current.record("tracking", fitRef.current, state, performance.now(), lockedRef.current ? "after lock" : undefined);
+      });
+      tracker.onCameraRestart?.((reason) => {
+        refitLog.current.record("camera-restart", fitRef.current, trackingRef.current, performance.now(), reason);
+      });
       tracker.onSighting((s) => {
-        if (lockedRef.current) return;
+        // After Lock the placement ignores sightings; the shadow copy is for the log only.
+        if (lockedRef.current) { shadow.current.add(s.index, s.position); return; }
         collector.current.add(s.index, s.position);
       });
 
@@ -176,7 +203,18 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       const c: Record<number, number> = {};
       for (const m of markers) c[m.index] = collector.current.count(m.index);
       setCounts(c);
-      if (lockedRef.current) return;
+      tickRef.current++;
+      if (lockedRef.current) {
+        if (tickRef.current % POST_LOCK_LOG_EVERY === 0) {
+          const sf = fitSurvey(markers, shadow.current, {
+            minSightings: MIN_SIGHTINGS,
+            solveScale: !(trackerRef.current?.metricWorld ?? false),
+          });
+          if (sf) refitLog.current.record("post-lock", sf, trackingRef.current);
+          if (debug) setLogTick(tickRef.current);
+        }
+        return;
+      }
       for (const e of collector.current.estimates()) {
         const dot = dotsRef.current.get(e.index);
         if (dot) { dot.position.set(e.position.x, e.position.y, e.position.z); dot.visible = e.count >= MIN_SIGHTINGS; }
@@ -187,10 +225,14 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       });
       fitRef.current = f;
       setFit(f);
-      if (f) blender.current.setTarget({ yaw: f.yaw, scale: f.scale, translation: f.translation }, performance.now());
+      if (f) {
+        blender.current.setTarget({ yaw: f.yaw, scale: f.scale, translation: f.translation }, performance.now());
+        refitLog.current.record("refit", f, trackingRef.current);
+        if (debug) setLogTick(tickRef.current);
+      }
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, markers]);
+  }, [phase, markers, debug]);
 
   // ── Frame loop: write the blended pose onto the model root ──────────────
   useEffect(() => {
@@ -212,15 +254,19 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   useEffect(() => () => trackerRef.current?.stop(), []);
 
   const lock = () => {
-    if (!fitRef.current) return;
+    if (!lockDecision(fitRef.current).ok) return;
+    refitLog.current.record("lock", fitRef.current, trackingRef.current);
+    shadow.current.clear();
     lockedRef.current = true;
     dotsRef.current.forEach((d) => (d.visible = false));
     setPhase("locked");
   };
 
   const replace = () => {
+    refitLog.current.record("replace", fitRef.current, trackingRef.current);
     lockedRef.current = false;
     collector.current.clear();
+    shadow.current.clear();
     blender.current.reset();
     if (modelRootRef.current) modelRootRef.current.visible = false;
     fitRef.current = null;
@@ -237,6 +283,8 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   const running = phase === "surveying" || phase === "locked";
   const found = markers.filter((m) => (counts[m.index] ?? 0) >= MIN_SIGHTINGS).length;
   const order = markers.map((m) => getMarkerLabel(m.index)).join(" → ");
+  const guard = lockDecision(fit);
+  const pairs = pairRows(fit);
 
   return (
     <div className="fixed inset-0 bg-[#0a0d12] text-white">
@@ -304,18 +352,37 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
             )}
           </div>
 
+          {debug && <RefitLogOverlay log={refitLog.current} tick={logTick} />}
+
           <div className="absolute inset-x-0 bottom-0 z-10 space-y-2 bg-gradient-to-t from-black/80 to-transparent px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-8 text-sm">
             {phase === "surveying" && (
               <p className="text-center text-white/80">
                 {found < 2
                   ? `Find the markers (${found}/${markers.length})`
-                  : `Model placed · fit ${fit ? `${fit.rmsMm.toFixed(0)} mm` : "—"}. Find more markers to refine, then lock.`}
+                  : guard.ok
+                    ? `Model placed · ${guard.message} Lock when it sits right.`
+                    : guard.message}
               </p>
+            )}
+            {phase === "surveying" && pairs.length > 0 && (
+              <div className="mx-auto max-w-sm rounded-xl bg-black/40 px-3 py-2 font-mono text-[11px] text-white/80">
+                {pairs.slice(0, 4).map((p) => (
+                  <div key={p.label} className="flex justify-between gap-3">
+                    <span>{p.label}</span>
+                    <span>
+                      model {Math.round(p.modelMm)} · seen {Math.round(p.observedMm)} mm{" "}
+                      <span className={Math.abs(p.deltaMm) > LOCK_MAX_RMS_MM ? "text-amber-300" : "text-white/60"}>
+                        ({p.deltaMm >= 0 ? "+" : ""}{Math.round(p.deltaMm)})
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
             {phase === "surveying" ? (
               <button
                 type="button"
-                disabled={!fit}
+                disabled={!guard.ok}
                 onClick={lock}
                 className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white font-semibold text-black disabled:opacity-40"
               >

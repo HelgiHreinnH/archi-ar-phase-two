@@ -6,12 +6,14 @@
  * world frame is metres and gravity-up. Each imagefound / imageupdated event
  * is passed on raw as a MarkerSighting; the viewer does the survey and fit.
  *
- * Engine loading, canvas sizing and the SLAM-origin sync reuse the patterns
- * proven in Tabletop/Wall (WorldLockScene.tsx). Licence: Niantic Spatial
+ * Engine loading, canvas sizing, the SLAM-origin sync and camera recovery
+ * (watchCamera, D12: the feed comes back after a screenshot or app switch)
+ * reuse the patterns proven in Tabletop/Wall (WorldLockScene.tsx). Licence: Niantic Spatial
  * Distributed Engine Binary — xr.js is loaded unmodified from jsDelivr and the
  * attribution below must stay on screen.
  */
 import { loadXr8 } from "@/lib/xr8Engine";
+import { watchCamera } from "@/lib/cameraRecovery";
 import { Emitter, type MarkerSighting, type SpatialMarkerTarget, type SpatialScene, type SpatialStartOptions, type SpatialTracker, type TrackingState } from "./SpatialTracker";
 
 const THREE_ESM_URL = "/assets/three/three.module.js";
@@ -84,7 +86,10 @@ function mapStatus(status?: string): TrackingState {
 export function create8thWallTracker(): SpatialTracker {
   const sightings = new Emitter<[MarkerSighting]>();
   const states = new Emitter<[TrackingState, string | undefined]>();
+  const restarts = new Emitter<[string]>();
   let XR8: Any = null;
+  let cameraVideo: HTMLVideoElement | null = null;
+  let stopCameraWatch: (() => void) | null = null;
   let started = false;
   let onResize: (() => void) | null = null;
   const moduleName = "archi-spatial-lab";
@@ -155,6 +160,20 @@ export function create8thWallTracker(): SpatialTracker {
             onAttach: ({ orientation }: Any) => sizeCanvas(orientation),
             onDeviceOrientationChange: ({ orientation }: Any) => sizeCanvas(orientation),
             onStart: () => {
+              // Same recovery as WorldLockScene: pause()/resume() replaces a dead
+              // feed and keeps the scene, the model and the lock in place.
+              if (!stopCameraWatch) {
+                stopCameraWatch = watchCamera({
+                  label: "8thwall-spatial",
+                  getVideo: () => cameraVideo,
+                  restart: async (reason) => {
+                    try { XR8.pause(); } catch { /* not running */ }
+                    await new Promise((r) => setTimeout(r, 300));
+                    XR8.resume();
+                    restarts.emit(reason);
+                  },
+                });
+              }
               const { scene, camera, renderer } = XR8.Threejs.xrScene();
               XR8.XrController.updateCameraProjectionMatrix({
                 origin: camera.position,
@@ -166,6 +185,7 @@ export function create8thWallTracker(): SpatialTracker {
               resolve({ THREE: T, scene, camera, renderer });
             },
             onCameraStatusChange: (e: Any) => {
+              if (e?.status === "hasVideo") cameraVideo = e.video ?? cameraVideo;
               if (e?.status === "failed") {
                 const why = e?.reason || e?.permission || "";
                 fail(new Error(`Camera could not start${why ? ` (${why})` : ""}.`));
@@ -191,15 +211,20 @@ export function create8thWallTracker(): SpatialTracker {
     },
 
     stop() {
+      try { stopCameraWatch?.(); } catch { /* noop */ }
+      stopCameraWatch = null;
+      cameraVideo = null;
       if (onResize) window.removeEventListener("resize", onResize);
       if (XR8 && started) { try { XR8.stop(); } catch { /* noop */ } }
       if (XR8) { try { XR8.clearCameraPipelineModules(); } catch { /* noop */ } }
       started = false;
       sightings.clear();
       states.clear();
+      restarts.clear();
     },
 
     onSighting: (cb) => sightings.on(cb),
     onTrackingState: (cb) => states.on((s, r) => cb(s, r)),
+    onCameraRestart: (cb) => restarts.on(cb),
   };
 }

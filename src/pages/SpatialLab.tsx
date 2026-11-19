@@ -23,6 +23,8 @@ import { LAB, labDb } from "@/lib/lab";
 import { normalizeMarkerData, type MarkerPoint } from "@/lib/markerTypes";
 import { getMarkerLabel } from "@/lib/spatial/markerLabels";
 import { SurveyCollector, fitSurvey, rhinoMmToModelM, type FitResult } from "@/lib/spatial/surveyFit";
+import { RefitLog } from "@/lib/spatial/refitLog";
+import RefitLogOverlay from "@/components/ar/spatial/RefitLogOverlay";
 import { PoseBlender } from "@/lib/spatial/poseBlend";
 import { loadSpatialAdapter } from "@/lib/spatial/adapters";
 import type { SpatialTracker, TrackingState } from "@/lib/spatial/SpatialTracker";
@@ -64,6 +66,12 @@ export default function SpatialLab() {
   const fpsRef = useRef<number[]>([]);
   const blender = useRef(new PoseBlender());
   const rendererRef = useRef<Any>(null);
+  // Rotation isolation log (§6.4): display and export only, never the placement.
+  const refitLog = useRef(new RefitLog(400, performance.now(), true));
+  const shadow = useRef(new SurveyCollector());
+  const trackingRef = useRef<TrackingState>("initializing");
+  const tickRef = useRef(0);
+  const [logTick, setLogTick] = useState(0);
 
   const [project, setProject] = useState<Project | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -117,12 +125,15 @@ export default function SpatialLab() {
         .map((m) => ({ index: m.index, imageUrl: urls[String(m.index)], physicalWidthM: MARKER_WIDTH_M }));
       if (targets.length < 2) throw new Error("This project has fewer than two marker images. Generate the Spatial markers first.");
 
+      tracker.onCameraRestart?.((reason) => refitLog.current.record("camera-restart", fitRef.current, trackingRef.current, performance.now(), reason));
       tracker.onTrackingState((s) => {
+        trackingRef.current = s;
+        refitLog.current.record("tracking", fitRef.current, s, performance.now(), lockedRef.current ? "after lock" : undefined);
         setTracking(s);
         if (s === "lost" || s === "limited") lossCount.current += 1;
       });
       tracker.onSighting((s) => {
-        if (lockedRef.current) return;
+        if (lockedRef.current) { shadow.current.add(s.index, s.position); return; }
         collector.current.add(s.index, s.position);
       });
 
@@ -190,7 +201,15 @@ export default function SpatialLab() {
       const c: Record<number, number> = {};
       for (const m of markers) c[m.index] = collector.current.count(m.index);
       setCounts(c);
-      if (lockedRef.current) return;
+      tickRef.current++;
+      if (lockedRef.current) {
+        if (tickRef.current % 4 === 0) {
+          const sf = fitSurvey(markers, shadow.current, { minSightings: MIN_SIGHTINGS, solveScale: !(trackerRef.current?.metricWorld ?? false) });
+          if (sf) refitLog.current.record("post-lock", sf, trackingRef.current);
+          setLogTick(tickRef.current);
+        }
+        return;
+      }
       for (const e of collector.current.estimates()) {
         const dot = dotsRef.current.get(e.index);
         if (dot) { dot.position.set(e.position.x, e.position.y, e.position.z); dot.visible = e.count >= MIN_SIGHTINGS; }
@@ -202,7 +221,11 @@ export default function SpatialLab() {
       fitRef.current = f;
       setFit(f);
       // Corrections blend, never snap: the frame loop below writes the matrix.
-      if (f) blender.current.setTarget({ yaw: f.yaw, scale: f.scale, translation: f.translation }, performance.now());
+      if (f) {
+        blender.current.setTarget({ yaw: f.yaw, scale: f.scale, translation: f.translation }, performance.now());
+        refitLog.current.record("refit", f, trackingRef.current);
+        setLogTick(tickRef.current);
+      }
     }, 250);
     return () => window.clearInterval(id);
   }, [phase, markers]);
@@ -237,6 +260,8 @@ export default function SpatialLab() {
 
   const lock = () => {
     if (!fitRef.current) return;
+    refitLog.current.record("lock", fitRef.current, trackingRef.current);
+    shadow.current.clear();
     lockedRef.current = true;
     timings.current.lock = performance.now();
     dotsRef.current.forEach((d) => (d.visible = false));
@@ -244,6 +269,8 @@ export default function SpatialLab() {
   };
 
   const resurvey = () => {
+    refitLog.current.record("replace", fitRef.current, trackingRef.current);
+    shadow.current.clear();
     lockedRef.current = false;
     collector.current.clear();
     timings.current.lock = 0;
@@ -270,7 +297,7 @@ export default function SpatialLab() {
       tracking_losses: lossCount.current,
       fps_avg: fps,
       notes: notes || null,
-      raw: { engine: LAB?.engine, fit: f, estimates: collector.current.estimates(), draw_calls: drawCalls },
+      raw: { engine: LAB?.engine, fit: f, estimates: collector.current.estimates(), draw_calls: drawCalls, refit_log: refitLog.current.toJSON() },
     };
     try {
       const { error } = await labDb().from("test_runs").insert(row);
@@ -316,6 +343,7 @@ export default function SpatialLab() {
 
       {running && (
         <>
+          <RefitLogOverlay log={refitLog.current} tick={logTick} />
           <div className="absolute inset-x-0 top-0 z-10 space-y-2 bg-gradient-to-b from-black/70 to-transparent p-3 text-xs">
             <div className="flex items-center justify-between">
               <span className="rounded-full bg-white/15 px-2 py-1">{LAB?.engine} · {tracking}</span>
