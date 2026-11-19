@@ -13,9 +13,13 @@
  */
 import { BRAND, INK, SPATIAL_MARKER_MM, escapeXml, logoTile, markerDiscInner } from "@/lib/spatial/design";
 import { spatialQrInner } from "@/lib/spatial/qr";
+import { SHEET_MM } from "@/lib/spatial/contract";
 
-export const SHEET_W = 210;
-export const SHEET_H = 297;
+/** A4 sheet and circle placement come from the Spatial contract (§3), shared with the Rhino plugin. */
+export const SHEET_W: number = SHEET_MM.w;
+export const SHEET_H: number = SHEET_MM.h;
+/** Circle centre = the coordinate, measured from the top edge. */
+export const CIRCLE_CENTRE_FROM_TOP: number = SHEET_MM.circleCentreFromTop;
 
 export interface MarkerSheetInput {
   index: number;
@@ -111,7 +115,7 @@ export function markerSheetSvg(input: MarkerSheetInput, fontCss: string): string
   // circle Ø180 mm, centre (105, 105): centred between the sheet top and the cut line (y = 210).
   // N/E/S/W ticks just outside the rim for aligning the circle centre on the coordinate.
   const cx = SHEET_W / 2;
-  const cy = 105;
+  const cy = CIRCLE_CENTRE_FROM_TOP;
   const r0 = SPATIAL_MARKER_MM / 2;
   s += `<g transform="translate(${cx - r0} ${cy - r0}) scale(${SPATIAL_MARKER_MM / 1200})">${markerDiscInner(index)}</g>`;
   for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {

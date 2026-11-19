@@ -4,6 +4,7 @@
  * Everything here returns SVG markup strings so it renders identically in the
  * browser (canvas rasterisation) and in tests (sharp / resvg).
  */
+import { SHEET_MM } from "@/lib/spatial/contract";
 
 /** Site primary, hsl(220 80% 50%). Used for the logo tile and QR accents. */
 export const BRAND = "#1A5EE6";
@@ -31,8 +32,8 @@ export function logoTile(cx: number, cy: number, r: number): string {
   );
 }
 
-/** Printed diameter of a Spatial location marker (= image-target physical width). */
-export const SPATIAL_MARKER_MM = 180;
+/** Printed diameter of a Spatial location marker (= image-target physical width). Contract §3. */
+export const SPATIAL_MARKER_MM: number = SHEET_MM.circle;
 
 // ── Deterministic organic pattern ───────────────────────────────────────────
 // Multi-scale blurred noise, thresholded at 0 and traced to smooth vector

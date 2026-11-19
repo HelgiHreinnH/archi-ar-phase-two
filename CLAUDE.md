@@ -63,6 +63,14 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
 - One tap is the floor. `getUserMedia` and native AR both require user activation;
   zero-tap is not achievable in a browser.
 
+## Spatial contract
+Cross-system rules for Spatial (Rhino plugin · GLB · import · SLAM fit · camera) live in
+Notion: [Spatial system contract](https://app.notion.com/p/41d3395b0b498138bfafdb40359a3e1e).
+Change that page first, then the code. Shared values (marker letters A–T, sheet
+210/297/180/105) are in `contracts/spatial-contract.json` (+ `src/lib/spatial/contract.ts`);
+the plugin keeps a copy. Markers read from a GLB are read-only (D18); Lock needs 3 markers
+and rms ≤ `LOCK_MAX_RMS_MM` (D9, `lockGuard.ts`); `n`/`up` from extras never enter the fit (D8).
+
 ## Deploy
 `main` -> Netlify -> ar.felles.dk. PRs get deploy previews.
 Build config is in `netlify.toml`, install flags in `.npmrc` — both in git, so

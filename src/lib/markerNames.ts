@@ -5,15 +5,42 @@
  * (`marker_A_proxy` inside a layer node `marker_A`), because Rhino's glTF
  * writer drops Point objects. The marker parser reads them; everything else
  * has to leave them alone or work around them.
+ *
+ * This file is the single definition of which names count (D11): letters
+ * A–T and numbers 1–20, case-insensitive, spaces/hyphens as underscores, an
+ * optional `_proxy` suffix. The parser and the optimiser both call it.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { MARKER_LETTERS, MAX_MARKERS } from "@/lib/spatial/contract";
+
+function normalise(name: string): string {
+  return name.trim().toLowerCase().replace(/[\s-]/g, "_");
+}
 
 /**
- * Node names the marker parser reads (`parseGlbMarkers.ts`): `marker_A`,
- * `marker_3`, `Marker-B_proxy` … Kept in step with that parser's normalising.
+ * 1-based marker index for a node name, or null when the name is not a marker:
+ * `marker_A` → 1, `Marker-T_proxy` → 20, `marker_7` → 7, `marker_U` → null.
  */
+export function markerIndexFromNodeName(name: string): number | null {
+  const m = normalise(name).match(/^marker_([a-z]|\d{1,2})(?:_proxy)?$/);
+  if (!m) return null;
+  const key = m[1];
+  if (/^\d+$/.test(key)) {
+    const n = parseInt(key, 10);
+    return n >= 1 && n <= MAX_MARKERS ? n : null;
+  }
+  const i = MARKER_LETTERS.indexOf(key.toUpperCase());
+  return i >= 0 ? i + 1 : null;
+}
+
+/** True for the proxy mesh (`marker_A_proxy`), false for the layer group node. */
+export function isMarkerProxyName(name: string): boolean {
+  return markerIndexFromNodeName(name) !== null && /_proxy$/.test(normalise(name));
+}
+
+/** Node names the marker parser reads (`parseGlbMarkers.ts`). */
 export function isMarkerNodeName(name: string): boolean {
-  return /^marker_(?:[a-z]|\d{1,2})(?:_proxy)?$/.test(name.trim().toLowerCase().replace(/[\s-]/g, "_"));
+  return markerIndexFromNodeName(name) !== null;
 }
 
 /**

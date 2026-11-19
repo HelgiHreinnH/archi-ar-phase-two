@@ -1,0 +1,8 @@
+{
+  "$comment": "Spatial system contract (Notion, 19 Nov 2026), sections 3, 5 and D11. Shared by the platform (src/lib/spatial/contract.ts, checked by contract.test.ts) and the Rhino plugin (a copy of this file, checked by the plugin's own test). Change the Notion page first, then this file, then both sides.",
+  "version": 1,
+  "markerLetters": "ABCDEFGHIJKLMNOPQRST",
+  "maxMarkers": 20,
+  "sheetMm": { "w": 210, "h": 297, "circle": 180, "circleCentreFromTop": 105 },
+  "extras": { "key": "archiar", "spatialVersion": 2, "frame": "rhino-z-up", "units": "mm" }
+}
