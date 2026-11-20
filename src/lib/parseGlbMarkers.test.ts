@@ -3,7 +3,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseGlbMarkers } from "./parseGlbMarkers";
+import { Document, NodeIO } from "@gltf-transform/core";
+import { parseGlbMarkers, MARKER_LETTERS } from "./parseGlbMarkers";
 
 /**
  * Fixture: a real Rhino 8 export (kitchen model, 13 Nov 2026) written with
@@ -80,4 +81,47 @@ describe("parseGlbMarkers", () => {
     const notGlb = new File(["{}"], "markers.json", { type: "application/json" });
     expect(await parseGlbMarkers(notGlb)).toBeNull();
   });
+
+  // Contract D11 (Spatial system contract, 20 Nov 2026): the Rhino plugin
+  // writes marker_A … marker_T. Before this, marker_D onwards were dropped
+  // without a warning, so a room with more than three sheets lost points.
+  it("reads letter markers beyond C (A to F as six markers)", async () => {
+    const rhino = [
+      [0, 0, 1300], [3000, 0, 1300], [1500, -1000, 0],
+      [4500, 500, 1200], [-800, 2000, 900], [2500, 3000, 0],
+    ];
+    const doc = new Document();
+    const buffer = doc.createBuffer();
+    const scene = doc.createScene();
+    rhino.forEach(([x, y, z], i) => {
+      // a tiny triangle centred on the point, in glTF metres (Y up): the
+      // inverse of the parser's Rhino.X = g.X, Rhino.Y = -g.Z, Rhino.Z = g.Y
+      const gx = x / 1000, gy = z / 1000, gz = -y / 1000, e = 0.005;
+      const pos = doc.createAccessor().setType("VEC3").setBuffer(buffer).setArray(new Float32Array([
+        gx - e, gy - e, gz, gx + e, gy - e, gz, gx, gy + e, gz,
+      ]));
+      const prim = doc.createPrimitive().setAttribute("POSITION", pos);
+      const letter = MARKER_LETTERS[i];
+      const mesh = doc.createMesh(`marker_${letter}_proxy`).addPrimitive(prim);
+      const group = doc.createNode(`marker_${letter}`).addChild(doc.createNode(`marker_${letter}_proxy`).setMesh(mesh));
+      scene.addChild(group);
+    });
+    const bytes = await new NodeIO().writeBinary(doc);
+    const file = new File([bytes], "six.glb", { type: "model/gltf-binary" });
+
+    const markers = await parseGlbMarkers(file);
+    expect(markers).not.toBeNull();
+    expect(markers!.map((m) => m.index)).toEqual([1, 2, 3, 4, 5, 6]);
+    rhino.forEach(([x, y, z], i) => {
+      const m = markers![i];
+      expect(m.x).toBeCloseTo(x, 0);
+      expect(m.y).toBeCloseTo(y, 0);
+      expect(m.z).toBeCloseTo(z, 0);
+    });
+  });
+
+  it("maps marker_A to marker_T onto 1 to 20 (the letters the Rhino plugin mirrors)", () => {
+    expect(MARKER_LETTERS).toBe("ABCDEFGHIJKLMNOPQRST");
+  });
 });
+

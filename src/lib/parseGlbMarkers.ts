@@ -6,12 +6,21 @@ import { stripTextures } from "@/lib/glbFile";
 
 const MAX_MARKERS = 20;
 
-/** Legacy name → index mapping */
-const LEGACY_MAP: Record<string, number> = {
-  marker_a: 1,
-  marker_b: 2,
-  marker_c: 3,
-};
+/**
+ * Marker letters the parser reads: marker_A … marker_T map to 1 … 20.
+ * CONTRACT (Spatial system contract D11): the Rhino plugin mirrors this exact
+ * string as PARSER_LETTERS in archiar_core.py and fails Test for any other
+ * letter. Change both together. Until 20 Nov 2026 only A–C were read, so a
+ * fourth marker named marker_D was dropped without a warning.
+ */
+export const MARKER_LETTERS = "ABCDEFGHIJKLMNOPQRST";
+
+/** Letter name → index mapping (marker_a → 1 … marker_t → 20) */
+const LEGACY_MAP: Record<string, number> = Object.fromEntries(
+  MARKER_LETTERS.toLowerCase()
+    .split("")
+    .map((letter, i) => [`marker_${letter}`, i + 1])
+);
 
 /**
  * Extracts the world-space position of a THREE.Object3D.
@@ -62,8 +71,8 @@ function gltfToRhinoMm(p: THREE.Vector3): { x: number; y: number; z: number } {
 /**
  * Parses a GLB file and looks for objects named marker_1 through marker_20
  * (case-insensitive, spaces/hyphens normalised to underscores, a trailing
- * "_proxy" ignored). Also supports legacy marker_A/B/C names (remapped to
- * 1/2/3). Returns sorted MarkerPoint[] in Rhino millimetres, or null if fewer
+ * "_proxy" ignored). Also reads letter names marker_A … marker_T (remapped to
+ * 1 … 20; MARKER_LETTERS). Returns sorted MarkerPoint[] in Rhino millimetres, or null if fewer
  * than 3 found.
  *
  * RHINO WORKFLOW NOTE:
@@ -118,7 +127,7 @@ export async function parseGlbMarkers(file: File): Promise<MarkerPoint[] | null>
             .replace(/[\s-]/g, "_")
             .replace(/_proxy$/, "");
 
-          // Check legacy names first
+          // Letter names first (marker_A … marker_T)
           if (LEGACY_MAP[name] !== undefined) {
             record(LEGACY_MAP[name], obj);
             return;
