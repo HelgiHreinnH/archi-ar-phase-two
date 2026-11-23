@@ -82,3 +82,30 @@ describe("surveyStatus agrees with the Lock guard (D9)", () => {
     }
   });
 });
+
+describe("uniform scale error (23 Nov 2026, second kitchen test)", () => {
+  // Every marker 13 % closer to the centroid: the run-1 pattern (all pairs ×0.87).
+  function scaled(k: number): FitPair[] {
+    const p = pairs();
+    const c = p.reduce((a, q) => ({ x: a.x + q.world.x / 3, y: a.y + q.world.y / 3, z: a.z + q.world.z / 3 }), { x: 0, y: 0, z: 0 });
+    return p.map((q) => ({ ...q, world: { x: c.x + (q.world.x - c.x) * k, y: c.y + (q.world.y - c.y) * k, z: c.z + (q.world.z - c.z) * k } }));
+  }
+
+  it("says the distances are all short instead of blaming one marker", () => {
+    const fit = fitGravityAligned(scaled(0.87), { solveScale: false });
+    const free = fitGravityAligned(scaled(0.87), { solveScale: true })!;
+    const s = surveyStatus({ order, found: new Set([1, 2, 3]), fit, freeFit: free, trackingReady: true });
+    expect(s.text).toMatch(/All distances are about 13 % shorter/);
+    expect(s.worst).toBeUndefined();
+    expect(s.lockReady).toBe(false);
+    expect(Object.values(s.quality).every((q) => q === "warn")).toBe(true);
+  });
+
+  it("a single misplaced sheet is still named (free scale does not explain it)", () => {
+    const p = pairs({ 3: 1200 });
+    const fit = fitGravityAligned(p, { solveScale: false });
+    const free = fitGravityAligned(p, { solveScale: true })!;
+    const s = surveyStatus({ order, found: new Set([1, 2, 3]), fit, freeFit: free, trackingReady: true });
+    expect(s.worst).toBe(3);
+  });
+});

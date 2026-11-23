@@ -20,6 +20,12 @@ import { LOCK_MAX_RMS_MM, LOCK_MIN_MARKERS } from "./lockGuard";
 export const GOOD_MM = LOCK_MAX_RMS_MM;
 /** Above this a marker is clearly off (red). Between GOOD and WARN: amber. */
 export const WARN_MM = 150;
+/**
+ * Uniform scale error (23 Nov 2026, second kitchen test): every distance off by
+ * the same factor. Flagged when a free-scale fit explains the markers within
+ * WARN_MM and its scale is off by more than this fraction.
+ */
+export const SCALE_OFF_FRACTION = 0.05;
 
 export type Tone = "info" | "good" | "warn" | "bad";
 export type MarkerQuality = "missing" | "found" | "good" | "warn" | "bad";
@@ -30,6 +36,8 @@ export interface SurveyStatusInput {
   /** Markers with enough sightings to take part in the fit. */
   found: Set<number>;
   fit: FitResult | null;
+  /** Same markers fitted with free scale (3+ markers): scale = observed / drawn. */
+  freeFit?: { scale: number; rmsMm: number } | null;
   /** False while the engine still reports weak / initialising tracking. */
   trackingReady: boolean;
 }
@@ -65,7 +73,7 @@ function gradeMm(mm: number): MarkerQuality {
   return "bad";
 }
 
-export function surveyStatus({ order, found, fit, trackingReady }: SurveyStatusInput): SurveyStatus {
+export function surveyStatus({ order, found, fit, freeFit, trackingReady }: SurveyStatusInput): SurveyStatus {
   const L = getMarkerLabel;
   const total = order.length;
   const required = LOCK_MIN_MARKERS;
@@ -138,6 +146,27 @@ export function surveyStatus({ order, found, fit, trackingReady }: SurveyStatusI
 
   const worst = worstMarker(fit);
   const worstMm = worst ? residualMm(worst) : 0;
+
+  // Every distance off by the same factor: the sheets agree with each other and
+  // with the drawing up to a scale. That is a print-size or engine-scale
+  // problem, not a misplaced sheet, so no single marker gets the blame.
+  if (
+    fit.rmsMm > GOOD_MM &&
+    freeFit &&
+    freeFit.rmsMm <= WARN_MM &&
+    Math.abs(freeFit.scale - 1) > SCALE_OFF_FRACTION
+  ) {
+    const pct = Math.round(Math.abs(freeFit.scale - 1) * 100);
+    const dir = freeFit.scale < 1 ? "shorter" : "longer";
+    for (const r of fit.residuals) quality[r.index] = "warn";
+    return {
+      text: `All distances are about ${pct} % ${dir} than the drawing, so the sheets agree with each other. Check one circle measures 180 mm (printed at 100 %). If it does, tap Reset placement and start with a slow room scan.`,
+      tone: "warn",
+      lockReady: false,
+      quality,
+    };
+  }
+
   if (fit.rmsMm <= GOOD_MM) {
     const more = next !== undefined ? ` (marker ${L(next)} is optional)` : "";
     return {

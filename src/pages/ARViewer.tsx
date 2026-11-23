@@ -211,6 +211,31 @@ const ARViewer = () => {
     if (viewState === "ended") logARTimingSummary(true);
   }, [viewState]);
 
+  // Spatial: scanning the QR again while Safari still has this tab open brings
+  // the old tab back on its end screen ("Thanks for taking a look"), one extra
+  // tap (23 Nov 2026 kitchen test). When the tab comes back into view on the end
+  // screen, start fresh on the Spatial intro instead. Tabletop/Wall unchanged.
+  useEffect(() => {
+    if (!isMultipoint || viewState !== "ended") return;
+    let hiddenAt: number | null = null;
+    const backToIntro = () => {
+      resetARSessionMarks();
+      setResetKey((k) => k + 1);
+      setViewState("landing");
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") hiddenAt = Date.now();
+      else if (hiddenAt !== null) backToIntro();
+    };
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) backToIntro(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [isMultipoint, viewState]);
+
   // Tabletop/Wall preload: while the pre-camera screen is up, fetch the engine,
   // the tracking target and the model, so the tap lands on warm assets.
   // Printed QR size, carried in the scanned link (?q=50|100|150). No ?q = a QR

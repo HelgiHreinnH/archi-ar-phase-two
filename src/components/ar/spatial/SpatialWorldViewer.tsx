@@ -23,8 +23,14 @@
  * claude/user-test-2026-11-23-first-spatial-kitchen.md):
  *  - Sightings only count while tracking is NORMAL (they drift while SLAM settles),
  *    and a marker seen again after a pause uses its fresh look (surveyFit.ts).
- *  - Scale comes from the printed marker's own width, as in Tabletop/Wall;
- *    `?scale=engine` keeps the old "world is metres" assumption for comparison.
+ *  - Scale is the engine's metric world (s = 1). The marker-width scale tried in
+ *    1efe39a swung by 2× in the second kitchen test (23 Nov 12:08), so it is only
+ *    used with `?scale=width` and otherwise shown in `?debug=1`.
+ *  - A free-scale fit runs next to it: when every distance is off by the same
+ *    factor the copy says so (print scale / engine scale), instead of blaming one
+ *    marker.
+ *  - "Reset placement" starts the marker search over without closing AR
+ *    (camera, room tracking and model stay).
  *  - The fit is told in words (surveyStatus.ts): which marker is off and by how
  *    much. Lock itself is still decided by lockGuard.ts (D9).
  *  - The model is a ghost until Lock is allowed, and when the camera is inside
@@ -108,6 +114,8 @@ interface ScaleDebug {
   enginePerMetre?: number;
   rmsEngine?: number;
   rmsWidth?: number;
+  freeScale?: number;
+  rmsFree?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -149,8 +157,9 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   const ignoredRef = useRef(0);
   const widthsRef = useRef<number[]>([]);
   const scaleRef = useRef<number | undefined>(undefined);
-  const useEngineScale = useMemo(() => {
-    try { return new URLSearchParams(window.location.search).get("scale") === "engine"; } catch { return false; }
+  // Opt-in only since the 23 Nov 12:08 test: the marker-width scale swung by 2×.
+  const useWidthScale = useMemo(() => {
+    try { return new URLSearchParams(window.location.search).get("scale") === "width"; } catch { return false; }
   }, []);
   // Debug only (§6.4): log + a shadow collector fed after Lock, never applied.
   const debug = useMemo(() => {
@@ -163,6 +172,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   const [logTick, setLogTick] = useState(0);
   const [inside, setInside] = useState(false);
   const [scaleDebug, setScaleDebug] = useState<ScaleDebug>({ ignored: 0, widths: 0 });
+  const [freeFit, setFreeFit] = useState<{ scale: number; rmsMm: number } | null>(null);
 
   const [phase, setPhase] = useState<Phase>("ready");
   const [message, setMessage] = useState("");
@@ -319,7 +329,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
           const sf = fitSurvey(markers, shadow.current, {
             minSightings: MIN_SIGHTINGS,
             solveScale: !(trackerRef.current?.metricWorld ?? false),
-            fixedScale: useEngineScale ? undefined : scaleRef.current,
+            fixedScale: useWidthScale ? scaleRef.current : undefined,
           });
           if (sf) refitLog.current.record("post-lock", sf, trackingRef.current);
           if (debug) setLogTick(tickRef.current);
@@ -338,7 +348,10 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
         solveScale: !(trackerRef.current?.metricWorld ?? false),
       });
       const fWidth = sane ? fitSurvey(markers, collector.current, { minSightings: MIN_SIGHTINGS, fixedScale: perMetre }) : null;
-      const f = useEngineScale || !fWidth ? fEngine : fWidth;
+      const f = useWidthScale && fWidth ? fWidth : fEngine;
+      // Free scale, for the diagnosis only: never moves the model.
+      const fFree = fitSurvey(markers, collector.current, { minSightings: MIN_SIGHTINGS, solveScale: true });
+      setFreeFit(fFree && fFree.markersUsed >= 3 ? { scale: fFree.scale, rmsMm: fFree.rmsMm } : null);
       if (debug) {
         setScaleDebug({
           ignored: ignoredRef.current,
@@ -346,6 +359,8 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
           enginePerMetre: perMetre,
           rmsEngine: fEngine?.rmsMm,
           rmsWidth: fWidth?.rmsMm,
+          freeScale: fFree?.scale,
+          rmsFree: fFree?.rmsMm,
         });
       }
       fitRef.current = f;
@@ -357,7 +372,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, markers, debug, useEngineScale]);
+  }, [phase, markers, debug, useWidthScale]);
 
   // ── What to tell the user: plain words, which marker is off ─────────────
   const foundSet = useMemo(
@@ -365,8 +380,8 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
     [markers, counts],
   );
   const status = useMemo(
-    () => surveyStatus({ order: markers.map((m) => m.index), found: foundSet, fit, trackingReady: tracking === "normal" }),
-    [markers, foundSet, fit, tracking],
+    () => surveyStatus({ order: markers.map((m) => m.index), found: foundSet, fit, freeFit, trackingReady: tracking === "normal" }),
+    [markers, foundSet, fit, freeFit, tracking],
   );
 
   // Ghost until Lock is allowed; full materials once it is, and after Lock.
@@ -391,7 +406,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
         continue;
       }
       o.ring.position.set(e.position.x, e.position.y, e.position.z);
-      o.ring.scale.setScalar(scaleRef.current ?? 1);
+      o.ring.scale.setScalar(useWidthScale ? scaleRef.current ?? 1 : 1);
       if (o.rotation) o.ring.quaternion.set(o.rotation.x, o.rotation.y, o.rotation.z, o.rotation.w);
       const off = !!fit && (q === "bad" || q === "warn");
       o.error.visible = o.predicted.visible = off;
@@ -407,7 +422,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
         o.error.geometry.computeBoundingSphere();
       }
     }
-  }, [counts, fit, status, phase, markers]);
+  }, [counts, fit, status, phase, markers, useWidthScale]);
 
   // ── Frame loop: write the blended pose onto the model root ──────────────
   useEffect(() => {
@@ -460,6 +475,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
     setPhase("locked");
   };
 
+  /** "Reset placement": forget the survey and the fit, keep the AR session running. */
   const replace = () => {
     refitLog.current.record("replace", fitRef.current, trackingRef.current);
     lockedRef.current = false;
@@ -471,6 +487,9 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
     if (modelRootRef.current) modelRootRef.current.visible = false;
     fitRef.current = null;
     setFit(null);
+    setFreeFit(null);
+    setCounts({});
+    overlaysRef.current.forEach((o) => { o.ring.visible = o.error.visible = o.predicted.visible = false; });
     setPhase("surveying");
   };
 
@@ -558,7 +577,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
             )}
             {debug && (
               <pre className="whitespace-pre-wrap rounded-lg bg-black/70 p-2 font-mono text-[10px] leading-snug text-white/90">
-                {scaleDebugText(tracking, scaleDebug, fit, useEngineScale)}
+                {scaleDebugText(tracking, scaleDebug, fit, useWidthScale)}
               </pre>
             )}
           </div>
@@ -566,11 +585,12 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
           {debug && <RefitLogOverlay log={refitLog.current} tick={logTick} />}
 
           <div className="absolute inset-x-0 bottom-0 z-10 space-y-2 bg-gradient-to-t from-black/80 to-transparent px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-8 text-sm">
+            {/* Dark panel: the text sat on the white ghost model and could not be read (23 Nov 12:08). */}
             {phase === "surveying" && (
-              <p className={`text-center ${TONE_TEXT[status.tone]}`}>{status.text}</p>
-            )}
-            {phase === "surveying" && pairs.length > 0 && (
-              <div className="mx-auto max-w-sm rounded-xl bg-black/40 px-3 py-2 font-mono text-[11px] text-white/80">
+              <div className="mx-auto max-w-sm space-y-2 rounded-2xl bg-black/75 px-3 py-2.5 shadow-lg backdrop-blur-sm">
+                <p className={`text-center leading-snug ${TONE_TEXT[status.tone]}`}>{status.text}</p>
+                {pairs.length > 0 && (
+              <div className="rounded-xl bg-white/5 px-3 py-2 font-mono text-[11px] text-white/85">
                 {pairs.slice(0, 4).map((p) => (
                   <div key={p.label} className="flex justify-between gap-3">
                     <span>{p.label}</span>
@@ -583,25 +603,41 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
                   </div>
                 ))}
               </div>
+                )}
+              </div>
             )}
             {phase === "surveying" ? (
-              <button
-                type="button"
-                disabled={!guard.ok}
-                onClick={lock}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white font-semibold text-black disabled:opacity-40"
-              >
-                <Lock className="h-4 w-4" />
-                Lock placement
-              </button>
+              <div className="flex gap-2">
+                {/* Start the marker search over without closing AR (Helgi, 23 Nov 2026):
+                    camera, room tracking and model stay; no new room scan. */}
+                {foundSet.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={replace}
+                    className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-2xl bg-black/60 px-4 font-semibold text-white backdrop-blur-sm"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Reset placement
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!guard.ok}
+                  onClick={lock}
+                  className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-white font-semibold text-black disabled:opacity-40"
+                >
+                  <Lock className="h-4 w-4" />
+                  Lock placement
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
                 onClick={replace}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white/15 font-semibold"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-black/60 font-semibold text-white backdrop-blur-sm"
               >
                 <RotateCcw className="h-4 w-4" />
-                Re-place model
+                Reset placement
               </button>
             )}
             {attribution && <p className="text-center text-[10px] text-white/50">{attribution}</p>}
@@ -640,12 +676,13 @@ function setGhost(model: Any, on: boolean): void {
 }
 
 /** `?debug=1`: enough to tell an engine-scale problem from a misplaced sheet. */
-function scaleDebugText(tracking: TrackingState, info: ScaleDebug, fit: FitResult | null, engineScale: boolean): string {
+function scaleDebugText(tracking: TrackingState, info: ScaleDebug, fit: FitResult | null, widthScale: boolean): string {
   const f = (v: number | undefined, d = 0) => (v === undefined || !Number.isFinite(v) ? "—" : v.toFixed(d));
   const lines = [
     `tracking ${tracking} · sightings ignored while settling ${info.ignored}`,
     `marker width → ${f(info.enginePerMetre, 3)} world units/m (${info.widths} readings; 1.000 = metric)`,
-    `rms with engine scale ${f(info.rmsEngine)} mm · with width scale ${f(info.rmsWidth)} mm · using ${engineScale ? "engine" : "width"}`,
+    `rms with engine scale ${f(info.rmsEngine)} mm · with width scale ${f(info.rmsWidth)} mm · using ${widthScale ? "width" : "engine"}`,
+    `free scale ${f(info.freeScale, 3)} (observed / drawn) · rms ${f(info.rmsFree)} mm`,
   ];
   if (fit) {
     for (const r of fit.residuals) {
