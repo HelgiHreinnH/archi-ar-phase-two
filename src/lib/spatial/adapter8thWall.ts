@@ -99,10 +99,13 @@ export function create8thWallTracker(): SpatialTracker {
     if (!name.startsWith(TARGET_PREFIX) || !detail.position) return;
     const index = Number(name.slice(TARGET_PREFIX.length));
     if (!Number.isFinite(index)) return;
+    // Same width read as Tabletop/Wall (WorldLockScene): scaledWidth × scale.
+    const width = Number(detail.scaledWidth) * Number(detail.scale ?? 1);
     sightings.emit({
       index,
       position: { x: detail.position.x, y: detail.position.y, z: detail.position.z },
       rotation: detail.rotation,
+      widthWorld: Number.isFinite(width) && width > 0 ? width : undefined,
       at: performance.now(),
     });
   };

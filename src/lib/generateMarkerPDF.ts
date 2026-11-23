@@ -38,7 +38,7 @@ async function addPageImage(doc: jsPDF, svg: string): Promise<void> {
 }
 
 /**
- * One location-marker sheet (Spatial, locked v11): "POINT n" + logo, circle at exactly
+ * One location-marker sheet (Spatial, locked v11): "POINT A" + logo, circle at exactly
  * Ø180 mm (= SPATIAL_MARKER_MM / MARKER_WIDTH_M in SpatialWorldViewer), model name, X/Y/Z,
  * origin row, placement steps, round QR. The circle is drawn from the same SVG as the
  * tracked marker image.

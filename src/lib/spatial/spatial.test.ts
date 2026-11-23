@@ -24,10 +24,10 @@ describe("spatial design", () => {
     expect(svg.match(/Q/g)!.length).toBeGreaterThan(200);
   });
 
-  it("marker sheet prints POINT n, the coordinates, model name and a Ø180 mm circle", () => {
+  it("marker sheet prints POINT + letter, the coordinates, model name and a Ø180 mm circle", () => {
     const svg = markerSheetSvg({ ...base, color: "#007AFF" }, "");
     expect(svg).toContain(">POINT<");
-    expect(svg).toContain(">3</text>");
+    expect(svg).toContain(">C</text>"); // index 3 → C, same name as the app and marker_C
     expect(svg).toContain(">Test</text>");
     expect(svg).toContain(">100 <");
     expect(svg).toContain("CIRCLE Ø 180 MM");
@@ -43,7 +43,7 @@ describe("spatial design", () => {
 
   it("light marker colours (yellow) get a darkened number, never the raw colour", () => {
     const yellow = markerSheetSvg({ ...base, color: "#FFD60A" }, "");
-    expect(yellow).not.toContain('fill="#FFD60A">3');
+    expect(yellow).not.toContain('fill="#FFD60A">C');
   });
 
   it("truncates very long model names", () => {

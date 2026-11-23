@@ -62,35 +62,80 @@ function dist(a: Vec3, b: Vec3): number {
  * Keeps the last `maxPerMarker` sightings per marker and returns a robust
  * per-marker position: component-wise median, then sightings further than
  * `rejectDistance` from it are dropped and the median recomputed.
+ *
+ * Fresh look wins (23 Nov 2026 kitchen test): SLAM drifts while the user walks
+ * between markers, so a marker's early sightings go stale. When a marker is
+ * seen again after a gap longer than `staleGapMs`, a new "look" starts. As soon
+ * as the new look has `freshMin` sightings, only that look is used; until then
+ * the previous one keeps the marker in the fit (no flicker). Sightings added
+ * without a time stamp never start a new look (old behaviour).
  */
 export class SurveyCollector {
   private samples = new Map<number, Vec3[]>();
+  /** Per marker: start index of the newest look in `samples`, and the last time stamp. */
+  private looks = new Map<number, { start: number; lastAt: number }>();
 
   constructor(
     private readonly maxPerMarker = 60,
     /** World units. 0.05 = 5 cm when the engine reports metres. */
     private readonly rejectDistance = 0.05,
+    private readonly staleGapMs = 2000,
+    private readonly freshMin = 5,
   ) {}
 
-  add(index: number, p: Vec3): void {
+  add(index: number, p: Vec3, at?: number): void {
     if (![p.x, p.y, p.z].every(Number.isFinite)) return;
     const list = this.samples.get(index) ?? [];
+    const look = this.looks.get(index);
+    if (at !== undefined) {
+      if (look && at - look.lastAt > this.staleGapMs) {
+        // A new look starts. Drop looks older than the previous one, so at most
+        // two looks are kept: the newest and the one before it as a fallback.
+        const prevStart = look.start;
+        list.splice(0, prevStart);
+        this.looks.set(index, { start: list.length, lastAt: at });
+      } else if (look) {
+        look.lastAt = at;
+      } else {
+        this.looks.set(index, { start: 0, lastAt: at });
+      }
+    }
     list.push({ x: p.x, y: p.y, z: p.z });
-    if (list.length > this.maxPerMarker) list.shift();
+    if (list.length > this.maxPerMarker) {
+      list.shift();
+      const l = this.looks.get(index);
+      if (l && l.start > 0) l.start -= 1;
+    }
     this.samples.set(index, list);
   }
 
-  clear(index?: number): void {
-    if (index === undefined) this.samples.clear();
-    else this.samples.delete(index);
+  /** Sightings the estimate is based on (newest look once it is big enough). */
+  private active(index: number): Vec3[] | undefined {
+    const list = this.samples.get(index);
+    if (!list) return undefined;
+    const look = this.looks.get(index);
+    if (look && look.start > 0 && list.length - look.start >= this.freshMin) return list.slice(look.start);
+    if (look && look.start > 0) return list.slice(0, look.start);
+    return list;
   }
 
+  clear(index?: number): void {
+    if (index === undefined) {
+      this.samples.clear();
+      this.looks.clear();
+    } else {
+      this.samples.delete(index);
+      this.looks.delete(index);
+    }
+  }
+
+  /** Sightings currently used for the marker's position. */
   count(index: number): number {
-    return this.samples.get(index)?.length ?? 0;
+    return this.active(index)?.length ?? 0;
   }
 
   estimate(index: number): MarkerEstimate | null {
-    const list = this.samples.get(index);
+    const list = this.active(index);
     if (!list || list.length === 0) return null;
     const med = (pts: Vec3[]): Vec3 => ({
       x: median(pts.map((p) => p.x)),
@@ -130,12 +175,25 @@ export interface FitPair {
 export interface FitOptions {
   /** Solve scale (default true). If false, s = 1 (engine must report metres). */
   solveScale?: boolean;
+  /**
+   * Known world units per model metre, measured from the printed marker's own
+   * width (as Tabletop/Wall do with the QR). Wins over `solveScale`. Keeps the
+   * fit honest when the engine's world is not metres (23 Nov 2026 test).
+   */
+  fixedScale?: number;
 }
 
 export interface MarkerResidual {
   index: number;
   /** Distance between fitted and observed marker, in millimetres. */
   errorMm: number;
+  /**
+   * Leave-one-out: how far the observed marker is from where the OTHER markers
+   * put it (mm). Only with 3+ markers. One misplaced sheet pulls the plain fit
+   * towards itself and spreads its error over every marker; this number puts
+   * the blame on the marker that is actually off.
+   */
+  offMm?: number;
 }
 
 export interface PairDistance {
@@ -184,13 +242,8 @@ export function fitMatrix(yaw: number, s: number, t: Vec3): number[] {
   ];
 }
 
-/**
- * Least-squares fit of model points onto world points, rotation about Y only.
- * Returns null with fewer than two markers or when they are (nearly) on top of
- * each other in plan.
- */
-export function fitGravityAligned(pairs: FitPair[], opts: FitOptions = {}): FitResult | null {
-  const solveScale = opts.solveScale ?? true;
+/** Heading, scale and translation only (no residuals); shared by the fit and leave-one-out. */
+function fitCore(pairs: FitPair[], solveScale: boolean, fixedScale?: number): { yaw: number; s: number; t: Vec3 } | null {
   if (pairs.length < 2) return null;
 
   const n = pairs.length;
@@ -212,7 +265,9 @@ export function fitGravityAligned(pairs: FitPair[], opts: FitOptions = {}): FitR
   const yaw = Math.atan2(B, A);
 
   let s = 1;
-  if (solveScale) {
+  if (fixedScale !== undefined && Number.isFinite(fixedScale) && fixedScale > 0) {
+    s = fixedScale;
+  } else if (solveScale) {
     const c = Math.cos(yaw), si = Math.sin(yaw);
     let num = 0, den = 0;
     for (const { model: p, world: q } of pairs) {
@@ -226,10 +281,24 @@ export function fitGravityAligned(pairs: FitPair[], opts: FitOptions = {}): FitR
 
   const rpc = applyFit(yaw, s, { x: 0, y: 0, z: 0 }, pc);
   const t = { x: qc.x - rpc.x, y: qc.y - rpc.y, z: qc.z - rpc.z };
+  return { yaw, s, t };
+}
+
+/**
+ * Least-squares fit of model points onto world points, rotation about Y only.
+ * Returns null with fewer than two markers or when they are (nearly) on top of
+ * each other in plan.
+ */
+export function fitGravityAligned(pairs: FitPair[], opts: FitOptions = {}): FitResult | null {
+  const solveScale = opts.solveScale ?? true;
+  const core = fitCore(pairs, solveScale, opts.fixedScale);
+  if (!core) return null;
+  const { yaw, s, t } = core;
+  const n = pairs.length;
 
   // World units → mm: one model metre is `s` world units.
   const toMm = 1000 / s;
-  const residuals = pairs.map(({ index, model, world }) => ({
+  const residuals: MarkerResidual[] = pairs.map(({ index, model, world }) => ({
     index,
     errorMm: dist(applyFit(yaw, s, t, model), world) * toMm,
   }));
@@ -247,7 +316,58 @@ export function fitGravityAligned(pairs: FitPair[], opts: FitOptions = {}): FitR
     }
   }
 
+  if (n >= 3) {
+    for (const r of residuals) {
+      const rest = pairs.filter((p) => p.index !== r.index);
+      const sub = fitCore(rest, solveScale, opts.fixedScale);
+      if (!sub) continue;
+      const me = pairs.find((p) => p.index === r.index)!;
+      r.offMm = dist(applyFit(sub.yaw, sub.s, sub.t, me.model), me.world) * (1000 / sub.s);
+    }
+  }
+
   return { yaw, scale: s, translation: t, matrix: fitMatrix(yaw, s, t), residuals, rmsMm, pairs: pairDistances, markersUsed: n };
+}
+
+/** |measured − drawn| for one pair of markers, mm. */
+export function pairErrorMm(p: PairDistance): number {
+  return Math.abs(p.observedMm - p.modelMm);
+}
+
+/**
+ * Worst pair error among the pairs that do NOT involve `index` — "how well do
+ * the other markers agree with the drawing without this one".
+ */
+function restErrorMm(fit: FitResult, index: number): number {
+  let worst = 0;
+  for (const p of fit.pairs) if (p.a !== index && p.b !== index) worst = Math.max(worst, pairErrorMm(p));
+  return worst;
+}
+
+/**
+ * The marker the fit trusts least. With 3+ markers: the one whose removal
+ * leaves the others agreeing best with the drawing (distances between markers
+ * do not depend on the fit, so one bad sheet can't drag the blame onto good
+ * ones). Ties and two-marker fits fall back to the largest residual.
+ */
+export function worstMarker(fit: FitResult): MarkerResidual | null {
+  if (!fit.residuals.length) return null;
+  const key = (r: MarkerResidual) => r.offMm ?? r.errorMm;
+  if (fit.markersUsed >= 3) {
+    return fit.residuals.reduce((a, b) => {
+      const ra = restErrorMm(fit, a.index), rb = restErrorMm(fit, b.index);
+      if (Math.abs(ra - rb) > 1) return rb < ra ? b : a;
+      return key(b) > key(a) ? b : a;
+    });
+  }
+  return fit.residuals.reduce((a, b) => (key(b) > key(a) ? b : a));
+}
+
+/** Smallest |measured − drawn| over the pairs that involve `index` (mm); Infinity if none. */
+export function bestPairErrorMm(fit: FitResult, index: number): number {
+  let best = Infinity;
+  for (const p of fit.pairs) if (p.a === index || p.b === index) best = Math.min(best, pairErrorMm(p));
+  return best;
 }
 
 /**

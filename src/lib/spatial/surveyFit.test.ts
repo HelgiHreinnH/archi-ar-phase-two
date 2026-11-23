@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SurveyCollector,
+  worstMarker,
   fitGravityAligned,
   fitSurvey,
   rhinoMmToModelM,
@@ -124,5 +125,56 @@ describe("SurveyCollector", () => {
     const fit = fitSurvey(RHINO, c, { minSightings: 5 })!;
     expect(fit.markersUsed).toBe(2);
     expect(fit.yaw).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("leave-one-out offsets (23 Nov 2026)", () => {
+  it("blames the one misplaced marker, not all three", () => {
+    const p = pairs(0.3, 1, { x: 0, y: 0, z: 0 });
+    // Marker 3 (index 3) sits 1.2 m off in plan; A and B are right.
+    p[2] = { ...p[2], world: { x: p[2].world.x + 1.2, y: p[2].world.y, z: p[2].world.z } };
+    const fit = fitGravityAligned(p, { solveScale: false })!;
+    const off = Object.fromEntries(fit.residuals.map((r) => [r.index, r.offMm!]));
+    expect(off[3]).toBeGreaterThan(1100);
+    expect(worstMarker(fit)!.index).toBe(3);
+  });
+
+  it("has no offsets with only two markers", () => {
+    const fit = fitGravityAligned(pairs(0.3, 1, { x: 0, y: 0, z: 0 }).slice(0, 2), { solveScale: false })!;
+    expect(fit.residuals.every((r) => r.offMm === undefined)).toBe(true);
+  });
+});
+
+describe("SurveyCollector fresh looks", () => {
+  it("a new look after a gap replaces the old one once it has enough sightings", () => {
+    const c = new SurveyCollector(60, 0.05, 2000, 5);
+    for (let i = 0; i < 10; i++) c.add(1, { x: 0, y: 0, z: 0 }, i * 50);
+    // Seen again 5 s later, SLAM has drifted 30 cm.
+    for (let i = 0; i < 3; i++) c.add(1, { x: 0.3, y: 0, z: 0 }, 5000 + i * 50);
+    expect(c.estimate(1)!.position.x).toBeCloseTo(0, 6); // new look too small: old one still used
+    expect(c.count(1)).toBe(10);
+    for (let i = 3; i < 6; i++) c.add(1, { x: 0.3, y: 0, z: 0 }, 5000 + i * 50);
+    expect(c.estimate(1)!.position.x).toBeCloseTo(0.3, 6);
+    expect(c.count(1)).toBe(6);
+  });
+
+  it("without time stamps keeps the old pooled behaviour", () => {
+    const c = new SurveyCollector();
+    for (let i = 0; i < 5; i++) c.add(1, { x: 0, y: 0, z: 0 });
+    for (let i = 0; i < 6; i++) c.add(1, { x: 0.01, y: 0, z: 0 });
+    expect(c.count(1)).toBe(11);
+  });
+});
+
+describe("fixedScale from the marker's own width", () => {
+  it("fits exactly when the engine world is not metres but the scale is known", () => {
+    const fit = fitGravityAligned(pairs(1.1, 0.62, { x: 0, y: 1, z: 0 }), { fixedScale: 0.62 })!;
+    expect(fit.scale).toBe(0.62);
+    expect(fit.rmsMm).toBeLessThan(1e-6);
+  });
+
+  it("two markers with s = 1 in a 0.62 world show the error that the kitchen test saw", () => {
+    const fit = fitGravityAligned(pairs(1.1, 0.62, { x: 0, y: 1, z: 0 }).slice(0, 2), { solveScale: false })!;
+    expect(fit.rmsMm).toBeGreaterThan(300);
   });
 });

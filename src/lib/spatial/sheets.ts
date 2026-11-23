@@ -1,7 +1,7 @@
 /**
  * Spatial A4 print layouts (210 × 297 mm), built as SVG strings.
  *
- *  - markerSheetSvg: location-marker sheet (locked v11, 18 Nov 2026) — "POINT n" top
+ *  - markerSheetSvg: location-marker sheet (locked v11, 18 Nov 2026) — "POINT A" top
  *    left and logo top right on one centre line, black/white circle Ø180 mm centred
  *    between the sheet top and the cut line, model name bottom left above the dotted
  *    cut line; below it the info strip with X/Y/Z pills, origin row, placement steps
@@ -14,6 +14,7 @@
 import { BRAND, INK, SPATIAL_MARKER_MM, escapeXml, logoTile, markerDiscInner } from "@/lib/spatial/design";
 import { spatialQrInner } from "@/lib/spatial/qr";
 import { SHEET_MM } from "@/lib/spatial/contract";
+import { getMarkerLabel } from "@/lib/spatial/markerLabels";
 
 /** A4 sheet and circle placement come from the Spatial contract (§3), shared with the Rhino plugin. */
 export const SHEET_W: number = SHEET_MM.w;
@@ -122,10 +123,12 @@ export function markerSheetSvg(input: MarkerSheetInput, fontCss: string): string
     s += `<line x1="${cx + dx * (r0 + 1.5)}" y1="${cy + dy * (r0 + 1.5)}" x2="${cx + dx * (r0 + 4.5)}" y2="${cy + dy * (r0 + 4.5)}" stroke="${INK}" stroke-width=".35"/>`;
   }
 
-  // top row on one centre line (y = 15): "POINT n" left, logo + wordmark right
+  // top row on one centre line (y = 15): "POINT A" left, logo + wordmark right.
+  // Letter, not number, since 23 Nov 2026: the app chips, the Rhino layers
+  // (marker_A) and the sheet now use the same name.
   s +=
     `<text x="15" y="16.3" font-size="3.6" font-weight="700" letter-spacing=".8" fill="${GREY}">POINT</text>` +
-    `<text x="33" y="21.4" font-family="Space Grotesk" font-size="19" font-weight="700" fill="${ac}">${index}</text>` +
+    `<text x="33" y="21.4" font-family="Space Grotesk" font-size="19" font-weight="700" fill="${ac}">${getMarkerLabel(index)}</text>` +
     `<text x="195" y="17.1" text-anchor="end" font-family="Space Grotesk" font-size="6" font-weight="700" fill="${INK}">Archi AR</text>` +
     logoTile(160.2, 15, 4.4);
 

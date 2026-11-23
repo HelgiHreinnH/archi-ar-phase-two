@@ -19,6 +19,19 @@
  *    Lock it fits new sightings in the shadow and logs the heading drift; the
  *    model never uses them.
  *
+ * After the first physical test (23 Nov 2026, kitchen; see
+ * claude/user-test-2026-11-23-first-spatial-kitchen.md):
+ *  - Sightings only count while tracking is NORMAL (they drift while SLAM settles),
+ *    and a marker seen again after a pause uses its fresh look (surveyFit.ts).
+ *  - Scale comes from the printed marker's own width, as in Tabletop/Wall;
+ *    `?scale=engine` keeps the old "world is metres" assumption for comparison.
+ *  - The fit is told in words (surveyStatus.ts): which marker is off and by how
+ *    much. Lock itself is still decided by lockGuard.ts (D9).
+ *  - The model is a ghost until Lock is allowed, and when the camera is inside
+ *    it ("step back"). Thin rings on the sheets instead of blue dots; a line to
+ *    where the drawing expects a marker that is off.
+ *  - ACES tone mapping (light wood clipped to white without it).
+ *
  * Licence: the 8th Wall attribution from the adapter stays on screen.
  */
 import { SPATIAL_MARKER_MM } from "@/lib/spatial/design";
@@ -26,7 +39,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Lock, RotateCcw, X } from "lucide-react";
 import { normalizeMarkerData, type MarkerPoint } from "@/lib/markerTypes";
 import { getMarkerLabel } from "@/lib/spatial/markerLabels";
-import { SurveyCollector, fitSurvey, rhinoMmToModelM, type FitResult } from "@/lib/spatial/surveyFit";
+import { SurveyCollector, applyFit, fitSurvey, rhinoMmToModelM, type FitResult } from "@/lib/spatial/surveyFit";
+import { surveyStatus, type MarkerQuality, type Tone } from "@/lib/spatial/surveyStatus";
 import { PoseBlender } from "@/lib/spatial/poseBlend";
 import { loadSpatialAdapter } from "@/lib/spatial/adapters";
 import type { SpatialTracker, TrackingState } from "@/lib/spatial/SpatialTracker";
@@ -46,6 +60,55 @@ const MARKER_WIDTH_M = SPATIAL_MARKER_MM / 1000;
 const MIN_SIGHTINGS = 5;
 /** Refit ticks (250 ms) between shadow-fit log entries after Lock. */
 const POST_LOCK_LOG_EVERY = 4;
+/** Opacity of the model while Lock is not allowed yet, or the camera is inside it. */
+const GHOST_OPACITY = 0.35;
+/** Margin around the model's box for "you are inside the model" (model metres). */
+const INSIDE_MARGIN_M = 0.15;
+/** Engine units per metre outside this range are treated as a bad width reading. */
+const SCALE_SANE: [number, number] = [0.25, 4];
+const TONE_MAPPING_EXPOSURE = 0.85;
+
+const QUALITY_HEX: Record<MarkerQuality, number> = {
+  missing: 0x9ca3af,
+  found: 0x2f80ff,
+  good: 0x22c55e,
+  warn: 0xf59e0b,
+  bad: 0xef4444,
+};
+const QUALITY_CHIP: Record<MarkerQuality, string> = {
+  missing: "bg-white/15 text-white",
+  found: "bg-primary text-primary-foreground",
+  good: "bg-green-500 text-black",
+  warn: "bg-amber-400 text-black",
+  bad: "bg-red-500 text-white",
+};
+const TONE_TEXT: Record<Tone, string> = {
+  info: "text-white/85",
+  good: "text-green-300",
+  warn: "text-amber-300",
+  bad: "text-red-300",
+};
+
+function median(values: number[]): number {
+  const v = [...values].sort((a, b) => a - b);
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+interface SightingOverlay {
+  ring: Any;
+  error: Any;
+  predicted: Any;
+  rotation?: { x: number; y: number; z: number; w: number };
+}
+
+interface ScaleDebug {
+  ignored: number;
+  widths: number;
+  enginePerMetre?: number;
+  rmsEngine?: number;
+  rmsWidth?: number;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -74,8 +137,21 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   const fitRef = useRef<FitResult | null>(null);
   const lockedRef = useRef(false);
   const modelRootRef = useRef<Any>(null);
-  const dotsRef = useRef<Map<number, Any>>(new Map());
+  const overlaysRef = useRef<Map<number, SightingOverlay>>(new Map());
   const blender = useRef(new PoseBlender());
+  const threeRef = useRef<{ T: Any; camera: Any } | null>(null);
+  const modelRef = useRef<Any>(null);
+  /** Model box in root space (model metres), for "camera inside the model". */
+  const modelBoxRef = useRef<Any>(null);
+  const ghostRef = useRef<boolean | null>(null);
+  const ghostWantedRef = useRef(true);
+  const insideRef = useRef(false);
+  const ignoredRef = useRef(0);
+  const widthsRef = useRef<number[]>([]);
+  const scaleRef = useRef<number | undefined>(undefined);
+  const useEngineScale = useMemo(() => {
+    try { return new URLSearchParams(window.location.search).get("scale") === "engine"; } catch { return false; }
+  }, []);
   // Debug only (§6.4): log + a shadow collector fed after Lock, never applied.
   const debug = useMemo(() => {
     try { return new URLSearchParams(window.location.search).get("debug") === "1"; } catch { return false; }
@@ -85,6 +161,8 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   const trackingRef = useRef<TrackingState>("initializing");
   const tickRef = useRef(0);
   const [logTick, setLogTick] = useState(0);
+  const [inside, setInside] = useState(false);
+  const [scaleDebug, setScaleDebug] = useState<ScaleDebug>({ ignored: 0, widths: 0 });
 
   const [phase, setPhase] = useState<Phase>("ready");
   const [message, setMessage] = useState("");
@@ -123,7 +201,9 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       trackerRef.current = tracker;
       setAttribution(tracker.attribution);
 
+      let sawStatus = false;
       tracker.onTrackingState((state) => {
+        sawStatus = true;
         trackingRef.current = state;
         setTracking(state);
         refitLog.current.record("tracking", fitRef.current, state, performance.now(), lockedRef.current ? "after lock" : undefined);
@@ -132,30 +212,56 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
         refitLog.current.record("camera-restart", fitRef.current, trackingRef.current, performance.now(), reason);
       });
       tracker.onSighting((s) => {
+        // 23 Nov 2026: sightings taken while SLAM is still settling land in a
+        // frame that moves afterwards. Count them only once tracking is NORMAL
+        // (or when the engine never reports a state, see below).
+        if (sawStatus && trackingRef.current !== "normal") {
+          ignoredRef.current += 1;
+          return;
+        }
         // After Lock the placement ignores sightings; the shadow copy is for the log only.
-        if (lockedRef.current) { shadow.current.add(s.index, s.position); return; }
-        collector.current.add(s.index, s.position);
+        if (lockedRef.current) { shadow.current.add(s.index, s.position, s.at); return; }
+        collector.current.add(s.index, s.position, s.at);
+        if (s.widthWorld) {
+          widthsRef.current.push(s.widthWorld);
+          if (widthsRef.current.length > 120) widthsRef.current.shift();
+        }
+        const o = overlaysRef.current.get(s.index);
+        if (o && s.rotation) o.rotation = s.rotation;
       });
 
-      const { THREE: T, scene, renderer } = await tracker.start({ canvas: canvasRef.current, markers: targets });
+      const { THREE: T, scene, camera, renderer } = await tracker.start({ canvas: canvasRef.current, markers: targets });
+      threeRef.current = { T, camera };
       setPhase("surveying");
 
+      // Light wood clipped to white without tone mapping (23 Nov 2026 test);
+      // the desktop preview already uses ACES (ModelViewer3D).
+      renderer.toneMapping = T.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = TONE_MAPPING_EXPOSURE;
       void applyRoomEnvironment(scene, renderer, T);
       scene.add(new T.AmbientLight(0xffffff, 0.4));
       const sun = new T.DirectionalLight(0xffffff, 1.2);
       sun.position.set(5, 10, 7.5);
       scene.add(sun);
 
-      // Small dots where the engine sees each marker, until the placement is locked.
+      // Per marker, until the placement is locked: a thin ring flat on the sheet
+      // where the engine sees it (coloured by how well it agrees with the
+      // drawing) and, when it is off, a line to where the drawing expects it.
+      // Replaces the 2 cm blue spheres that filled the screen up close.
       for (const m of markers) {
-        const dot = new T.Mesh(
-          new T.SphereGeometry(0.02, 16, 12),
-          new T.MeshBasicMaterial({ color: 0x2f80ff, depthTest: false }),
-        );
-        dot.visible = false;
-        dot.renderOrder = 999;
-        scene.add(dot);
-        dotsRef.current.set(m.index, dot);
+        const overlayMat = (color: number) =>
+          new T.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9, side: T.DoubleSide, toneMapped: false });
+        const r = MARKER_WIDTH_M / 2;
+        const ring = new T.Mesh(new T.RingGeometry(r * 0.9, r * 1.02, 48), overlayMat(QUALITY_HEX.found));
+        const predicted = new T.Mesh(new T.SphereGeometry(0.012, 12, 8), overlayMat(QUALITY_HEX.bad));
+        const lineGeo = new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]);
+        const error = new T.Line(lineGeo, new T.LineBasicMaterial({ color: QUALITY_HEX.bad, depthTest: false, transparent: true, toneMapped: false }));
+        for (const o of [ring, predicted, error]) {
+          o.visible = false;
+          o.renderOrder = 999;
+          scene.add(o);
+        }
+        overlaysRef.current.set(m.index, { ring, predicted, error });
       }
 
       // Model root: world = fit.matrix · (unitScale · file coords).
@@ -185,7 +291,11 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
         const size = measureModel(model, T).getSize(new T.Vector3());
         const maxDim = Math.max(size.x, size.y, size.z);
         if (maxDim >= UNIT_GUESS_THRESHOLD) model.scale.setScalar(0.001);
+        // Measured before it joins the root, so the box is in root (model-metre) space.
+        modelBoxRef.current = measureModel(model, T).expandByScalar(INSIDE_MARGIN_M);
         root.add(model);
+        modelRef.current = model;
+        ghostRef.current = null; // force the first ghost state to apply
       }
     } catch (e) {
       console.error("[SpatialWorldViewer]", e);
@@ -209,20 +319,35 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
           const sf = fitSurvey(markers, shadow.current, {
             minSightings: MIN_SIGHTINGS,
             solveScale: !(trackerRef.current?.metricWorld ?? false),
+            fixedScale: useEngineScale ? undefined : scaleRef.current,
           });
           if (sf) refitLog.current.record("post-lock", sf, trackingRef.current);
           if (debug) setLogTick(tickRef.current);
         }
         return;
       }
-      for (const e of collector.current.estimates()) {
-        const dot = dotsRef.current.get(e.index);
-        if (dot) { dot.position.set(e.position.x, e.position.y, e.position.z); dot.visible = e.count >= MIN_SIGHTINGS; }
-      }
-      const f = fitSurvey(markers, collector.current, {
+      // World units per metre from the printed marker's own width (as
+      // Tabletop/Wall do with the QR). 1.00 when the engine world is metres.
+      const widths = widthsRef.current;
+      const perMetre = widths.length >= MIN_SIGHTINGS ? median(widths) / MARKER_WIDTH_M : undefined;
+      const sane = perMetre !== undefined && perMetre >= SCALE_SANE[0] && perMetre <= SCALE_SANE[1];
+      scaleRef.current = sane ? perMetre : undefined;
+
+      const fEngine = fitSurvey(markers, collector.current, {
         minSightings: MIN_SIGHTINGS,
         solveScale: !(trackerRef.current?.metricWorld ?? false),
       });
+      const fWidth = sane ? fitSurvey(markers, collector.current, { minSightings: MIN_SIGHTINGS, fixedScale: perMetre }) : null;
+      const f = useEngineScale || !fWidth ? fEngine : fWidth;
+      if (debug) {
+        setScaleDebug({
+          ignored: ignoredRef.current,
+          widths: widths.length,
+          enginePerMetre: perMetre,
+          rmsEngine: fEngine?.rmsMm,
+          rmsWidth: fWidth?.rmsMm,
+        });
+      }
       fitRef.current = f;
       setFit(f);
       if (f) {
@@ -232,18 +357,91 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, markers, debug]);
+  }, [phase, markers, debug, useEngineScale]);
+
+  // ── What to tell the user: plain words, which marker is off ─────────────
+  const foundSet = useMemo(
+    () => new Set(markers.filter((m) => (counts[m.index] ?? 0) >= MIN_SIGHTINGS).map((m) => m.index)),
+    [markers, counts],
+  );
+  const status = useMemo(
+    () => surveyStatus({ order: markers.map((m) => m.index), found: foundSet, fit, trackingReady: tracking === "normal" }),
+    [markers, foundSet, fit, tracking],
+  );
+
+  // Ghost until Lock is allowed; full materials once it is, and after Lock.
+  useEffect(() => {
+    ghostWantedRef.current = phase !== "locked" && !status.lockReady;
+  }, [phase, status.lockReady]);
+
+  // Sighting rings and error lines follow the survey (hidden once locked).
+  useEffect(() => {
+    if (!threeRef.current) return;
+    const locked = phase === "locked";
+    for (const m of markers) {
+      const o = overlaysRef.current.get(m.index);
+      if (!o) continue;
+      const e = collector.current.estimate(m.index);
+      const shown = !locked && !!e && e.count >= MIN_SIGHTINGS;
+      o.ring.visible = shown;
+      const q = status.quality[m.index] ?? "found";
+      o.ring.material.color.setHex(QUALITY_HEX[q]);
+      if (!shown || !e) {
+        o.error.visible = o.predicted.visible = false;
+        continue;
+      }
+      o.ring.position.set(e.position.x, e.position.y, e.position.z);
+      o.ring.scale.setScalar(scaleRef.current ?? 1);
+      if (o.rotation) o.ring.quaternion.set(o.rotation.x, o.rotation.y, o.rotation.z, o.rotation.w);
+      const off = !!fit && (q === "bad" || q === "warn");
+      o.error.visible = o.predicted.visible = off;
+      if (off && fit) {
+        const p = applyFit(fit.yaw, fit.scale, fit.translation, rhinoMmToModelM(m));
+        o.predicted.position.set(p.x, p.y, p.z);
+        o.predicted.material.color.setHex(QUALITY_HEX[q]);
+        o.error.material.color.setHex(QUALITY_HEX[q]);
+        const pos = o.error.geometry.attributes.position;
+        pos.setXYZ(0, e.position.x, e.position.y, e.position.z);
+        pos.setXYZ(1, p.x, p.y, p.z);
+        pos.needsUpdate = true;
+        o.error.geometry.computeBoundingSphere();
+      }
+    }
+  }, [counts, fit, status, phase, markers]);
 
   // ── Frame loop: write the blended pose onto the model root ──────────────
   useEffect(() => {
     if (phase !== "surveying" && phase !== "locked") return;
     let raf = 0;
+    let camLocal: Any = null;
+    let inv: Any = null;
     const tick = () => {
       const root = modelRootRef.current;
+      const three = threeRef.current;
       if (root && blender.current.hasPose()) {
         root.matrix.fromArray(blender.current.matrix(performance.now()));
         root.matrixWorldNeedsUpdate = true;
         root.visible = true;
+
+        // Camera inside the model's box → ghost it and say "step back"
+        // (23 Nov 2026: up to 20 s of white planks filling the screen).
+        let isInside = false;
+        if (three && modelBoxRef.current) {
+          camLocal ??= new three.T.Vector3();
+          inv ??= new three.T.Matrix4();
+          three.camera.getWorldPosition(camLocal);
+          camLocal.applyMatrix4(inv.copy(root.matrix).invert());
+          isInside = modelBoxRef.current.containsPoint(camLocal);
+        }
+        if (isInside !== insideRef.current) {
+          insideRef.current = isInside;
+          setInside(isInside);
+        }
+        const ghost = ghostWantedRef.current || isInside;
+        if (modelRef.current && ghost !== ghostRef.current) {
+          ghostRef.current = ghost;
+          setGhost(modelRef.current, ghost);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -258,7 +456,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
     refitLog.current.record("lock", fitRef.current, trackingRef.current);
     shadow.current.clear();
     lockedRef.current = true;
-    dotsRef.current.forEach((d) => (d.visible = false));
+    overlaysRef.current.forEach((o) => { o.ring.visible = o.error.visible = o.predicted.visible = false; });
     setPhase("locked");
   };
 
@@ -267,6 +465,8 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
     lockedRef.current = false;
     collector.current.clear();
     shadow.current.clear();
+    widthsRef.current = [];
+    scaleRef.current = undefined;
     blender.current.reset();
     if (modelRootRef.current) modelRootRef.current.visible = false;
     fitRef.current = null;
@@ -281,7 +481,7 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
   };
 
   const running = phase === "surveying" || phase === "locked";
-  const found = markers.filter((m) => (counts[m.index] ?? 0) >= MIN_SIGHTINGS).length;
+  const first = markers.length ? getMarkerLabel(markers[0].index) : "A";
   const order = markers.map((m) => getMarkerLabel(m.index)).join(" → ");
   const guard = lockDecision(fit);
   const pairs = pairRows(fit);
@@ -305,8 +505,8 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
               <p className="mt-5 max-w-xs text-sm leading-relaxed text-white/70">{message}</p>
             ) : (
               <p className="mt-5 max-w-xs text-sm leading-relaxed text-white/65">
-                Point the camera at each printed marker in turn ({order}) and hold it there until the letter turns
-                blue. The model appears after two markers.
+                First scan the room slowly from 2–3 m away. Then find each printed marker in turn ({order}), 1–1.5 m
+                away and straight on, until its letter turns blue. Finish back at {first}, then lock.
               </p>
             )}
           </main>
@@ -330,10 +530,11 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-wrap gap-1.5">
                 {markers.map((m) => {
-                  const ok = (counts[m.index] ?? 0) >= MIN_SIGHTINGS;
+                  const q = status.quality[m.index] ?? "missing";
+                  const mark = q === "missing" ? "" : q === "bad" ? " !" : q === "warn" ? " ~" : " ✓";
                   return (
-                    <span key={m.index} className={`rounded-full px-3 py-1 font-semibold ${ok ? "bg-primary text-primary-foreground" : "bg-white/15"}`}>
-                      {getMarkerLabel(m.index)}{ok ? " ✓" : ""}
+                    <span key={m.index} className={`rounded-full px-3 py-1 font-semibold ${QUALITY_CHIP[q]}`}>
+                      {getMarkerLabel(m.index)}{mark}
                     </span>
                   );
                 })}
@@ -350,19 +551,23 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
                 Tracking weak · move slowly, aim at textured surfaces
               </div>
             )}
+            {inside && (
+              <div className="rounded-full bg-white/90 px-3 py-1 text-center font-semibold text-black">
+                You are inside the model · step back to see it
+              </div>
+            )}
+            {debug && (
+              <pre className="whitespace-pre-wrap rounded-lg bg-black/70 p-2 font-mono text-[10px] leading-snug text-white/90">
+                {scaleDebugText(tracking, scaleDebug, fit, useEngineScale)}
+              </pre>
+            )}
           </div>
 
           {debug && <RefitLogOverlay log={refitLog.current} tick={logTick} />}
 
           <div className="absolute inset-x-0 bottom-0 z-10 space-y-2 bg-gradient-to-t from-black/80 to-transparent px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-8 text-sm">
             {phase === "surveying" && (
-              <p className="text-center text-white/80">
-                {found < 2
-                  ? `Find the markers (${found}/${markers.length})`
-                  : guard.ok
-                    ? `Model placed · ${guard.message} Lock when it sits right.`
-                    : guard.message}
-              </p>
+              <p className={`text-center ${TONE_TEXT[status.tone]}`}>{status.text}</p>
             )}
             {phase === "surveying" && pairs.length > 0 && (
               <div className="mx-auto max-w-sm rounded-xl bg-black/40 px-3 py-2 font-mono text-[11px] text-white/80">
@@ -405,4 +610,47 @@ export default function SpatialWorldViewer({ project, onStartTap, onClose }: Spa
       )}
     </div>
   );
+}
+
+/**
+ * Ghost the model (transparent, no depth writes) or restore its own materials.
+ * Originals are kept on each material, so shared materials are handled once.
+ */
+function setGhost(model: Any, on: boolean): void {
+  const seen = new Set<Any>();
+  model.traverse((o: Any) => {
+    if (!o.isMesh || !o.visible) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m || seen.has(m)) continue;
+      seen.add(m);
+      const orig = (m.userData.archiGhost ??= { transparent: m.transparent, opacity: m.opacity, depthWrite: m.depthWrite });
+      if (on) {
+        m.transparent = true;
+        m.opacity = Math.min(orig.opacity, GHOST_OPACITY);
+        m.depthWrite = false;
+      } else {
+        m.transparent = orig.transparent;
+        m.opacity = orig.opacity;
+        m.depthWrite = orig.depthWrite;
+      }
+      m.needsUpdate = true;
+    }
+  });
+}
+
+/** `?debug=1`: enough to tell an engine-scale problem from a misplaced sheet. */
+function scaleDebugText(tracking: TrackingState, info: ScaleDebug, fit: FitResult | null, engineScale: boolean): string {
+  const f = (v: number | undefined, d = 0) => (v === undefined || !Number.isFinite(v) ? "—" : v.toFixed(d));
+  const lines = [
+    `tracking ${tracking} · sightings ignored while settling ${info.ignored}`,
+    `marker width → ${f(info.enginePerMetre, 3)} world units/m (${info.widths} readings; 1.000 = metric)`,
+    `rms with engine scale ${f(info.rmsEngine)} mm · with width scale ${f(info.rmsWidth)} mm · using ${engineScale ? "engine" : "width"}`,
+  ];
+  if (fit) {
+    for (const r of fit.residuals) {
+      lines.push(`${getMarkerLabel(r.index)} residual ${f(r.errorMm)} mm${r.offMm !== undefined ? ` · off ${f(r.offMm)} mm (others)` : ""}`);
+    }
+  }
+  return lines.join("\n");
 }

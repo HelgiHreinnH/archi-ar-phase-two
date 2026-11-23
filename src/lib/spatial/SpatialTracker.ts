@@ -29,8 +29,14 @@ export interface MarkerSighting {
   index: number;
   /** Marker centre in the engine's world frame. */
   position: Vec3;
-  /** Marker orientation in the world frame (unused by the fit, kept for logs). */
+  /** Marker orientation in the world frame (used to draw the sighting ring flat on the sheet). */
   rotation?: { x: number; y: number; z: number; w: number };
+  /**
+   * Printed marker width as the engine sees it, in world units. Divided by the
+   * real width (0.18 m) this is the engine's world units per metre: 1.00 in a
+   * metric world. The fit uses it as the scale.
+   */
+  widthWorld?: number;
   /** performance.now() of the frame. */
   at: number;
 }
