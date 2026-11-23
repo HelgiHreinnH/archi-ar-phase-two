@@ -38,6 +38,10 @@ Supabase (DB, storage, edge functions, RLS) · Netlify hosting · Simply.com DNS
   then X/Y/Z, origin row, placement steps, round QR. The old coloured dial disc (v7,
   Ø150 mm) is retired: its markers were too alike and rotationally symmetric for 8th
   Wall (ZNCC 0.89 vs ≤0.33 now). Changing the look needs a documented decision.
+- **Spatial marker names (contract D11, 20 Nov 2026).** `parseGlbMarkers` reads
+  `marker_A`…`marker_T` and `marker_1`…`marker_20` (`MARKER_LETTERS`). The Rhino plugin
+  mirrors the letters as `PARSER_LETTERS` in `archiar_core.py` and fails its Test for any
+  other name, so change both together. Contract: Notion "Spatial system contract".
 - **GLB is the only model format** across Tabletop, Wall and Spatial. USDZ was
   dropped Sep 2026 — file size.
 - **Rhino exports Z-up, Three.js is Y-up.** The -90 deg X rotation must be applied
